@@ -3,5 +3,5 @@ The library is called "ASDL", which stands for Automatic Second-order Differenti
 
 You can import `asdfghjkl` by scrolling your finger on a QWERTY keyboard :innocent:
 ```python
-import asdfghjkl as asdl
+import asdfghjkl
 ```
