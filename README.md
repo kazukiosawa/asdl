@@ -9,6 +9,10 @@ import asdfghjkl
 
 ## ADL vs ASDL
 ### Basic metrics supported by a standard automatic differentiation libarary (ADL)
+<p align="center">
+  <img src="https://user-images.githubusercontent.com/7961228/92200352-9c2de980-eeb4-11ea-8aa3-f37dc7e49aee.png" width="600"/>
+</p>
+
 | metric | definition |
 | --- | --- |
 | neural network | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;f_\theta:\mathbb{R}^{M_{0}}\to\mathbb{R}^{C},\,\,\,\theta\in\mathbb{R}^{P}"/> |
@@ -29,7 +33,7 @@ import asdfghjkl
 
 ## Matrix approximations
 <p align="center">
-  <img src="https://user-images.githubusercontent.com/7961228/92199553-73a4f000-eeb2-11ea-8f89-28abbba1f2de.png" width="700"/>
+  <img src="https://user-images.githubusercontent.com/7961228/92199553-73a4f000-eeb2-11ea-8f89-28abbba1f2de.png" width="600"/>
 </p>
 
 ## Supported operations
