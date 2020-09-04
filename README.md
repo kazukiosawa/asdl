@@ -8,7 +8,7 @@ import asdfghjkl
 ```
 
 ## ADL vs ASDL
-### Basic metrics supported by an automatic differentiation libarary (ADL)
+### Basic metrics supported by a standard automatic differentiation libarary (ADL)
 | metric | definition |
 | --- | --- |
 | neural network | <img src="https://latex.codecogs.com/png.latex?\dpi{150}&space;f_\theta:\mathbb{R}^{M_{0}}\to\mathbb{R}^{C},\,\,\,\theta\in\mathbb{R}^{P}"/> |
