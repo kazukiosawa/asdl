@@ -9,9 +9,7 @@ import asdfghjkl
 
 ## ADL vs ASDL
 ### Basic metrics supported by a standard automatic differentiation libarary (ADL)
-<p align="center">
-  <img src="https://user-images.githubusercontent.com/7961228/92200646-676e6200-eeb5-11ea-81e6-9a5556261e70.png" width="600"/>
-</p>
+<img src="https://user-images.githubusercontent.com/7961228/92200646-676e6200-eeb5-11ea-81e6-9a5556261e70.png" width="600"/>
 
 | metric | definition |
 | --- | --- |
@@ -32,9 +30,7 @@ import asdfghjkl
 | **K**ernel | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathcal{K}=\mathcal{JJ}^\top\in\mathbb{R}^{NC\times{NC}}"/> |
 
 ## Matrix approximations
-<p align="center">
-  <img src="https://user-images.githubusercontent.com/7961228/92199553-73a4f000-eeb2-11ea-8f89-28abbba1f2de.png" width="600"/>
-</p>
+<img src="https://user-images.githubusercontent.com/7961228/92199553-73a4f000-eeb2-11ea-8f89-28abbba1f2de.png" width="600"/>
 
 ## Supported operations
 - matrix-vector product
