@@ -5,3 +5,6 @@ You can import `asdfghjkl` by scrolling your finger on a QWERTY keyboard :innoce
 ```python
 import asdfghjkl
 ```
+
+**F**isher information matrix
+$\mathbf{F}=\mathbb{E}\left[\nabla\ell\nabla\ell\right]$
