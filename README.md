@@ -23,6 +23,18 @@ import asdfghjkl
 | empirical **F**isher | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathbf{F}_{\rm{emp}}=\left\langle\frac{\partial}{\partial\theta}\ell(x_i,y_i,\theta)\frac{\partial}{\partial\theta}\ell(x_i,y_i,\theta)^\top\right\rangle\in\mathbb{R}^{P\times{P}}" />  |
 | **G**radient covariance | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathbf{C}=\left\langle\left(\frac{\partial}{\partial\theta}\ell(x_i,y_i,\theta)-\bar{g}\right)\left(\frac{\partial}{\partial\theta}\ell(x_i,y_i,\theta)-\bar{g}\right)^\top\right\rangle\in\mathbb{R}^{P\times{P}}" />  |
 | **H**essian | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathbf{H}=\nabla^2\mathcal{L}(\theta)=\left\langle\frac{\partial^2}{\partial\theta\partial\theta^\top}\ell(x_i,y_i,\theta)\right\rangle\in\mathbb{R}^{P\times{P}}"/> |
-| **J**acobian (per sample) | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathbf{J}_{f,\theta}(x)=\frac{\partial}{\partial\theta}f_{\theta}(x)\in\mathbb{R}^{C\times{P}}"/> |
+| **J**acobian (per example) | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathbf{J}_{f,\theta}(x)=\frac{\partial}{\partial\theta}f_{\theta}(x)\in\mathbb{R}^{C\times{P}}"/> |
 | **J**acobian | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathcal{J}=\left[\mathbf{J}_{f,\theta}(x_1)^\top,\dots,\mathbf{J}_{f,\theta}(x_N)^\top\right]^\top\in\mathbb{R}^{NC\times{P}}"/> |
 | **K**ernel | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathcal{K}=\mathcal{JJ}^\top\in\mathbb{R}^{NC\times{NC}}"/> |
+
+## Matrix approximations
+<p align="center">
+  <img src="https://user-images.githubusercontent.com/7961228/92199553-73a4f000-eeb2-11ea-8f89-28abbba1f2de.png" width="700"/>
+</p>
+
+## Supported operations
+- matrix-vector product
+    - power method
+    - Lanczos method
+    - conjugate gradient method
+- preconditioning gradient
