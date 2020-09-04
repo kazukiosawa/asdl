@@ -15,7 +15,7 @@ import asdfghjkl
 | loss | <img src="https://latex.codecogs.com/png.latex?\dpi{150}&space;\mathcal{L}(\theta)=\frac{1}{N}\sum_{i=1}^N\ell(x_i,y_i,\theta)=\left\langle\ell(x_i,y_i,\theta)\right\rangle"/> |
 | (averaged) gradient | <img src="https://latex.codecogs.com/png.latex?\dpi{150}&space;\bar{g}=\nabla\mathcal{L}(\theta)=\left\langle\frac{\partial}{\partial\theta}\ell(x_i,y_i,\theta)\right\rangle=\left\langle\mathbf{J}_{f,\theta}(x_i)^\top\frac{\partial}{\partial{f}}\ell(x_i,y_i,\theta)\right\rangle\in\mathbb{R}^P"/> |
 
-### Advanced metrics (FGHJK) supported by ASDL
+### Advanced 1st/2nd-order metrics (FGHJK) supported by ASDL
 | metric | definition |
 | --- | --- |
 | **F**isher information matrix | <img src="https://latex.codecogs.com/png.latex?\dpi{150}&space;\mathbf{F}=\left\langle\mathbb{E}_{p(k\|x_i)}\left[\frac{\partial}{\partial\theta}\ell(x_i,k,\theta)\frac{\partial}{\partial\theta}\ell(x_i,k,\theta)^\top\right]\right\rangle\in\mathbb{R}^{P\times{P}}" />  |
