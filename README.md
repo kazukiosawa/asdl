@@ -10,7 +10,7 @@ import asdfghjkl
 ## ADL vs ASDL
 ### Basic metrics supported by a standard automatic differentiation libarary (ADL)
 <p align="center">
-  <img src="https://user-images.githubusercontent.com/7961228/92200352-9c2de980-eeb4-11ea-8aa3-f37dc7e49aee.png" width="600"/>
+  <img src="https://user-images.githubusercontent.com/7961228/92200646-676e6200-eeb5-11ea-81e6-9a5556261e70.png" width="600"/>
 </p>
 
 | metric | definition |
