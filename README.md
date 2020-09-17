@@ -2,7 +2,7 @@
 The library is called "ASDL", which stands for **A**utomatic **S**econd-order **D**ifferentiation (for **F**isher, **G**radient covariance, **H**essian, **J**acobian, and **K**ernel) **L**ibrary.
 ASDL is a PyTorch extension for computing 1st/2nd-order metrics and performing 2nd-order optimization of deep neural networks.
 
-You can import `asdfghjkl` by scrolling your finger on a QWERTY keyboard :innocent:
+You can import `asdfghjkl` by sliding your finger on a QWERTY keyboard :innocent:
 ```python
 import asdfghjkl
 ```
