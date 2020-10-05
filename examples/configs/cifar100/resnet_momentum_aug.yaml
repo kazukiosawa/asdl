@@ -1,0 +1,20 @@
+dataset: CIFAR-100
+epochs: 400
+arch: ResNet18
+optim: SGD
+optim_args:
+    lr: 1.e-2
+    momentum: 0.9
+    weight_decay: 5.e-4
+random_crop: True
+random_crop_args:
+  size: 32
+  padding: 4
+random_horizontal_flip: True
+scheduler: LinearDecay
+scheduler_args:
+  decay_factor: 1.e-2
+  decay_steps: 300000
+scheduler_type: iteration
+criteria_name: train_acc_1
+checkpoint_criteria: [0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.93, 0.96, 0.97]

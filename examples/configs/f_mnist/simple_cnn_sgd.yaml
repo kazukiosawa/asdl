@@ -1,0 +1,13 @@
+dataset: F-MNIST
+epochs: 400
+arch: SimpleCNN
+arch_args:
+  num_classes: 10
+  dropout_ratio: 0.4
+  width_factor: 1
+optim: SGD
+optim_args:
+    weight_decay: 1.e-3
+checkpoint_criteria: [0.7, 0.8, 0.9, 0.95, 0.97, 0.98, 0.988, 0.993, 0.996, 0.998, 0.999]
+stopping_criteria: 0.001
+criteria_name: train_acc_1

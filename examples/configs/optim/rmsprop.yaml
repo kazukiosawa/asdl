@@ -1,0 +1,13 @@
+optim: RMSprop
+optim_args:
+  lr: 1.e-2
+  alpha: 0.99
+  momentum: 0
+  weight_decay: 0
+scheduler_name: ReduceLROnPlateau
+scheduler_args:
+  factor: 0.2
+  patience: 5
+  threshold: 1.e-4
+  threshold_mode: rel
+  min_lr: 1.e-5

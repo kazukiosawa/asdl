@@ -1,0 +1,14 @@
+dataset: SVHN
+epochs: 400
+arch: SimpleCNN
+arch_args:
+  num_classes: 10
+  dropout_ratio: 0.4
+  width_factor: 1
+optim: SGD
+optim_args:
+    momentum: 0.9
+    weight_decay: 1.e-3
+checkpoint_criteria: [0.8, 0.9, 0.93, 0.95, 0.965, 0.975, 0.985, 0.996]
+stopping_criteria: 0.004
+criteria_name: train_acc_1
