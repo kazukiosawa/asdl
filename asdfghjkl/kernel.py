@@ -7,7 +7,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader, Subset, TensorDataset
 import torch.distributed as dist
 
-from mammoth_utils import autograd
+from .core import extend
 from .operations import *
 
 
@@ -239,7 +239,7 @@ def empirical_direct_ntk(model, x1, x2=None):
         n2 = x2.shape[0]
     n_params = sum(p.numel() for p in model.parameters())
 
-    with autograd.extend(model, OP_BATCH_GRADS):
+    with extend(model, OP_BATCH_GRADS):
         outputs = model(inputs)
         n_data, n_classes = outputs.shape  # n x c
         j1 = outputs.new_zeros(n1, n_classes, n_params)
@@ -316,7 +316,7 @@ def _empirical_class_wise_ntk(model, x1, x2=None, hadamard=False):
         n1 = n2 = x1.shape[0]
 
     op_name = OP_GRAM_HADAMARD if hadamard else OP_GRAM_DIRECT
-    with autograd.extend(model, op_name):
+    with extend(model, op_name):
         _zero_kernel(model, n1, n2)
         outputs = model(inputs)
         n_classes = outputs.shape[-1]  # c
