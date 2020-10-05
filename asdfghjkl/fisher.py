@@ -1,7 +1,9 @@
 from contextlib import contextmanager
 import torch
 import torch.nn.functional as F
-from mammoth_utils import autograd
+from .core import extend
+from .utils import disable_param_grad
+from .gradient import data_loader_gradient
 from .operations import *
 from .symmatrix import SymMatrix, Kron, Diag, UnitWise
 from .matrices import *
@@ -92,7 +94,7 @@ def fisher_for_cross_entropy(
         device = next(model.parameters()).device
         for inputs, targets in data_loader:
             inputs, targets = inputs.to(device), targets.to(device)
-            with autograd.extend(model, op_names):
+            with extend(model, op_names):
                 _fisher_for_cross_entropy(
                     model, fisher_types, inputs, targets, **kwargs
                 )
@@ -100,7 +102,7 @@ def fisher_for_cross_entropy(
                 stats_name, scale=1 / len(data_loader)
             )
         if compute_param_grad:
-            autograd.data_loader_gradient(
+            data_loader_gradient(
                 model,
                 data_loader,
                 has_accumulated=True,
@@ -111,7 +113,7 @@ def fisher_for_cross_entropy(
     else:
         # compute fisher for a single batch
         assert inputs is not None
-        with autograd.extend(model, op_names):
+        with extend(model, op_names):
             _fisher_for_cross_entropy(
                 model, fisher_types, inputs, targets, **kwargs
             )
@@ -262,7 +264,7 @@ def fvp_for_cross_entropy(
 
     zero_fvp(model, [fisher_type])
 
-    with autograd.extend(model, OP_BATCH_GRADS):
+    with extend(model, OP_BATCH_GRADS):
         _fisher_for_cross_entropy(
             model, [fisher_type],
             inputs,
@@ -456,7 +458,7 @@ def _covariance(loss_and_backward, model, targets, compute_param_grad=False):
     if compute_param_grad:
         loss_and_backward(targets)
     else:
-        with autograd.disable_param_grad(model):
+        with disable_param_grad(model):
             loss_and_backward(targets)
     _register_fisher(model, COV, scale=1 / n_examples)
 
