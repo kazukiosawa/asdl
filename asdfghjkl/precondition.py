@@ -7,9 +7,13 @@ from .fisher import fisher_for_cross_entropy
 _supported_modules = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d)
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 
+__all__ = [
+    'Precondition', 'NaturalGradient', 'LayerWiseNaturalGradient', 'KFAC',
+    'DiagNaturalGradient'
+]
+
 
 class Precondition:
-
     def __init__(self):
         pass
 
@@ -33,8 +37,11 @@ class Precondition:
 
 
 class NaturalGradient(Precondition):
-
-    def __init__(self, model, fisher_type=FISHER_EXACT, n_mc_samples=1, damping=1e-5):
+    def __init__(self,
+                 model,
+                 fisher_type=FISHER_EXACT,
+                 n_mc_samples=1,
+                 damping=1e-5):
         self.model = model
         self.modules = [model]
         self.fisher_type = fisher_type
@@ -121,7 +128,7 @@ class NaturalGradient(Precondition):
         for p in self.model.parameters():
             if p.requires_grad and p.grad is not None:
                 numel = p.grad.numel()
-                val = ng[pointer: pointer + numel]
+                val = ng[pointer:pointer + numel]
                 p.grad.copy_(val.reshape_as(p.grad))
                 pointer += numel
 
@@ -129,11 +136,16 @@ class NaturalGradient(Precondition):
 
 
 class LayerWiseNaturalGradient(NaturalGradient):
-
-    def __init__(self, model, fisher_type=FISHER_EXACT, n_mc_samples=1, damping=1e-5):
+    def __init__(self,
+                 model,
+                 fisher_type=FISHER_EXACT,
+                 n_mc_samples=1,
+                 damping=1e-5):
         super().__init__(model, fisher_type, n_mc_samples, damping)
         self.fisher_shape = SHAPE_BLOCK_DIAG
-        self.modules = [m for m in model.modules() if isinstance(m, _supported_modules)]
+        self.modules = [
+            m for m in model.modules() if isinstance(m, _supported_modules)
+        ]
 
     def precondition(self):
         for module in self.modules:
@@ -155,11 +167,16 @@ class LayerWiseNaturalGradient(NaturalGradient):
 
 
 class KFAC(NaturalGradient):
-
-    def __init__(self, model, fisher_type=FISHER_EXACT, n_mc_samples=1, damping=1e-5):
+    def __init__(self,
+                 model,
+                 fisher_type=FISHER_EXACT,
+                 n_mc_samples=1,
+                 damping=1e-5):
         super().__init__(model, fisher_type, n_mc_samples, damping)
         self.fisher_shape = SHAPE_KRON
-        self.modules = [m for m in model.modules() if isinstance(m, _supported_modules)]
+        self.modules = [
+            m for m in model.modules() if isinstance(m, _supported_modules)
+        ]
 
     def update_inv(self, damping=None):
         if damping is None:
@@ -177,7 +194,7 @@ class KFAC(NaturalGradient):
                 A_eig_mean = A.trace() / A.shape[0]
                 B_eig_mean = B.trace() / B.shape[0]
                 pi = torch.sqrt(A_eig_mean / B_eig_mean)
-                r = damping ** 0.5
+                r = damping**0.5
 
                 A_inv = _cholesky_inv(_add_value_to_diagonal(A, r * pi))
                 B_inv = _cholesky_inv(_add_value_to_diagonal(B, r / pi))
@@ -197,7 +214,8 @@ class KFAC(NaturalGradient):
                 B_inv = fisher.kron.B_inv
                 grad2d = module.weight.grad.view(B_inv.shape[0], -1)
                 if _bias_requires_grad(module):
-                    grad2d = torch.cat([grad2d, module.bias.grad.unsqueeze(dim=1)], dim=1)
+                    grad2d = torch.cat(
+                        [grad2d, module.bias.grad.unsqueeze(dim=1)], dim=1)
                 ng = B_inv.mm(grad2d).mm(A_inv)
                 if _bias_requires_grad(module):
                     grad_w = ng[:, :-1]
@@ -208,11 +226,16 @@ class KFAC(NaturalGradient):
 
 
 class DiagNaturalGradient(NaturalGradient):
-
-    def __init__(self, model, fisher_type=FISHER_EXACT, n_mc_samples=1, damping=1e-5):
+    def __init__(self,
+                 model,
+                 fisher_type=FISHER_EXACT,
+                 n_mc_samples=1,
+                 damping=1e-5):
         super().__init__(model, fisher_type, n_mc_samples, damping)
         self.fisher_shape = SHAPE_DIAG
-        self.modules = [m for m in model.modules() if isinstance(m, _supported_modules)]
+        self.modules = [
+            m for m in model.modules() if isinstance(m, _supported_modules)
+        ]
 
     def update_inv(self, damping=None):
         if damping is None:
@@ -274,4 +297,3 @@ def _add_value_to_diagonal(X, value):
         indices = torch.LongTensor([[i, i] for i in range(X.shape[0])])
     values = X.new_ones(X.shape[0]).mul(value)
     return X.index_put(tuple(indices.t()), values, accumulate=True)
-
