@@ -15,7 +15,7 @@ import pytorch_utils as pu
 from asdfghjkl.kernel import *
 from asdfghjkl import FISHER_EXACT, SHAPE_FULL, SHAPE_BLOCK_DIAG
 from asdfghjkl import fisher_free_for_cross_entropy, hessian_free
-from asdfghjkl.precondition import NaturalGradient, LayerWiseNaturalGradient, KFAC
+from asdfghjkl.precondition import NaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient
 
 
 # ignore warning from PIL/TiffImagePlugin.py
@@ -391,6 +391,11 @@ def main():
         'kfac': {
             'grad_fn': natural_gradient_by_precondition,
             'precond_class': KFAC,
+            'fisher_type': FISHER_EXACT,
+        },
+        'diag_ngd': {
+            'grad_fn': natural_gradient_by_precondition,
+            'precond_class': DiagNaturalGradient,
             'fisher_type': FISHER_EXACT,
         },
         'cw_ngd': {
