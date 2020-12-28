@@ -67,11 +67,11 @@ def timeit(func, v):
     print(f'{f_name}: {elapsed / loop * 1000:.3f}ms')
 
 
-v = [torch.randn_like(p) for p in model.parameters()]
-timeit(ggn_vp, v)
-
 v = torch.randn_like(y)
 timeit(ntk_vp, v)
+
+v = [torch.randn_like(p) for p in model.parameters()]
+timeit(ggn_vp, v)
 
 v = [torch.randn_like(p) for p in model.parameters()]
 timeit(hvp, v)
