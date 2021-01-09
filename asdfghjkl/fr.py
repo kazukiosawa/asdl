@@ -137,7 +137,7 @@ class FROMP:
             # TODO: all-reduce grads_sum
             pass
 
-        # update param.grad
+        # add regularization grad to param.grad
         for p, g in zip(model.parameters(), grads_sum):
             p.grad.add_(g, alpha=tau)
 
