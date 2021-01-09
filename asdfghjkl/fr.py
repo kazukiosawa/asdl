@@ -85,6 +85,12 @@ class FROMP:
                  n_mc_samples=1,
                  kernel_fn=empirical_implicit_ntk,
                  ):
+        from torch.nn.parallel import DistributedDataParallel as DDP
+        assert not isinstance(model, DDP), \
+            f'{DDP} is not supported. Use the collective communication' \
+            f'methods defined in {torch.distributed} for distributed training.'
+        del DDP
+
         # apply softmax to model's output
         self.model_and_softmax = torch.nn.Sequential(model, torch.nn.Softmax())
         self.device = device  # TODO: manage device of each tensor appropriately
