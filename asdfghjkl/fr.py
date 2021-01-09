@@ -30,8 +30,7 @@ class TaskInfo:
         self.mean = model(self.memorable_points)  # (n, c)
 
     def get_regularization_grad(self, model, eps=1e-5):
-        assert self.kernel is not None
-        assert self.mean is not None
+        assert self.kernel is not None and self.mean is not None
 
         current_mean = model(self.memorable_points)  # (n, c)
         b = current_mean - self.mean  # (n, c)
