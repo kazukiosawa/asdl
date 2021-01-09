@@ -9,3 +9,4 @@ from .fisher import *
 from .hessian import *
 from .kernel import *
 from .precondition import *
+from .fr import *
