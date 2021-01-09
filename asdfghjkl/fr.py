@@ -108,7 +108,7 @@ class FROMP:
     def is_ready(self):
         return len(self.observed_tasks) > 0
 
-    def update_regularization_info(self, data_loader, is_distributed=False, batch_size=32):
+    def update_regularization_info(self, data_loader, batch_size_for_kernel=32, is_distributed=False):
         # update GGN and inverse for the current task
         self.precond.update_curvature(data_loader=data_loader)
         if is_distributed:
@@ -123,10 +123,10 @@ class FROMP:
         # update information (kernel & prediction) for each observed task
         model = self.model_and_softmax
         for task in self.observed_tasks:
-            task.update_kernel(model, self.kernel_fn, batch_size, is_distributed)
+            task.update_kernel(model, self.kernel_fn, batch_size_for_kernel, is_distributed)
             task.update_mean(model)
 
-    def apply_regularization_grad(self, tau=None, is_distributed=False, eps=1e-5):
+    def apply_regularization_grad(self, tau=None, eps=1e-5, is_distributed=False):
         assert self.is_ready, 'Functional regularization is not ready yet, ' \
                               'call FROMP.update_regularization_info(data_loader).'
         if tau is None:
