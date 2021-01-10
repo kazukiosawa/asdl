@@ -1,5 +1,6 @@
 import numpy as np
 from typing import List
+from functools import partial
 
 import torch
 from torch import Tensor
@@ -9,6 +10,7 @@ import torch.distributed as dist
 
 from .core import extend
 from .operations import *
+from .precondition import Precondition
 
 
 __all__ = [
@@ -17,6 +19,7 @@ __all__ = [
     'empirical_implicit_ntk',
     'empirical_class_wise_direct_ntk',
     'empirical_class_wise_hadamard_ntk',
+    'get_preconditioned_kernel_fn',
     'logits_hessian_cross_entropy',
     'natural_gradient_cross_entropy',
     'efficient_natural_gradient_cross_entropy',
@@ -272,12 +275,17 @@ def empirical_direct_ntk(model, x1, x2=None):
         return torch.einsum('ncp,mdp->nmcd', j1, j2)  # n1 x n2 x c x c
 
 
-def empirical_implicit_ntk(model, x1, x2=None):
+def empirical_implicit_ntk(model, x1, x2=None, precond: Precondition = None):
     n1 = x1.shape[0]
     y1 = model(x1)
     n_classes = y1.shape[-1]
     v1 = torch.ones_like(y1).requires_grad_()
     vjp1 = torch.autograd.grad(y1, model.parameters(), v1, create_graph=True)
+
+    if precond is not None:
+        # precondition
+        vjp1 = precond.precondition_vector(vjp1)
+
     if x2 is None:
         n2 = n1
         ntk_dot_v = torch.autograd.grad(vjp1, v1, vjp1, create_graph=True)[0]
@@ -296,6 +304,10 @@ def empirical_implicit_ntk(model, x1, x2=None):
             ntk[:, j, :, k] = kernel
 
     return ntk  # n1 x n2 x c x c
+
+
+def get_preconditioned_kernel_fn(kernel_fn, precond: Precondition):
+    return partial(kernel_fn, precond=precond)
 
 
 def empirical_class_wise_direct_ntk(model, x1, x2=None):
