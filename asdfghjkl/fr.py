@@ -152,7 +152,7 @@ class FROMP:
             task.update_kernel(model, self.kernel_fn, batch_size_for_kernel, is_distributed)
             task.update_mean(model)
 
-    def apply_regularization_grad(self, tau=None, eps=1e-5, is_distributed=False):
+    def apply_regularization_grad(self, tau=None, eps=1e-5):
         assert self.is_ready, 'Functional regularization is not ready yet, ' \
                               'call FROMP.update_regularization_info(data_loader).'
         if tau is None:
@@ -164,10 +164,6 @@ class FROMP:
         for task in self.observed_tasks:
             grads = task.get_regularization_grad(model, eps=eps)
             grads_sum = [gs.add_(g) for gs, g in zip(grads_sum, grads)]
-
-        if is_distributed:
-            # TODO: all-reduce grads_sum
-            pass
 
         # add regularization grad to param.grad
         for p, g in zip(model.parameters(), grads_sum):
