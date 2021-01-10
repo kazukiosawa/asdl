@@ -101,7 +101,6 @@ class FROMP:
     """
     def __init__(self,
                  model: torch.nn.Module,
-                 device: torch.DeviceObjType = None,
                  tau=None,
                  n_memorable_points=10,
                  precond_class=DiagNaturalGradient,
@@ -119,7 +118,7 @@ class FROMP:
 
         # apply softmax to model's output
         self.model = model
-        self.device = device  # TODO: manage device of each tensor appropriately
+        self.device = model.device  # TODO: manage device of each tensor appropriately
         self.tau = tau
         self.n_memorable_points = n_memorable_points
         self.precond = precond_class(model,
