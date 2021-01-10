@@ -11,6 +11,11 @@ from .kernel import batch, empirical_implicit_ntk, get_preconditioned_kernel_fn
 from .utils import add_value_to_diagonal
 
 
+__all__ = [
+    'FROMP',
+]
+
+
 class TaskInfo:
     def __init__(self, memorable_points: torch.Tensor, class_ids=None):
         # TODO: support DataLoader for memorable_points
