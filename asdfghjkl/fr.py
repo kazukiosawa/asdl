@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.utils.data.dataloader import DataLoader
 
 from .precondition import DiagNaturalGradient
-from .fisher import FISHER_EXACT
+from .fisher import FISHER_EXACT, COV
 from .kernel import batch, empirical_implicit_ntk, get_preconditioned_kernel_fn
 from .utils import add_value_to_diagonal
 
@@ -110,6 +110,7 @@ class FROMP:
             f'{DDP} is not supported. Use the collective communication' \
             f'methods defined in {torch.distributed} for distributed training.'
         del DDP
+        assert ggn_type != COV, f'ggn_type: {COV} is not supported.'
 
         # apply softmax to model's output
         self.model = model
