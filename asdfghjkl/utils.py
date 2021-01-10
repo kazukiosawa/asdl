@@ -11,7 +11,8 @@ __all__ = [
     'record_original_requires_grad',
     'restore_original_requires_grad',
     'disable_param_grad',
-    'im2col_2d'
+    'im2col_2d',
+    'add_value_to_diagonal'
 ]
 
 
@@ -56,3 +57,12 @@ def im2col_2d(x: torch.Tensor, conv2d: nn.Module):
     )
 
     return Mx
+
+
+def add_value_to_diagonal(x: torch.Tensor, value):
+    if x.is_cuda:
+        indices = torch.cuda.LongTensor([[i, i] for i in range(x.shape[0])])
+    else:
+        indices = torch.LongTensor([[i, i] for i in range(x.shape[0])])
+    values = x.new_ones(x.shape[0]).mul(value)
+    return x.index_put(tuple(indices.t()), values, accumulate=True)
