@@ -61,10 +61,10 @@ class TaskInfo:
         with self.add_softmax(model):
             current_mean = model(self.memorable_points)  # (n, c)
         b = current_mean - self.mean  # (n, c)
-        b = b.flatten()  # (nc,)
+        b = b.reshape(-1, 1)  # (nc, 1)
         kernel = add_value_to_diagonal(self.kernel, eps)  # (nc, nc)
         u = torch.cholesky(kernel)
-        v = torch.cholesky_solve(b, u)  # (nc,)
+        v = torch.cholesky_solve(b, u)  # (nc, 1)
         v = v.reshape(self.memorable_points.shape[0], -1)  # (n, c)
 
         grad = torch.autograd.grad(current_mean, model.parameters(), grad_outputs=v)
