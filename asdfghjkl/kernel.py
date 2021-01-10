@@ -311,7 +311,7 @@ def get_preconditioned_kernel_fn(kernel_fn, precond: Precondition):
 
 
 def empirical_class_wise_direct_ntk(model, x1, x2=None):
-    return _empirical_class_wise_ntk(model, x1, x2)
+    return _empirical_class_wise_ntk(model, x1, x2, hadamard=False)
 
 
 def empirical_class_wise_hadamard_ntk(model, x1, x2=None):
