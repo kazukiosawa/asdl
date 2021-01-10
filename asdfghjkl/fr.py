@@ -147,7 +147,8 @@ class FROMP:
         self.observed_tasks.append(TaskInfo(memorable_points, class_ids))
 
         # update information (kernel & prediction) for each observed task
-        model = self.model
+        if batch_size_for_kernel is None:
+            batch_size_for_kernel = self.n_memorable_points
         for task in self.observed_tasks:
             task.update_kernel(model, self.kernel_fn, batch_size_for_kernel, is_distributed)
             task.update_mean(model)
