@@ -58,7 +58,8 @@ class TaskInfo:
     def get_regularization_grad(self, model, eps=1e-5):
         assert self.kernel is not None and self.mean is not None
 
-        current_mean = model(self.memorable_points)  # (n, c)
+        with self.add_softmax(model):
+            current_mean = model(self.memorable_points)  # (n, c)
         b = current_mean - self.mean  # (n, c)
         b = b.flatten()  # (nc,)
         kernel = add_value_to_diagonal(self.kernel, eps)  # (nc, nc)
