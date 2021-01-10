@@ -89,7 +89,6 @@ def fisher_for_cross_entropy(
     )
 
     if data_loader is not None:
-        assert stats_name is not None
         # accumulate fisher for an epoch
         device = next(model.parameters()).device
         for inputs, targets in data_loader:
@@ -98,9 +97,7 @@ def fisher_for_cross_entropy(
                 _fisher_for_cross_entropy(
                     model, fisher_types, inputs, targets, **kwargs
                 )
-            matrix_manager.accumulate_matrices(
-                stats_name, scale=1 / len(data_loader)
-            )
+            matrix_manager.accumulate_matrices(stats_name)
         if compute_param_grad:
             data_loader_gradient(
                 model,
@@ -428,7 +425,6 @@ def _block_diag_cvp(model, vec):
 
 
 def _fisher_mc(loss_and_backward, model, probs, n_mc_samples=1):
-    n_examples = probs.shape[0]
     dist = torch.distributions.Categorical(probs)
     _targets = dist.sample((n_mc_samples, ))
     for i in range(n_mc_samples):
@@ -436,31 +432,30 @@ def _fisher_mc(loss_and_backward, model, probs, n_mc_samples=1):
         _register_fisher(
             model,
             FISHER_MC,
-            scale=1 / n_mc_samples / n_examples,
+            scale=1 / n_mc_samples,
             accumulate=True
         )
 
 
 def _fisher_exact(loss_and_backward, model, probs):
-    n_examples, n_classes = probs.shape
+    _, n_classes = probs.shape
     probs, _targets = torch.sort(probs, dim=1, descending=True)
     sqrt_probs = torch.sqrt(probs)
     for i in range(n_classes):
         with _grads_scale(model, sqrt_probs[:, i]):
             loss_and_backward(_targets[:, i])
         _register_fisher(
-            model, FISHER_EXACT, scale=1 / n_examples, accumulate=True
+            model, FISHER_EXACT, accumulate=True
         )
 
 
 def _covariance(loss_and_backward, model, targets, compute_param_grad=False):
-    n_examples = targets.shape[0]
     if compute_param_grad:
         loss_and_backward(targets)
     else:
         with disable_param_grad(model):
             loss_and_backward(targets)
-    _register_fisher(model, COV, scale=1 / n_examples)
+    _register_fisher(model, COV)
 
 
 @contextmanager
