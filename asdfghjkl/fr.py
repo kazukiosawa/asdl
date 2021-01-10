@@ -1,6 +1,8 @@
 from typing import List
+from contextlib import contextmanager
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data.dataloader import DataLoader
 
 from .precondition import DiagNaturalGradient
@@ -10,24 +12,43 @@ from .utils import add_value_to_diagonal
 
 
 class TaskInfo:
-    def __init__(self, memorable_points: torch.Tensor):
+    def __init__(self, memorable_points: torch.Tensor, class_ids=None):
         # TODO: support DataLoader for memorable_points
         self.memorable_points = memorable_points
+        self.n_memorable_points = memorable_points.shape[0]
         self.kernel = None
         self.mean = None
-        # TODO: support multi-head, class-ids
+        self.class_ids = class_ids
+
+    @contextmanager
+    def add_softmax(self, module: torch.nn.Module):
+        class_ids = self.class_ids
+
+        def forward_hook(module, input, output):
+            if class_ids is not None:
+                return F.softmax(output[:, class_ids])
+            else:
+                return F.softmax(output)
+
+        handle = module.register_forward_hook(forward_hook)
+        yield
+        handle.remove()
+        del forward_hook
 
     def update_kernel(self, model, kernel_fn, batch_size=32, is_distributed=False):
-        kernel = batch(kernel_fn,
-                       model,
-                       self.memorable_points,
-                       batch_size=min(batch_size, self.memorable_points.shape[0]),
-                       is_distributed=is_distributed)  # (n, n, c, c)
+        batch_size = min(batch_size, self.n_memorable_points)
+        with self.add_softmax(model):
+            kernel = batch(kernel_fn,
+                           model,
+                           self.memorable_points,
+                           batch_size=batch_size,
+                           is_distributed=is_distributed)  # (n, n, c, c)
         n, c = kernel.shape[0], kernel.shape[-1]
         self.kernel = kernel.transpose(1, 2).reshape(n * c, -1)  # (nc, nc)
 
     def update_mean(self, model):
-        self.mean = model(self.memorable_points)  # (n, c)
+        with self.add_softmax(model):
+            self.mean = model(self.memorable_points)  # (n, c)
 
     def get_regularization_grad(self, model, eps=1e-5):
         assert self.kernel is not None and self.mean is not None
@@ -91,7 +112,7 @@ class FROMP:
         del DDP
 
         # apply softmax to model's output
-        self.model_and_softmax = torch.nn.Sequential(model, torch.nn.Softmax())
+        self.model = model
         self.device = device  # TODO: manage device of each tensor appropriately
         self.tau = tau
         self.n_memorable_points = n_memorable_points
@@ -107,7 +128,7 @@ class FROMP:
     def is_ready(self):
         return len(self.observed_tasks) > 0
 
-    def update_regularization_info(self, data_loader, batch_size_for_kernel=32, is_distributed=False):
+    def update_regularization_info(self, data_loader, class_ids=None, batch_size_for_kernel=32, is_distributed=False):
         # update GGN and inverse for the current task
         self.precond.update_curvature(data_loader=data_loader)
         if is_distributed:
@@ -116,11 +137,11 @@ class FROMP:
         self.precond.update_inv()
 
         # register the current task
-        memorable_points = self._collect_top_memorable_points(data_loader)
-        self.observed_tasks.append(TaskInfo(memorable_points))
+        memorable_points = self._collect_top_memorable_points(data_loader, class_ids)
+        self.observed_tasks.append(TaskInfo(memorable_points, class_ids))
 
         # update information (kernel & prediction) for each observed task
-        model = self.model_and_softmax
+        model = self.model
         for task in self.observed_tasks:
             task.update_kernel(model, self.kernel_fn, batch_size_for_kernel, is_distributed)
             task.update_mean(model)
@@ -130,7 +151,7 @@ class FROMP:
                               'call FROMP.update_regularization_info(data_loader).'
         if tau is None:
             tau = self.tau
-        model = self.model_and_softmax
+        model = self.model
 
         # calculate FROMP grads on all the observed tasks
         grads_sum = [torch.zeros_like(p.grad) for p in model.parameters()]
@@ -146,7 +167,10 @@ class FROMP:
         for p, g in zip(model.parameters(), grads_sum):
             p.grad.add_(g, alpha=tau)
 
-    def _collect_top_memorable_points(self, data_loader: DataLoader, is_distributed=False):
+    def _collect_top_memorable_points(self,
+                                      data_loader: DataLoader,
+                                      class_ids: List[int] = None,
+                                      is_distributed=False):
         # TODO: support is_distributed (DistributedSampler)
         device = self.device
         dataset = data_loader.dataset
@@ -162,7 +186,10 @@ class FROMP:
         # collect Hessian trace
         for inputs, _ in no_shuffle_loader:
             inputs = inputs.to(device)
-            probs = self.model_and_softmax(inputs)  # (n, c)
+            logits = self.model(inputs)
+            if class_ids is not None:
+                logits = logits[:, class_ids]
+            probs = F.softmax(logits)  # (n, c)
             diag_hessian = probs - probs * probs  # (n, c)
             hessian_traces.append(diag_hessian.sum(dim=1))  # [(n,)]
         hessian_traces = torch.cat(hessian_traces)
