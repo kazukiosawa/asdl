@@ -16,7 +16,7 @@ __all__ = [
 ]
 
 
-class TaskInfo:
+class PastTask:
     def __init__(self, memorable_points: torch.Tensor, class_ids=None):
         # TODO: support DataLoader for memorable_points
         self.memorable_points = memorable_points
@@ -110,7 +110,7 @@ class FROMP:
                                      n_mc_samples=n_mc_samples,
                                      damping=prior_prec)
         self.kernel_fn = get_preconditioned_kernel_fn(kernel_fn, self.precond)
-        self.observed_tasks: List[TaskInfo] = []
+        self.observed_tasks: List[PastTask] = []
 
     @property
     def is_ready(self):
@@ -129,7 +129,7 @@ class FROMP:
         with customize_head(model, class_ids):
             # register the current task
             memorable_points = self._collect_top_memorable_points(data_loader)
-            self.observed_tasks.append(TaskInfo(memorable_points, class_ids))
+            self.observed_tasks.append(PastTask(memorable_points, class_ids))
 
         # update information (kernel & prediction) for each observed task
         if batch_size_for_kernel is None:
