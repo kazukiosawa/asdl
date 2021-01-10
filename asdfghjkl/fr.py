@@ -118,7 +118,7 @@ class FROMP:
 
         # apply softmax to model's output
         self.model = model
-        self.device = model.device  # TODO: manage device of each tensor appropriately
+        self.device = next(model.parameters()).device
         self.tau = tau
         self.n_memorable_points = n_memorable_points
         self.precond = precond_class(model,
@@ -201,4 +201,4 @@ class FROMP:
         memorable_points = [dataset[idx][0] for idx in top_indices]
 
         # TODO: support DataLoader for memorable_points
-        return torch.cat(memorable_points)  # (m, *)
+        return torch.cat(memorable_points).to(device)  # (m, *)
