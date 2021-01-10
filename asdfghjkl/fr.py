@@ -31,9 +31,9 @@ class TaskInfo:
 
         def forward_hook(module, input, output):
             if class_ids is not None:
-                return F.softmax(output[:, class_ids])
+                return F.softmax(output[:, class_ids], dim=1)
             else:
-                return F.softmax(output)
+                return F.softmax(output, dim=1)
 
         handle = module.register_forward_hook(forward_hook)
         yield
@@ -191,7 +191,7 @@ class FROMP:
             logits = self.model(inputs)
             if class_ids is not None:
                 logits = logits[:, class_ids]
-            probs = F.softmax(logits)  # (n, c)
+            probs = F.softmax(logits, dim=1)  # (n, c)
             diag_hessian = probs - probs * probs  # (n, c)
             hessian_traces.append(diag_hessian.sum(dim=1))  # [(n,)]
         hessian_traces = torch.cat(hessian_traces)
