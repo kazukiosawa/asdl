@@ -129,10 +129,10 @@ class FROMP:
         self.precond.accumulate_curvature(to_pre_inv=True)
         self.precond.update_inv()
 
+        # register the current task with the memorable points
         with customize_head(model, class_ids):
-            # register the current task
             memorable_points = self._collect_top_memorable_points(data_loader)
-            self.observed_tasks.append(PastTask(memorable_points, class_ids))
+        self.observed_tasks.append(PastTask(memorable_points, class_ids))
 
         # update information (kernel & mean) for each observed task
         for task in self.observed_tasks:
