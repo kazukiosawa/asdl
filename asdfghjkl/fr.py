@@ -117,15 +117,17 @@ class FROMP:
         return len(self.observed_tasks) > 0
 
     def update_regularization_info(self, data_loader, class_ids=None, batch_size_for_kernel=None, is_distributed=False):
+        model = self.model
+        model.eval()
+
         # update GGN and inverse for the current task
-        with customize_head(self.precond.model, class_ids):
+        with customize_head(model, class_ids):
             self.precond.update_curvature(data_loader=data_loader)
         if is_distributed:
             self.precond.reduce_curvature()
         self.precond.accumulate_curvature(to_pre_inv=True)
         self.precond.update_inv()
 
-        model = self.model
         with customize_head(model, class_ids):
             # register the current task
             memorable_points = self._collect_top_memorable_points(data_loader)
