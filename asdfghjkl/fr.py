@@ -26,7 +26,8 @@ class PastTask:
         self.class_ids = class_ids
 
     def update_kernel(self, model, kernel_fn, batch_size=32, is_distributed=False):
-        batch_size = min(batch_size, self.n_memorable_points)
+        if batch_size is None:
+            batch_size = self.n_memorable_points
         kernel = batch(kernel_fn,
                        model,
                        self.memorable_points,
@@ -134,8 +135,6 @@ class FROMP:
             self.observed_tasks.append(PastTask(memorable_points, class_ids))
 
         # update information (kernel & mean) for each observed task
-        if batch_size_for_kernel is None:
-            batch_size_for_kernel = self.n_memorable_points
         for task in self.observed_tasks:
             with customize_head(model, task.class_ids, softmax=True):
                 task.update_kernel(model, self.kernel_fn, batch_size_for_kernel, is_distributed)
