@@ -133,7 +133,7 @@ class FROMP:
             memorable_points = self._collect_top_memorable_points(data_loader)
             self.observed_tasks.append(PastTask(memorable_points, class_ids))
 
-        # update information (kernel & prediction) for each observed task
+        # update information (kernel & mean) for each observed task
         if batch_size_for_kernel is None:
             batch_size_for_kernel = self.n_memorable_points
         for task in self.observed_tasks:
