@@ -287,20 +287,18 @@ class DiagNaturalGradient(NaturalGradient):
 
     def precondition_vector(self, vec):
         idx = 0
-        rst = []
         for module in self.modules:
             fisher = self._get_pre_inv_fisher(module)
             if fisher is None:
                 continue
             assert fisher.diag is not None, module
-            rst.append(vec[idx].mul(fisher.diag.weight_inv))
+            vec[idx].mul_(fisher.diag.weight_inv)
             idx += 1
             if _bias_requires_grad(module):
-                rst.append(vec[idx].mul(fisher.diag.bias_inv))
+                vec[idx].mul_(fisher.diag.bias_inv)
                 idx += 1
 
         assert idx == len(vec)
-        return rst
 
 
 def _bias_requires_grad(module):
