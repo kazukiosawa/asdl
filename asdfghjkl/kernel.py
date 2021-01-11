@@ -281,20 +281,21 @@ def empirical_implicit_ntk(model, x1, x2=None, precond: Precondition = None):
     n_classes = y1.shape[-1]
     v1 = torch.ones_like(y1).requires_grad_()
     vjp1 = torch.autograd.grad(y1, model.parameters(), v1, create_graph=True)
+    vjp1_clone = [v.clone() for v in vjp1]
 
     if precond is not None:
         # precondition
-        vjp1 = precond.precondition_vector(vjp1)
+        precond.precondition_vector(vjp1_clone)
 
     if x2 is None:
         n2 = n1
-        ntk_dot_v = torch.autograd.grad(vjp1, v1, vjp1, create_graph=True)[0]
+        ntk_dot_v = torch.autograd.grad(vjp1, v1, vjp1_clone, create_graph=True)[0]
     else:
         n2 = x2.shape[0]
         y2 = model(x2)
         v2 = torch.ones_like(y2).requires_grad_()
         vjp2 = torch.autograd.grad(y2, model.parameters(), v2, create_graph=True)
-        ntk_dot_v = torch.autograd.grad(vjp2, v2, vjp1, create_graph=True)[0]
+        ntk_dot_v = torch.autograd.grad(vjp2, v2, vjp1_clone, create_graph=True)[0]
 
     ntk = y1.new_zeros(n1, n2, n_classes, n_classes)
     for j in range(n2):
