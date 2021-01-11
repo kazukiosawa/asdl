@@ -97,7 +97,8 @@ def fisher_for_cross_entropy(
                 _fisher_for_cross_entropy(
                     model, fisher_types, inputs, targets, **kwargs
                 )
-            matrix_manager.accumulate_matrices(stats_name)
+            if stats_name is not None:
+                matrix_manager.accumulate_matrices(stats_name)
         if compute_param_grad:
             data_loader_gradient(
                 model,
