@@ -19,15 +19,18 @@ __all__ = [
 
 
 class PastTask:
-    def __init__(self, memorable_points: DataLoader, class_ids=None):
+    def __init__(self, memorable_points, class_ids=None):
         self.memorable_points = memorable_points
-        self.n_memorable_points = len(memorable_points.dataset)
         self.kernel = None
         self.mean = None
         self.class_ids = class_ids
 
     def update_kernel(self, model, kernel_fn):
-        kernel = batch(kernel_fn, model, self.memorable_points)
+        memorable_points = self.memorable_points
+        if isinstance(memorable_points, DataLoader):
+            kernel = batch(kernel_fn, model, memorable_points)
+        else:
+            kernel = kernel_fn(model, memorable_points)
         n, c = kernel.shape[0], kernel.shape[-1]  # (n, n, c, c)
         self.kernel = kernel.transpose(1, 2).reshape(n * c, n * c)  # (nc, nc)
 
@@ -37,10 +40,14 @@ class PastTask:
     def _evaluate_mean(self, model):
         means = []
         device = next(model.parameters()).device
-        for inputs, _ in self.memorable_points:
-            inputs = inputs.to(device)
-            means.append(model(inputs))
-        return torch.cat(means)  # (n, c)
+        memorable_points = self.memorable_points
+        if isinstance(memorable_points, DataLoader):
+            for inputs, _ in self.memorable_points:
+                inputs = inputs.to(device)
+                means.append(model(inputs))
+            return torch.cat(means)  # (n, c)
+        else:
+            return model(memorable_points)
 
     def get_regularization_grad(self, model, eps=1e-5):
         assert self.kernel is not None and self.mean is not None
@@ -51,7 +58,7 @@ class PastTask:
         kernel = add_value_to_diagonal(self.kernel, eps)  # (nc, nc)
         u = torch.cholesky(kernel)
         v = torch.cholesky_solve(b, u)  # (nc, 1)
-        v = v.reshape(self.n_memorable_points, -1)  # (n, c)
+        v.detach_().resize_as_(current_mean)  # (n, c)
 
         grad = torch.autograd.grad(current_mean, model.parameters(), grad_outputs=v)
 
@@ -118,7 +125,11 @@ class FROMP:
     def is_ready(self):
         return len(self.observed_tasks) > 0
 
-    def update_regularization_info(self, data_loader, class_ids=None, batch_size_for_kernel=None, is_distributed=False):
+    def update_regularization_info(self,
+                                   data_loader,
+                                   class_ids=None,
+                                   memorable_points_as_tensor=True,
+                                   is_distributed=False):
         model = self.model
         model.eval()
 
@@ -134,7 +145,9 @@ class FROMP:
         with customize_head(model, class_ids):
             memorable_points = collect_memorable_points(model,
                                                         data_loader,
-                                                        self.n_memorable_points)
+                                                        self.n_memorable_points,
+                                                        memorable_points_as_tensor,
+                                                        is_distributed)
         self.observed_tasks.append(PastTask(memorable_points, class_ids))
 
         # update information (kernel & mean) for each observed task
@@ -165,6 +178,7 @@ class FROMP:
 def collect_memorable_points(model,
                              data_loader: DataLoader,
                              n_memorable_points,
+                             as_tensor=True,
                              is_distributed=False):
     device = next(model.parameters()).device
     dataset = data_loader.dataset
@@ -191,16 +205,21 @@ def collect_memorable_points(model,
     hessian_traces = torch.cat(hessian_traces)
 
     # sort indices by Hessian trace
-    indices = torch.argsort(hessian_traces, descending=True)
+    indices = torch.argsort(hessian_traces, descending=True).cpu()
     top_indices = indices[:n_memorable_points]
 
-    # create a DataLoader for memorable points
-    batch_size = min(n_memorable_points, data_loader.batch_size)
-    return DataLoader(Subset(dataset, top_indices),
-                      batch_size=batch_size,
-                      pin_memory=True,
-                      drop_last=False,
-                      shuffle=False)
+    if as_tensor:
+        memorable_points = [dataset[idx][0] for idx in top_indices]
+        return torch.cat(memorable_points).to(device)
+    else:
+        # create a DataLoader for memorable points
+        memorable_points = Subset(dataset, top_indices)
+        batch_size = min(n_memorable_points, data_loader.batch_size)
+        return DataLoader(memorable_points,
+                          batch_size=batch_size,
+                          pin_memory=True,
+                          drop_last=False,
+                          shuffle=False)
 
 
 @contextmanager
