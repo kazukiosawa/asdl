@@ -302,7 +302,7 @@ def _fisher_for_cross_entropy(
     probs = None
 
     def loss_and_backward(target):
-        model.zero_grad()
+        model.zero_grad(set_to_none=True)
         loss = F.nll_loss(log_probs, target, reduction='sum')
         loss.backward(retain_graph=True)
         if compute_full_fisher:
