@@ -188,7 +188,6 @@ def collect_memorable_points(model,
                              is_distributed=False):
     device = next(model.parameters()).device
     dataset = data_loader.dataset
-    hessian_traces = []
 
     # create a data loader w/o shuffling so that indices in the dataset are stored
     assert data_loader.batch_size is not None, 'DataLoader w/o batch_size is not supported.'
@@ -202,6 +201,7 @@ def collect_memorable_points(model,
                                    drop_last=False,
                                    shuffle=False)
     # collect Hessian trace
+    hessian_traces = []
     for inputs, _ in no_shuffle_loader:
         inputs = inputs.to(device)
         logits = model(inputs)
