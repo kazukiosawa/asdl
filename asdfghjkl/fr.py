@@ -34,6 +34,7 @@ class PastTask:
         n, c = kernel.shape[0], kernel.shape[-1]  # (n, n, c, c)
         self.kernel = kernel.transpose(1, 2).reshape(n * c, n * c)  # (nc, nc)
 
+    @torch.no_grad()
     def update_mean(self, model):
         self.mean = self._evaluate_mean(model)
 
@@ -179,6 +180,7 @@ class FROMP:
             p.grad.add_(g, alpha=tau)
 
 
+@torch.no_grad()
 def collect_memorable_points(model,
                              data_loader: DataLoader,
                              n_memorable_points,
