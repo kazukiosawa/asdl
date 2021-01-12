@@ -49,15 +49,19 @@ class PastTask:
         else:
             return model(memorable_points)
 
-    def get_regularization_grad(self, model, eps=1e-5):
+    def get_regularization_grad(self, model, eps=1e-5, cholesky=False):
         assert self.kernel is not None and self.mean is not None
 
         current_mean = self._evaluate_mean(model)  # (n, c)
-        b = current_mean - self.mean  # (n, c)
-        b = b.reshape(-1, 1)  # (nc, 1)
         kernel = add_value_to_diagonal(self.kernel, eps)  # (nc, nc)
-        u = torch.cholesky(kernel)
-        v = torch.cholesky_solve(b, u)  # (nc, 1)
+        b = current_mean - self.mean  # (n, c)
+        if cholesky:
+            b = b.reshape(-1, 1)  # (nc, 1)
+            u = torch.cholesky(kernel)
+            v = torch.cholesky_solve(b, u)  # (nc, 1)
+        else:
+            b = b.flatten()  # (nc,)
+            v = torch.mv(torch.inverse(kernel), b)  # (nc,)
         v.detach_().resize_as_(current_mean)  # (n, c)
 
         grad = torch.autograd.grad(current_mean, model.parameters(), grad_outputs=v)
@@ -156,7 +160,7 @@ class FROMP:
                 task.update_kernel(model, self.kernel_fn)
                 task.update_mean(model)
 
-    def apply_regularization_grad(self, tau=None, eps=1e-5):
+    def apply_regularization_grad(self, tau=None, eps=1e-5, cholesky=False):
         assert self.is_ready, 'Functional regularization is not ready yet, ' \
                               'call FROMP.update_regularization_info(data_loader).'
         if tau is None:
@@ -167,7 +171,7 @@ class FROMP:
         grads_sum = [torch.zeros_like(p.grad) for p in model.parameters()]
         for task in self.observed_tasks:
             with customize_head(model, task.class_ids, softmax=True):
-                grads = task.get_regularization_grad(model, eps=eps)
+                grads = task.get_regularization_grad(model, eps=eps, cholesky=cholesky)
             grads_sum = [gs.add_(g) for gs, g in zip(grads_sum, grads)]
 
         # add regularization grad to param.grad
