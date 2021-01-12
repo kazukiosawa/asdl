@@ -55,7 +55,7 @@ class PastTask:
         else:
             return model(memorable_points)
 
-    def get_regularization_grad(self, model, eps=1e-5, cholesky=False):
+    def apply_regularization_grad(self, model, tau=1., eps=1e-5, cholesky=False):
         assert self.kernel is not None and self.mean is not None
 
         current_mean = self._evaluate_mean(model)  # (n, c)
@@ -70,9 +70,8 @@ class PastTask:
             v = torch.mv(torch.inverse(kernel), b)  # (nc,)
         v.detach_().resize_as_(current_mean)  # (n, c)
 
-        grad = torch.autograd.grad(current_mean, model.parameters(), grad_outputs=v)
-
-        return grad
+        # regularization grad (weighted by tau) will be added to param.grad
+        torch.autograd.backward(current_mean, grad_tensors=v.mul_(tau))
 
 
 class FROMP:
@@ -182,16 +181,10 @@ class FROMP:
             eps = self.eps
         model = self.model
 
-        # calculate FROMP grads on all the observed tasks
-        grads_sum = [torch.zeros_like(p.grad) for p in model.parameters()]
+        # add regularization grads on all the observed tasks to param.grad
         for task in self.observed_tasks:
             with customize_head(model, task.class_ids, softmax=True):
-                grads = task.get_regularization_grad(model, eps=eps, cholesky=cholesky)
-            grads_sum = [gs.add_(g) for gs, g in zip(grads_sum, grads)]
-
-        # add regularization grad to param.grad
-        for p, g in zip(model.parameters(), grads_sum):
-            p.grad.add_(g, alpha=tau)
+                task.apply_regularization_grad(model, tau=tau, eps=eps, cholesky=cholesky)
 
 
 @torch.no_grad()
