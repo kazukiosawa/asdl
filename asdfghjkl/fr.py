@@ -100,7 +100,6 @@ class FROMP:
         del DDP
         assert ggn_type != COV, f'ggn_type: {COV} is not supported.'
 
-        # apply softmax to model's output
         self.model = model
         self.device = next(model.parameters()).device
         self.tau = tau
