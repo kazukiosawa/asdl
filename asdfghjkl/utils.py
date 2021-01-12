@@ -60,9 +60,5 @@ def im2col_2d(x: torch.Tensor, conv2d: nn.Module):
 
 
 def add_value_to_diagonal(x: torch.Tensor, value):
-    if x.is_cuda:
-        indices = torch.cuda.LongTensor([[i, i] for i in range(x.shape[0])])
-    else:
-        indices = torch.LongTensor([[i, i] for i in range(x.shape[0])])
-    values = x.new_ones(x.shape[0]).mul(value)
-    return x.index_put(tuple(indices.t()), values, accumulate=True)
+    eye = torch.eye(x.shape[0], device=x.device)
+    return x.add_(eye, alpha=value)
