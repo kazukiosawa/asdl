@@ -245,6 +245,34 @@ class KFAC(NaturalGradient):
                     grad_w = ng
                 module.weight.grad.copy_(grad_w.reshape_as(module.weight.grad))
 
+    def precondition_vector(self, vec):
+        idx = 0
+        for module in self.modules:
+            fisher = self._get_pre_inv_fisher(module)
+            if fisher is None:
+                continue
+            if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d)):
+                raise ValueError(f'{nn.BatchNorm1d,nn.BatchNorm2d} are not supported.')
+            else:
+                A_inv = fisher.kron.A_inv
+                B_inv = fisher.kron.B_inv
+                w_idx = idx
+                vec2d = vec[w_idx].view(B_inv.shape[0], -1)
+                idx += 1
+                if _bias_requires_grad(module):
+                    vec2d = torch.cat(
+                        [vec2d, vec[idx].unsqueeze(dim=1)], dim=1)
+                ng = B_inv.mm(vec2d).mm(A_inv)
+                if _bias_requires_grad(module):
+                    vec_w = ng[:, :-1]
+                    vec[idx].copy_(ng[:, -1])
+                    idx += 1
+                else:
+                    vec_w = ng
+                vec[w_idx].copy_(vec_w.reshape_as(module.weight.data))
+
+        assert idx == len(vec)
+
 
 class DiagNaturalGradient(NaturalGradient):
     def __init__(self,
