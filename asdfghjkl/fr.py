@@ -7,8 +7,8 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.data import Subset
 import torch.distributed as dist
 
-from .precondition import DiagNaturalGradient
-from .fisher import FISHER_EXACT, COV
+from .precondition import KFAC, DiagNaturalGradient
+from .fisher import FISHER_EXACT, FISHER_MC
 from .kernel import batch, empirical_implicit_ntk, get_preconditioned_kernel_fn
 from .utils import add_value_to_diagonal
 
@@ -16,6 +16,11 @@ from .utils import add_value_to_diagonal
 __all__ = [
     'FROMP',
 ]
+
+
+_precond_classes = {'kron': KFAC, 'diag': DiagNaturalGradient}
+_fisher_types = {'exact': FISHER_EXACT, 'mc': FISHER_MC}
+_kernel_fns = {'implicit': empirical_implicit_ntk}
 
 
 class PastTask:
@@ -100,30 +105,37 @@ class FROMP:
     """
     def __init__(self,
                  model: torch.nn.Module,
-                 tau=None,
+                 tau=1.,
+                 eps=1e-5,
                  n_memorable_points=10,
-                 precond_class=DiagNaturalGradient,
-                 ggn_type=FISHER_EXACT,
+                 ggn_shape='diag',
+                 ggn_type='exact',
                  prior_prec=1e-5,
                  n_mc_samples=1,
-                 kernel_fn=empirical_implicit_ntk,
+                 kernel_type='implicit',
                  ):
         from torch.nn.parallel import DistributedDataParallel as DDP
         assert not isinstance(model, DDP), \
             f'{DDP} is not supported. Use the collective communication' \
             f'methods defined in {torch.distributed} for distributed training.'
         del DDP
-        assert ggn_type != COV, f'ggn_type: {COV} is not supported.'
+        assert ggn_type in _fisher_types, f'ggn_type: {ggn_type} is not supported.' \
+                                          f' choices: {list(_fisher_types.keys())}'
+        assert ggn_shape in _precond_classes, f'ggn_shape: {ggn_shape} is not supported.' \
+                                              f' choices: {list(_precond_classes.keys())}'
+        assert kernel_type in _kernel_fns, f'kernel_type: {kernel_type} is not supported.' \
+                                           f' choices: {list(_kernel_fns.keys())}'
 
         self.model = model
         self.tau = tau
+        self.eps = eps
         self.n_memorable_points = n_memorable_points
-        self.precond = precond_class(model,
-                                     fisher_type=ggn_type,
-                                     pre_inv_postfix='all_tasks_ggn',
-                                     n_mc_samples=n_mc_samples,
-                                     damping=prior_prec)
-        self.kernel_fn = get_preconditioned_kernel_fn(kernel_fn, self.precond)
+        self.precond = _precond_classes[ggn_shape](model,
+                                                   fisher_type=_fisher_types[ggn_type],
+                                                   pre_inv_postfix='all_tasks_ggn',
+                                                   n_mc_samples=n_mc_samples,
+                                                   damping=prior_prec)
+        self.kernel_fn = get_preconditioned_kernel_fn(_kernel_fns[kernel_type], self.precond)
         self.observed_tasks: List[PastTask] = []
 
     @property
@@ -161,11 +173,13 @@ class FROMP:
                 task.update_kernel(model, self.kernel_fn)
                 task.update_mean(model)
 
-    def apply_regularization_grad(self, tau=None, eps=1e-5, cholesky=False):
+    def apply_regularization_grad(self, tau=None, eps=None, cholesky=False):
         assert self.is_ready, 'Functional regularization is not ready yet, ' \
                               'call FROMP.update_regularization_info(data_loader).'
         if tau is None:
             tau = self.tau
+        if eps is None:
+            eps = self.eps
         model = self.model
 
         # calculate FROMP grads on all the observed tasks
