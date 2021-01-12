@@ -39,9 +39,9 @@ class PastTask:
 
     def _evaluate_mean(self, model):
         means = []
-        device = next(model.parameters()).device
         memorable_points = self.memorable_points
         if isinstance(memorable_points, DataLoader):
+            device = next(model.parameters()).device
             for inputs, _ in self.memorable_points:
                 inputs = inputs.to(device)
                 means.append(model(inputs))
@@ -209,6 +209,7 @@ def collect_memorable_points(model,
     top_indices = indices[:n_memorable_points]
 
     if as_tensor:
+        # crate a Tensor for memorable points on model's device
         memorable_points = [dataset[idx][0] for idx in top_indices]
         return torch.cat(memorable_points).to(device)
     else:
