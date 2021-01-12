@@ -4,6 +4,8 @@ from contextlib import contextmanager
 import torch
 import torch.nn.functional as F
 from torch.utils.data.dataloader import DataLoader
+from torch.utils.data import Subset
+import torch.distributed as dist
 
 from .precondition import DiagNaturalGradient
 from .fisher import FISHER_EXACT, COV
@@ -17,38 +19,39 @@ __all__ = [
 
 
 class PastTask:
-    def __init__(self, memorable_points: torch.Tensor, class_ids=None):
-        # TODO: support DataLoader for memorable_points
+    def __init__(self, memorable_points: DataLoader, class_ids=None):
         self.memorable_points = memorable_points
-        self.n_memorable_points = memorable_points.shape[0]
+        self.n_memorable_points = len(memorable_points.dataset)
         self.kernel = None
         self.mean = None
         self.class_ids = class_ids
 
-    def update_kernel(self, model, kernel_fn, batch_size=32, is_distributed=False):
-        if batch_size is None:
-            batch_size = self.n_memorable_points
-        kernel = batch(kernel_fn,
-                       model,
-                       self.memorable_points,
-                       batch_size=batch_size,
-                       is_distributed=is_distributed)  # (n, n, c, c)
-        n, c = kernel.shape[0], kernel.shape[-1]
-        self.kernel = kernel.transpose(1, 2).reshape(n * c, -1)  # (nc, nc)
+    def update_kernel(self, model, kernel_fn):
+        kernel = batch(kernel_fn, model, self.memorable_points)
+        n, c = kernel.shape[0], kernel.shape[-1]  # (n, n, c, c)
+        self.kernel = kernel.transpose(1, 2).reshape(n * c, n * c)  # (nc, nc)
 
     def update_mean(self, model):
-        self.mean = model(self.memorable_points)  # (n, c)
+        self.mean = self._evaluate_mean(model)
+
+    def _evaluate_mean(self, model):
+        means = []
+        device = next(model.parameters()).device
+        for inputs, _ in self.memorable_points:
+            inputs = inputs.to(device)
+            means.append(model(inputs))
+        return torch.cat(means)  # (n, c)
 
     def get_regularization_grad(self, model, eps=1e-5):
         assert self.kernel is not None and self.mean is not None
 
-        current_mean = model(self.memorable_points)  # (n, c)
+        current_mean = self._evaluate_mean(model)  # (n, c)
         b = current_mean - self.mean  # (n, c)
         b = b.reshape(-1, 1)  # (nc, 1)
         kernel = add_value_to_diagonal(self.kernel, eps)  # (nc, nc)
         u = torch.cholesky(kernel)
         v = torch.cholesky_solve(b, u)  # (nc, 1)
-        v = v.reshape(self.memorable_points.shape[0], -1)  # (n, c)
+        v = v.reshape(self.n_memorable_points, -1)  # (n, c)
 
         grad = torch.autograd.grad(current_mean, model.parameters(), grad_outputs=v)
 
@@ -101,7 +104,6 @@ class FROMP:
         assert ggn_type != COV, f'ggn_type: {COV} is not supported.'
 
         self.model = model
-        self.device = next(model.parameters()).device
         self.tau = tau
         self.n_memorable_points = n_memorable_points
         self.precond = precond_class(model,
@@ -130,13 +132,15 @@ class FROMP:
 
         # register the current task with the memorable points
         with customize_head(model, class_ids):
-            memorable_points = self._collect_top_memorable_points(data_loader)
+            memorable_points = collect_memorable_points(model,
+                                                        data_loader,
+                                                        self.n_memorable_points)
         self.observed_tasks.append(PastTask(memorable_points, class_ids))
 
         # update information (kernel & mean) for each observed task
         for task in self.observed_tasks:
             with customize_head(model, task.class_ids, softmax=True):
-                task.update_kernel(model, self.kernel_fn, batch_size_for_kernel, is_distributed)
+                task.update_kernel(model, self.kernel_fn)
                 task.update_mean(model)
 
     def apply_regularization_grad(self, tau=None, eps=1e-5):
@@ -157,37 +161,46 @@ class FROMP:
         for p, g in zip(model.parameters(), grads_sum):
             p.grad.add_(g, alpha=tau)
 
-    def _collect_top_memorable_points(self,
-                                      data_loader: DataLoader,
-                                      is_distributed=False):
-        # TODO: support is_distributed (DistributedSampler)
-        device = self.device
-        dataset = data_loader.dataset
-        hessian_traces = []
 
-        # create a data loader w/o shuffling so that indices in the dataset are stored
-        no_shuffle_loader = DataLoader(dataset,
-                                       batch_size=data_loader.batch_size,
-                                       num_workers=data_loader.num_workers,
-                                       pin_memory=True,
-                                       drop_last=False,
-                                       shuffle=False)
-        # collect Hessian trace
-        for inputs, _ in no_shuffle_loader:
-            inputs = inputs.to(device)
-            logits = self.model(inputs)
-            probs = F.softmax(logits, dim=1)  # (n, c)
-            diag_hessian = probs - probs * probs  # (n, c)
-            hessian_traces.append(diag_hessian.sum(dim=1))  # [(n,)]
-        hessian_traces = torch.cat(hessian_traces)
+def collect_memorable_points(model,
+                             data_loader: DataLoader,
+                             n_memorable_points,
+                             is_distributed=False):
+    device = next(model.parameters()).device
+    dataset = data_loader.dataset
+    hessian_traces = []
 
-        # sort indices by Hessian trace
-        indices = torch.argsort(hessian_traces, descending=True)
-        top_indices = indices[:self.n_memorable_points]
-        memorable_points = [dataset[idx][0] for idx in top_indices]
+    # create a data loader w/o shuffling so that indices in the dataset are stored
+    assert data_loader.batch_size is not None, 'DataLoader w/o batch_size is not supported.'
+    if is_distributed:
+        indices = range(dist.get_rank(), len(dataset), dist.get_world_size())
+        dataset = Subset(dataset, indices)
+    no_shuffle_loader = DataLoader(dataset,
+                                   batch_size=data_loader.batch_size,
+                                   num_workers=data_loader.num_workers,
+                                   pin_memory=True,
+                                   drop_last=False,
+                                   shuffle=False)
+    # collect Hessian trace
+    for inputs, _ in no_shuffle_loader:
+        inputs = inputs.to(device)
+        logits = model(inputs)
+        probs = F.softmax(logits, dim=1)  # (n, c)
+        diag_hessian = probs - probs * probs  # (n, c)
+        hessian_traces.append(diag_hessian.sum(dim=1))  # [(n,)]
+    hessian_traces = torch.cat(hessian_traces)
 
-        # TODO: support DataLoader for memorable_points
-        return torch.cat(memorable_points).to(device)  # (m, *)
+    # sort indices by Hessian trace
+    indices = torch.argsort(hessian_traces, descending=True)
+    top_indices = indices[:n_memorable_points]
+
+    # create a DataLoader for memorable points
+    batch_size = min(n_memorable_points, data_loader.batch_size)
+    return DataLoader(Subset(dataset, top_indices),
+                      batch_size=batch_size,
+                      pin_memory=True,
+                      drop_last=False,
+                      shuffle=False)
 
 
 @contextmanager
