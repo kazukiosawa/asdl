@@ -172,7 +172,7 @@ class FROMP:
                 task.update_kernel(model, self.kernel_fn)
                 task.update_mean(model)
 
-    def apply_regularization_grad(self, tau=None, eps=None, cholesky=False):
+    def apply_regularization_grad(self, tau=None, eps=None, cholesky=False, random_task=False):
         assert self.is_ready, 'Functional regularization is not ready yet, ' \
                               'call FROMP.update_regularization_info(data_loader).'
         if tau is None:
@@ -181,10 +181,17 @@ class FROMP:
             eps = self.eps
         model = self.model
 
-        # add regularization grads on all the observed tasks to param.grad
-        for task in self.observed_tasks:
+        if random_task:
+            import random
+            # add regularization grad on a random task to param.grad
+            task = self.observed_tasks[random.randint(0, len(self.observed_tasks) - 1)]
             with customize_head(model, task.class_ids, softmax=True):
                 task.apply_regularization_grad(model, tau=tau, eps=eps, cholesky=cholesky)
+        else:
+            # add regularization grads on all the observed tasks to param.grad
+            for task in self.observed_tasks:
+                with customize_head(model, task.class_ids, softmax=True):
+                    task.apply_regularization_grad(model, tau=tau, eps=eps, cholesky=cholesky)
 
 
 @torch.no_grad()
