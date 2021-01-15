@@ -106,6 +106,7 @@ class FROMP:
                  model: torch.nn.Module,
                  tau=1.,
                  eps=1e-5,
+                 max_tasks_for_grad=None,
                  n_memorable_points=10,
                  ggn_shape='diag',
                  ggn_type='exact',
@@ -128,6 +129,7 @@ class FROMP:
         self.model = model
         self.tau = tau
         self.eps = eps
+        self.max_tasks_for_grad = max_tasks_for_grad
         self.n_memorable_points = n_memorable_points
         self.precond = _precond_classes[ggn_shape](model,
                                                    fisher_type=_fisher_types[ggn_type],
@@ -172,26 +174,30 @@ class FROMP:
                 task.update_kernel(model, self.kernel_fn)
                 task.update_mean(model)
 
-    def apply_regularization_grad(self, tau=None, eps=None, cholesky=False, random_task=False):
+    def apply_regularization_grad(self, tau=None, eps=None, cholesky=False, max_tasks=None):
         assert self.is_ready, 'Functional regularization is not ready yet, ' \
                               'call FROMP.update_regularization_info(data_loader).'
         if tau is None:
             tau = self.tau
         if eps is None:
             eps = self.eps
+        if max_tasks is None:
+            max_tasks = self.max_tasks_for_grad
         model = self.model
+        observed_tasks = self.observed_tasks
 
-        if random_task:
+        # collect indices of tasks to apply regularization grad
+        n_observed_tasks = len(observed_tasks)
+        indices = list(range(n_observed_tasks))
+        if max_tasks and max_tasks < n_observed_tasks:
             import random
-            # add regularization grad on a random task to param.grad
-            task = self.observed_tasks[random.randint(0, len(self.observed_tasks) - 1)]
+            indices = random.sample(indices, max_tasks)
+
+        # add regularization grad on all the selected tasks to param.grad
+        for idx in indices:
+            task = observed_tasks[idx]
             with customize_head(model, task.class_ids, softmax=True):
                 task.apply_regularization_grad(model, tau=tau, eps=eps, cholesky=cholesky)
-        else:
-            # add regularization grads on all the observed tasks to param.grad
-            for task in self.observed_tasks:
-                with customize_head(model, task.class_ids, softmax=True):
-                    task.apply_regularization_grad(model, tau=tau, eps=eps, cholesky=cholesky)
 
 
 @torch.no_grad()
