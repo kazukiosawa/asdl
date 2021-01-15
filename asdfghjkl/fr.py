@@ -174,7 +174,7 @@ class FROMP:
                 task.update_kernel(model, self.kernel_fn)
                 task.update_mean(model)
 
-    def apply_regularization_grad(self, tau=None, eps=None, cholesky=False, max_tasks=None):
+    def apply_regularization_grad(self, tau=None, eps=None, max_tasks=None, cholesky=False):
         assert self.is_ready, 'Functional regularization is not ready yet, ' \
                               'call FROMP.update_regularization_info(data_loader).'
         if tau is None:
