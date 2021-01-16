@@ -105,7 +105,7 @@ class FROMP:
                  model: torch.nn.Module,
                  tau=1.,
                  eps=1e-5,
-                 max_tasks_for_grad=None,
+                 max_tasks_for_penalty=None,
                  n_memorable_points=10,
                  ggn_shape='diag',
                  ggn_type='exact',
@@ -128,7 +128,7 @@ class FROMP:
         self.model = model
         self.tau = tau
         self.eps = eps
-        self.max_tasks_for_grad = max_tasks_for_grad
+        self.max_tasks_for_penalty = max_tasks_for_penalty
         self.n_memorable_points = n_memorable_points
         self.precond = _precond_classes[ggn_shape](model,
                                                    fisher_type=_fisher_types[ggn_type],
@@ -181,7 +181,7 @@ class FROMP:
         if eps is None:
             eps = self.eps
         if max_tasks is None:
-            max_tasks = self.max_tasks_for_grad
+            max_tasks = self.max_tasks_for_penalty
         model = self.model
         observed_tasks = self.observed_tasks
 
