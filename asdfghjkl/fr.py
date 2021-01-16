@@ -55,7 +55,7 @@ class PastTask:
         else:
             return model(memorable_points)
 
-    def apply_regularization_grad(self, model, tau=1., eps=1e-5, cholesky=False):
+    def get_penalty(self, model, eps=1e-5, cholesky=False):
         assert self.kernel is not None and self.mean is not None
 
         current_mean = self._evaluate_mean(model)  # (n, c)
@@ -68,10 +68,9 @@ class PastTask:
         else:
             b = b.flatten()  # (nc,)
             v = torch.mv(torch.inverse(kernel), b)  # (nc,)
-        v.detach_().resize_as_(current_mean)  # (n, c)
+        v.detach_()
 
-        # regularization grad (weighted by tau) will be added to param.grad
-        torch.autograd.backward(current_mean, grad_tensors=v.mul_(tau))
+        return torch.mul(b, v).sum()
 
 
 class FROMP:
@@ -96,9 +95,9 @@ class FROMP:
         >>>     for x, y in data_loader:
         >>>         optimizer.zero_grad()
         >>>         loss = loss_fn(model(x), y)
-        >>>         loss.backward()
         >>>         if fr.is_ready:
-        >>>             fr.apply_regularization_grad()
+        >>>             loss += fr.get_penalty()
+        >>>         loss.backward()
         >>>         optimizer.step()
         >>>     fr.update_regularization_info(data_loader)
     """
@@ -174,7 +173,7 @@ class FROMP:
                 task.update_kernel(model, self.kernel_fn)
                 task.update_mean(model)
 
-    def apply_regularization_grad(self, tau=None, eps=None, max_tasks=None, cholesky=False):
+    def get_penalty(self, tau=None, eps=None, max_tasks=None, cholesky=False):
         assert self.is_ready, 'Functional regularization is not ready yet, ' \
                               'call FROMP.update_regularization_info(data_loader).'
         if tau is None:
@@ -186,18 +185,21 @@ class FROMP:
         model = self.model
         observed_tasks = self.observed_tasks
 
-        # collect indices of tasks to apply regularization grad
+        # collect indices of tasks to calculate regularization penalty
         n_observed_tasks = len(observed_tasks)
         indices = list(range(n_observed_tasks))
         if max_tasks and max_tasks < n_observed_tasks:
             import random
             indices = random.sample(indices, max_tasks)
 
-        # add regularization grad on all the selected tasks to param.grad
+        # get regularization penalty on all the selected tasks
+        total_penalty = 0
         for idx in indices:
             task = observed_tasks[idx]
             with customize_head(model, task.class_ids, softmax=True):
-                task.apply_regularization_grad(model, tau=tau, eps=eps, cholesky=cholesky)
+                total_penalty += task.get_penalty(model, eps=eps, cholesky=cholesky)
+
+        return 0.5 * tau * total_penalty
 
 
 @torch.no_grad()
