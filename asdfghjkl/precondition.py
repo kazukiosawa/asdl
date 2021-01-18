@@ -333,7 +333,9 @@ class DiagNaturalGradient(NaturalGradient):
 
 
 def _bias_requires_grad(module):
-    return hasattr(module, 'bias') and module.bias.requires_grad
+    return hasattr(module, 'bias') \
+           and module.bias is not None \
+           and module.bias.requires_grad
 
 
 def _cholesky_inv(X):
