@@ -246,7 +246,7 @@ def collect_memorable_points(model,
     if as_tensor:
         # crate a Tensor for memorable points on model's device
         memorable_points = [dataset[idx][0] for idx in top_indices]
-        return torch.cat(memorable_points).to(device)
+        return torch.stack(memorable_points).to(device)
     else:
         # create a DataLoader for memorable points
         memorable_points = Subset(dataset, top_indices)
