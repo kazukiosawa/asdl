@@ -201,11 +201,12 @@ class FROMP:
             indices = random.sample(indices, max_tasks)
 
         # get regularization penalty on all the selected tasks
-        total_penalty = 0
-        for idx in indices:
-            task = observed_tasks[idx]
-            with customize_head(model, task.class_ids, softmax=True):
-                total_penalty += task.get_penalty(model, eps=eps, cholesky=cholesky)
+        with disable_broadcast_buffers(model):
+            total_penalty = 0
+            for idx in indices:
+                task = observed_tasks[idx]
+                with customize_head(model, task.class_ids, softmax=True):
+                    total_penalty += task.get_penalty(model, eps=eps, cholesky=cholesky)
 
         return 0.5 * tau * total_penalty
 
@@ -275,3 +276,13 @@ def customize_head(module: torch.nn.Module, class_ids: List[int] = None, softmax
     handle.remove()
     del forward_hook
 
+
+@contextmanager
+def disable_broadcast_buffers(module):
+    tmp = False
+    if isinstance(module, DDP):
+        tmp = module.broadcast_buffers
+        module.broadcast_buffers = False
+    yield
+    if isinstance(module, DDP):
+        module.broadcast_buffers = tmp
