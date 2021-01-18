@@ -190,6 +190,7 @@ class FROMP:
         if max_tasks is None:
             max_tasks = self.max_tasks_for_penalty
         model = self.model
+        model.eval()
         observed_tasks = self.observed_tasks
 
         # collect indices of tasks to calculate regularization penalty
