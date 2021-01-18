@@ -48,6 +48,9 @@ class NaturalGradient(Precondition):
                  n_mc_samples=1,
                  damping=1e-5,
                  ):
+        from torch.nn.parallel import DistributedDataParallel as DDP
+        assert not isinstance(model, DDP), f'{DDP} is not supported.'
+        del DDP
         self.model = model
         self.modules = [model]
         self.fisher_type = fisher_type
