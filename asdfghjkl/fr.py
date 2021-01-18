@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data import Subset
 import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from .precondition import KFAC, DiagNaturalGradient
 from .fisher import FISHER_EXACT, FISHER_MC
@@ -113,11 +114,6 @@ class FROMP:
                  n_mc_samples=1,
                  kernel_type='implicit',
                  ):
-        from torch.nn.parallel import DistributedDataParallel as DDP
-        assert not isinstance(model, DDP), \
-            f'{DDP} is not supported. Use the collective communication' \
-            f'methods defined in {torch.distributed} for distributed training.'
-        del DDP
         assert ggn_type in _fisher_types, f'ggn_type: {ggn_type} is not supported.' \
                                           f' choices: {list(_fisher_types.keys())}'
         assert ggn_shape in _precond_classes, f'ggn_shape: {ggn_shape} is not supported.' \
@@ -130,7 +126,14 @@ class FROMP:
         self.eps = eps
         self.max_tasks_for_penalty = max_tasks_for_penalty
         self.n_memorable_points = n_memorable_points
-        self.precond = _precond_classes[ggn_shape](model,
+
+        if isinstance(model, DDP):
+            # As DDP disables hook functions required for Fisher calculation,
+            # the underlying module will be used instead.
+            model_precond = model.module
+        else:
+            model_precond = model
+        self.precond = _precond_classes[ggn_shape](model_precond,
                                                    fisher_type=_fisher_types[ggn_type],
                                                    pre_inv_postfix='all_tasks_ggn',
                                                    n_mc_samples=n_mc_samples,
@@ -148,6 +151,10 @@ class FROMP:
                                    memorable_points_as_tensor=True,
                                    is_distributed=False):
         model = self.model
+        if isinstance(model, DDP):
+            # As DDP disables hook functions required for Kernel calculation,
+            # the underlying module will be used instead.
+            model = model.module
         model.eval()
 
         # update GGN and inverse for the current task
