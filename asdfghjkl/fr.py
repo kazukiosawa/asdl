@@ -146,8 +146,8 @@ class FROMP:
         return len(self.observed_tasks) > 0
 
     def update_regularization_info(self,
-                                   data_loader,
-                                   class_ids=None,
+                                   data_loader: DataLoader,
+                                   class_ids: List[int] = None,
                                    memorable_points_as_tensor=True,
                                    is_distributed=False):
         model = self.model
