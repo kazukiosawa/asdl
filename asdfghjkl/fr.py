@@ -61,6 +61,7 @@ class PastTask:
 
         current_mean = self._evaluate_mean(model)  # (n, c)
         kernel = add_value_to_diagonal(self.kernel, eps)  # (nc, nc)
+        kernel.detach_()
         b = current_mean - self.mean  # (n, c)
         if cholesky:
             b = b.reshape(-1, 1)  # (nc, 1)
@@ -69,7 +70,6 @@ class PastTask:
         else:
             b = b.flatten()  # (nc,)
             v = torch.mv(torch.inverse(kernel), b)  # (nc,)
-        v.detach_()
 
         return torch.mul(b, v).sum()
 
