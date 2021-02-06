@@ -66,12 +66,13 @@ class PastTask:
         if cholesky:
             b = b.reshape(-1, 1)  # (nc, 1)
             u = torch.cholesky(kernel)
-            v = torch.cholesky_solve(b, u)  # (nc, 1)
+            v = torch.cholesky_solve(b, u).flatten()  # (nc, 1)
+            b = b.flatten()  # (nc,)
         else:
             b = b.flatten()  # (nc,)
             v = torch.mv(torch.inverse(kernel), b)  # (nc,)
 
-        return torch.mul(b, v).sum()
+        return torch.dot(b, v)
 
 
 class FROMP:
