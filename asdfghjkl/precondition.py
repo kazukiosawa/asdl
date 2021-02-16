@@ -211,7 +211,11 @@ class KFAC(NaturalGradient):
             if fisher is None:
                 continue
             if isinstance(module, _normalizations):
-                pass
+                unit = fisher.unit.data
+                f = unit.shape[0]
+                dmp = torch.eye(2, device=unit.device, dtype=unit.dtype).repeat(f, 1, 1) * damping
+                inv = torch.inverse(fisher.unit.data + dmp)
+                setattr(fisher.unit, 'inv', inv)
             else:
                 A = fisher.kron.A
                 B = fisher.kron.B
@@ -232,7 +236,15 @@ class KFAC(NaturalGradient):
             if fisher is None:
                 continue
             if isinstance(module, _normalizations):
-                pass
+                inv = fisher.unit.inv  # (f, 2, 2)
+                assert _bias_requires_grad(module)
+                grad_w = module.weight.grad  # (f,)
+                grad_b = module.bias.grad  # (f,)
+                g = torch.stack([grad_w, grad_b], dim=1)  # (f, 2)
+                g = g.unsqueeze(2)  # (f, 2, 1)
+                ng = torch.matmul(inv, g).squeeze(2)  # (f, 2)
+                module.weight.grad.copy_(ng[:, 0])
+                module.bias.grad.copy_(ng[:, 1])
             else:
                 A_inv = fisher.kron.A_inv
                 B_inv = fisher.kron.B_inv
@@ -255,7 +267,17 @@ class KFAC(NaturalGradient):
             if fisher is None:
                 continue
             if isinstance(module, _normalizations):
-                raise ValueError(f'{module} is not supported.')
+                inv = fisher.unit.inv  # (f, 2, 2)
+                assert _bias_requires_grad(module)
+                vec_w = vec[idx]  # (f,)
+                vec_b = vec[idx + 1]  # (f,)
+                v = torch.stack([vec_w, vec_b], dim=1)  # (f, 2)
+                v = v.unsqueeze(2)  # (f, 2, 1)
+                print(module, inv.shape, v.shape)
+                ng = torch.matmul(inv, v).squeeze(2)  # (f, 2)
+                vec[idx].copy_(ng[:, 0])
+                vec[idx + 1].copy_(ng[:, 1])
+                idx += 2
             else:
                 A_inv = fisher.kron.A_inv
                 B_inv = fisher.kron.B_inv
