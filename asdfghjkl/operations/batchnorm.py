@@ -44,7 +44,7 @@ class _BatchNormNd(Operation):
         return grads.mul(grads).sum(dim=0)  # f x 1
 
     def cov_unit_wise(self, module, in_data, out_grads):
-        n_features = in_data.shape[-1]  # f
+        n_features = in_data.shape[1]  # f
         grads_w = self.batch_grads_weight(module, in_data, out_grads)  # n x f
         grads_b = self.batch_grads_bias(module, out_grads)  # n x f
         cov_ww = (grads_w ** 2).sum(0)  # f
