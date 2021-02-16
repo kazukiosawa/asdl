@@ -231,7 +231,7 @@ class KFAC(NaturalGradient):
             fisher = self._get_pre_inv_fisher(module)
             if fisher is None:
                 continue
-            if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d)):
+            if isinstance(module, _normalizations):
                 pass
             else:
                 A_inv = fisher.kron.A_inv
@@ -254,8 +254,8 @@ class KFAC(NaturalGradient):
             fisher = self._get_pre_inv_fisher(module)
             if fisher is None:
                 continue
-            if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d)):
-                raise ValueError(f'{nn.BatchNorm1d,nn.BatchNorm2d} are not supported.')
+            if isinstance(module, _normalizations):
+                raise ValueError(f'{module} is not supported.')
             else:
                 A_inv = fisher.kron.A_inv
                 B_inv = fisher.kron.B_inv
