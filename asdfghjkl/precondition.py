@@ -273,7 +273,6 @@ class KFAC(NaturalGradient):
                 vec_b = vec[idx + 1]  # (f,)
                 v = torch.stack([vec_w, vec_b], dim=1)  # (f, 2)
                 v = v.unsqueeze(2)  # (f, 2, 1)
-                print(module, inv.shape, v.shape)
                 ng = torch.matmul(inv, v).squeeze(2)  # (f, 2)
                 vec[idx].copy_(ng[:, 0])
                 vec[idx + 1].copy_(ng[:, 1])
