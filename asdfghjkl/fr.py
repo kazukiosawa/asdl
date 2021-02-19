@@ -27,18 +27,20 @@ _kernel_fns = {'implicit': empirical_implicit_ntk}
 class PastTask:
     def __init__(self, memorable_points, class_ids=None):
         self.memorable_points = memorable_points
-        self.kernel = None
+        self.kernel_inv = None
         self.mean = None
         self.class_ids = class_ids
 
-    def update_kernel(self, model, kernel_fn):
+    def update_kernel(self, model, kernel_fn, eps=1e-5):
         memorable_points = self.memorable_points
         if isinstance(memorable_points, DataLoader):
             kernel = batch(kernel_fn, model, memorable_points)
         else:
             kernel = kernel_fn(model, memorable_points)
         n, c = kernel.shape[0], kernel.shape[-1]  # (n, n, c, c)
-        self.kernel = kernel.transpose(1, 2).reshape(n * c, n * c)  # (nc, nc)
+        kernel = kernel.transpose(1, 2).reshape(n * c, n * c)  # (nc, nc)
+        kernel = add_value_to_diagonal(kernel, eps)
+        self.kernel_inv = torch.inverse(kernel).detach_()
 
     @torch.no_grad()
     def update_mean(self, model):
@@ -56,21 +58,12 @@ class PastTask:
         else:
             return model(memorable_points)
 
-    def get_penalty(self, model, eps=1e-5, cholesky=False):
-        assert self.kernel is not None and self.mean is not None
-
+    def get_penalty(self, model):
+        assert self.kernel_inv is not None and self.mean is not None
         current_mean = self._evaluate_mean(model)  # (n, c)
-        kernel = add_value_to_diagonal(self.kernel, eps)  # (nc, nc)
-        kernel.detach_()
         b = current_mean - self.mean  # (n, c)
-        if cholesky:
-            b = b.reshape(-1, 1)  # (nc, 1)
-            u = torch.cholesky(kernel)
-            v = torch.cholesky_solve(b, u).flatten()  # (nc, 1)
-            b = b.flatten()  # (nc,)
-        else:
-            b = b.flatten()  # (nc,)
-            v = torch.mv(torch.inverse(kernel), b)  # (nc,)
+        b = b.flatten()  # (nc,)
+        v = torch.mv(self.kernel_inv, b)  # (nc,)
 
         return torch.dot(b, v)
 
