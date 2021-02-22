@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.cuda import nvtx
 
 _REQUIRES_GRAD_ATTR = '_original_requires_grad'
 
@@ -12,7 +13,8 @@ __all__ = [
     'restore_original_requires_grad',
     'disable_param_grad',
     'im2col_2d',
-    'add_value_to_diagonal'
+    'add_value_to_diagonal',
+    'nvtx_range'
 ]
 
 
@@ -67,3 +69,12 @@ def add_value_to_diagonal(x: torch.Tensor, value):
         shape = tuple(x.shape[:-2]) + (1, 1)
         eye = eye.repeat(*shape)
     return x.add_(eye, alpha=value)
+
+
+@contextmanager
+def nvtx_range(msg):
+    try:
+        nvtx.range_push(msg)
+        yield
+    finally:
+        nvtx.range_pop()
