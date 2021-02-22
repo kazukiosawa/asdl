@@ -10,8 +10,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from .precondition import KFAC, DiagNaturalGradient
 from .fisher import FISHER_EXACT, FISHER_MC
-from .kernel import batch, empirical_implicit_ntk, get_preconditioned_kernel_fn
-from .utils import add_value_to_diagonal
+from .kernel import batch, empirical_implicit_ntk, empirical_class_wise_direct_ntk, get_preconditioned_kernel_fn
+from .utils import add_value_to_diagonal, nvtx_range
 
 
 __all__ = [
@@ -21,7 +21,7 @@ __all__ = [
 
 _precond_classes = {'kron': KFAC, 'diag': DiagNaturalGradient}
 _fisher_types = {'exact': FISHER_EXACT, 'mc': FISHER_MC}
-_kernel_fns = {'implicit': empirical_implicit_ntk}
+_kernel_fns = {'implicit': empirical_implicit_ntk, 'class_wise': empirical_class_wise_direct_ntk}
 
 
 class PastTask:
@@ -37,8 +37,15 @@ class PastTask:
             kernel = batch(kernel_fn, model, memorable_points)
         else:
             kernel = kernel_fn(model, memorable_points)
-        n, c = kernel.shape[0], kernel.shape[-1]  # (n, n, c, c)
-        kernel = kernel.transpose(1, 2).reshape(n * c, n * c)  # (nc, nc)
+        n, c = kernel.shape[0], kernel.shape[-1]  # (n, n, c, c) or (n, n, c)
+        ndim = kernel.ndim
+        if ndim == 4:
+            kernel = kernel.transpose(1, 2).reshape(n * c, n * c)  # (nc, nc)
+        elif ndim == 3:
+            kernel = kernel.transpose(0, 2)  # (c, n, n)
+        else:
+            raise ValueError(f'Invalid kernel ndim: {ndim}. ndim must be 3 or 4.')
+
         kernel = add_value_to_diagonal(kernel, eps)
         self.kernel_inv = torch.inverse(kernel).detach_()
 
@@ -60,10 +67,19 @@ class PastTask:
 
     def get_penalty(self, model):
         assert self.kernel_inv is not None and self.mean is not None
+        kernel_inv = self.kernel_inv  # (nc, nc) or (c, n, n)
         current_mean = self._evaluate_mean(model)  # (n, c)
         b = current_mean - self.mean  # (n, c)
-        b = b.flatten()  # (nc,)
-        v = torch.mv(self.kernel_inv, b)  # (nc,)
+        if kernel_inv.ndim == 2:
+            # kernel_inv: (nc, nc)
+            b = b.flatten()  # (nc,)
+            v = torch.mv(kernel_inv, b)  # (nc,)
+        else:
+            # kernel_inv: (c, n, n)
+            b = b.transpose(0, 1).unsqueeze(2)  # (c, n, 1)
+            v = torch.matmul(kernel_inv, b)  # (c, n, 1)
+            v = v.transpose(0, 1).flatten()  # (nc,)
+            b = b.flatten()  # (nc,)
 
         return torch.dot(b, v)
 

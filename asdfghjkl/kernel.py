@@ -311,15 +311,15 @@ def get_preconditioned_kernel_fn(kernel_fn, precond: Precondition):
     return partial(kernel_fn, precond=precond)
 
 
-def empirical_class_wise_direct_ntk(model, x1, x2=None):
-    return _empirical_class_wise_ntk(model, x1, x2, hadamard=False)
+def empirical_class_wise_direct_ntk(model, x1, x2=None, precond=None):
+    return _empirical_class_wise_ntk(model, x1, x2, hadamard=False, precond=precond)
 
 
-def empirical_class_wise_hadamard_ntk(model, x1, x2=None):
-    return _empirical_class_wise_ntk(model, x1, x2, hadamard=True)
+def empirical_class_wise_hadamard_ntk(model, x1, x2=None, precond=None):
+    return _empirical_class_wise_ntk(model, x1, x2, hadamard=True, precond=precond)
 
 
-def _empirical_class_wise_ntk(model, x1, x2=None, hadamard=False):
+def _empirical_class_wise_ntk(model, x1, x2=None, hadamard=False, precond=None):
     if x2 is not None:
         inputs = torch.cat([x1, x2], dim=0)
         n1 = x1.shape[0]
@@ -327,6 +327,9 @@ def _empirical_class_wise_ntk(model, x1, x2=None, hadamard=False):
     else:
         inputs = x1
         n1 = n2 = x1.shape[0]
+
+    for module in model.modules():
+        setattr(module, 'gram_precond', precond)
 
     op_name = OP_GRAM_HADAMARD if hadamard else OP_GRAM_DIRECT
     with extend(model, op_name):
@@ -341,6 +344,9 @@ def _empirical_class_wise_ntk(model, x1, x2=None, hadamard=False):
             kernels.append(model.kernel.clone().detach())
             _zero_kernel(model, n1, n2)
         _clear_kernel(model)
+
+    for module in model.modules():
+        delattr(module, 'gram_precond')
 
     return torch.stack(kernels).permute(1, 2, 0)  # n1 x n2 x c
 

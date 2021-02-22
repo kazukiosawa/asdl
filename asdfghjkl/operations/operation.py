@@ -110,17 +110,27 @@ class Operation:
                 self._model.kernel += B.mul(A)
 
             elif op_name == OP_GRAM_DIRECT:
-                grads = self.batch_grads_weight(module, in_data, out_grads).flatten(start_dim=1)
-                if original_requires_grad(module, 'bias'):
-                    grads_b = self.batch_grads_bias(module, out_grads).flatten(start_dim=1)
-                    grads = torch.cat([grads, grads_b], dim=1)
                 n_data = in_data.shape[0]
                 n1 = self._model.kernel.shape[0]
-                if n_data == n1:
-                    self._model.kernel += torch.matmul(grads, grads.T)
-                else:
-                    self._model.kernel += torch.matmul(grads[:n1], grads[n1:].T)
 
+                grads = self.batch_grads_weight(module, in_data, out_grads)
+                v = [grads]
+                if original_requires_grad(module, 'bias'):
+                    grads_b = self.batch_grads_bias(module, out_grads)
+                    v.append(grads_b)
+                g = torch.cat([_v.flatten(start_dim=1) for _v in v], axis=1)
+
+                precond = getattr(module, 'gram_precond', None)
+                if precond is not None:
+                    precond.precondition_vector_module(v, module)
+                    g2 = torch.cat([_v.flatten(start_dim=1) for _v in v], axis=1)
+                else:
+                    g2 = g
+
+                if n_data == n1:
+                    self._model.kernel += torch.matmul(g, g2.T)
+                else:
+                    self._model.kernel += torch.matmul(g[:n1], g2[n1:].T)
             else:
                 rst = getattr(self,
                               f'{op_name}_weight')(module, in_data, out_grads)

@@ -60,5 +60,10 @@ def im2col_2d(x: torch.Tensor, conv2d: nn.Module):
 
 
 def add_value_to_diagonal(x: torch.Tensor, value):
-    eye = torch.eye(x.shape[0], device=x.device)
+    ndim = x.ndim
+    assert ndim >= 2
+    eye = torch.eye(x.shape[-1], device=x.device)
+    if ndim > 2:
+        shape = tuple(x.shape[:-2]) + (1, 1)
+        eye = eye.repeat(*shape)
     return x.add_(eye, alpha=value)
