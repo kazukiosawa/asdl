@@ -123,6 +123,7 @@ class FROMP:
                  eps=1e-5,
                  max_tasks_for_penalty=None,
                  n_memorable_points=10,
+                 memory_select_method="lambda_descend",
                  ggn_shape='diag',
                  ggn_type='exact',
                  prior_prec=1e-5,
@@ -142,6 +143,7 @@ class FROMP:
         self.eps = eps
         self.max_tasks_for_penalty = max_tasks_for_penalty
         self.n_memorable_points = n_memorable_points
+        self.memory_select_method = memory_select_method
         self.use_identity_kernel = use_identity_kernel
 
         if isinstance(model, DDP):
@@ -188,6 +190,7 @@ class FROMP:
             memorable_points = collect_memorable_points(model,
                                                         data_loader,
                                                         self.n_memorable_points,
+                                                        self.memory_select_method,
                                                         memorable_points_as_tensor,
                                                         is_distributed)
         self.observed_tasks.append(PastTask(memorable_points, class_ids))
@@ -196,16 +199,14 @@ class FROMP:
         for task in self.observed_tasks:
             with customize_head(model, task.class_ids, softmax=True):
                 if not self.use_identity_kernel:
-                    task.update_kernel(model, self.kernel_fn)
+                    task.update_kernel(model, self.kernel_fn, self.eps)
                 task.update_mean(model)
 
-    def get_penalty(self, tau=None, eps=None, max_tasks=None, cholesky=False):
+    def get_penalty(self, tau=None, max_tasks=None):
         assert self.is_ready, 'Functional regularization is not ready yet, ' \
                               'call FROMP.update_regularization_info(data_loader).'
         if tau is None:
             tau = self.tau
-        if eps is None:
-            eps = self.eps
         if max_tasks is None:
             max_tasks = self.max_tasks_for_penalty
         model = self.model
@@ -225,7 +226,7 @@ class FROMP:
             for idx in indices:
                 task = observed_tasks[idx]
                 with customize_head(model, task.class_ids, softmax=True):
-                    total_penalty += task.get_penalty(model, eps=eps, cholesky=cholesky)
+                    total_penalty += task.get_penalty(model)
 
         return 0.5 * tau * total_penalty
 
@@ -234,16 +235,93 @@ class FROMP:
 def collect_memorable_points(model,
                              data_loader: DataLoader,
                              n_memorable_points,
+                             select_method="lambda_descend",
                              as_tensor=True,
                              is_distributed=False):
     device = next(model.parameters()).device
     dataset = data_loader.dataset
 
-    # create a data loader w/o shuffling so that indices in the dataset are stored
     assert data_loader.batch_size is not None, 'DataLoader w/o batch_size is not supported.'
     if is_distributed:
         indices = range(dist.get_rank(), len(dataset), dist.get_world_size())
         dataset = Subset(dataset, indices)
+
+    assert select_method in ['lambda_descend', 'random', 'lambda_descend_global', 'random_global'], \
+        'Invalid memorable points selection method.'
+    memorable_points_kwargs = dict(model=model, data_loader=data_loader, dataset=dataset, device=device,
+                                    n_memorable_points=n_memorable_points, select_method=select_method)
+    if 'global' in select_method:
+        memorable_points_indices = _collect_memorable_points(**memorable_points_kwargs)
+    else:
+        memorable_points_indices = _collect_memorable_points_class_balanced(**memorable_points_kwargs)
+
+    if as_tensor:
+        # crate a Tensor for memorable points on model's device
+        memorable_points = [dataset[idx][0] for idx in memorable_points_indices]
+        return torch.stack(memorable_points).to(device)
+    else:
+        # create a DataLoader for memorable points
+        memorable_points = Subset(dataset, memorable_points_indices)
+        batch_size = min(n_memorable_points, data_loader.batch_size)
+        return DataLoader(memorable_points,
+                          batch_size=batch_size,
+                          pin_memory=True,
+                          drop_last=False,
+                          shuffle=False)
+
+
+def _collect_memorable_points_class_balanced(model, data_loader, dataset, device, n_memorable_points, select_method):
+    """ collect memorable points (class-balanced) """
+
+    # extract dataset targets
+    if hasattr(dataset, 'targets'):
+        targets = torch.tensor(dataset.targets)
+    else:
+        targets = torch.tensor([dataset[i][1] for i in range(len(dataset))])
+
+    # define number of memorable points per class
+    n_classes = len(targets.unique())
+    n_memorable_points_per_class = int(n_memorable_points / n_classes)
+
+    if select_method == 'lambda_descend':
+        # compute Hessian traces
+        hessian_traces = _compute_hessian_traces(model, data_loader, dataset, device)
+
+    # for each class, select a uniformly random subset of data points
+    memorable_points_indices = []
+    for cls in targets.unique():
+        class_indices = (targets == cls).nonzero(as_tuple=False).flatten()
+
+        if select_method == 'lambda_descend':
+            # sort indices by Hessian trace (for current class) 
+            select_indices = torch.argsort(hessian_traces[class_indices], descending=True)
+        else:
+            # obtain uniformly random indices (for current class)
+            select_indices = torch.randperm(len(class_indices))
+
+        memorable_points_indices.append(class_indices[select_indices[:n_memorable_points_per_class]])
+
+    return torch.cat(memorable_points_indices)
+
+
+def _collect_memorable_points(model, data_loader, dataset, device, n_memorable_points, select_method):
+    """ collect memorable points (not class-balanced) """
+
+    if select_method == 'lambda_descend':
+        # sort indices by Hessian trace (across full dataset)
+        hessian_traces = _compute_hessian_traces(model, data_loader, dataset, device)
+        select_indices = torch.argsort(hessian_traces, descending=True)
+    else:
+        # obtain uniformly random indices (across full dataset)
+        select_indices = torch.randperm(len(dataset))
+
+    return select_indices[:n_memorable_points]
+
+
+def _compute_hessian_traces(model, data_loader, dataset, device):
+    """ compute Hessian traces for selecting memorable points using the lambda_descend method """
+
+    # create a data loader w/o shuffling so that indices in the dataset are stored
     no_shuffle_loader = DataLoader(dataset,
                                    batch_size=data_loader.batch_size,
                                    num_workers=data_loader.num_workers,
@@ -258,25 +336,8 @@ def collect_memorable_points(model,
         probs = F.softmax(logits, dim=1)  # (n, c)
         diag_hessian = probs - probs * probs  # (n, c)
         hessian_traces.append(diag_hessian.sum(dim=1))  # [(n,)]
-    hessian_traces = torch.cat(hessian_traces)
 
-    # sort indices by Hessian trace
-    indices = torch.argsort(hessian_traces, descending=True).cpu()
-    top_indices = indices[:n_memorable_points]
-
-    if as_tensor:
-        # crate a Tensor for memorable points on model's device
-        memorable_points = [dataset[idx][0] for idx in top_indices]
-        return torch.stack(memorable_points).to(device)
-    else:
-        # create a DataLoader for memorable points
-        memorable_points = Subset(dataset, top_indices)
-        batch_size = min(n_memorable_points, data_loader.batch_size)
-        return DataLoader(memorable_points,
-                          batch_size=batch_size,
-                          pin_memory=True,
-                          drop_last=False,
-                          shuffle=False)
+    return torch.cat(hessian_traces).cpu()
 
 
 @contextmanager
