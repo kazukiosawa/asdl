@@ -66,11 +66,16 @@ class PastTask:
             return model(memorable_points)
 
     def get_penalty(self, model):
-        assert self.kernel_inv is not None and self.mean is not None
-        kernel_inv = self.kernel_inv  # (nc, nc) or (c, n, n)
+        assert self.mean is not None
+        kernel_inv = self.kernel_inv  # None or (nc, nc) or (c, n, n)
         current_mean = self._evaluate_mean(model)  # (n, c)
         b = current_mean - self.mean  # (n, c)
-        if kernel_inv.ndim == 2:
+
+        if kernel_inv is None:
+            # kernel_inv == identity matrix
+            b = b.flatten()  # (nc,)
+            v = b  # (nc,)
+        elif kernel_inv.ndim == 2:
             # kernel_inv: (nc, nc)
             b = b.flatten()  # (nc,)
             v = torch.mv(kernel_inv, b)  # (nc,)
@@ -123,6 +128,7 @@ class FROMP:
                  prior_prec=1e-5,
                  n_mc_samples=1,
                  kernel_type='implicit',
+                 use_identity_kernel=False,
                  ):
         assert ggn_type in _fisher_types, f'ggn_type: {ggn_type} is not supported.' \
                                           f' choices: {list(_fisher_types.keys())}'
@@ -136,6 +142,7 @@ class FROMP:
         self.eps = eps
         self.max_tasks_for_penalty = max_tasks_for_penalty
         self.n_memorable_points = n_memorable_points
+        self.use_identity_kernel = use_identity_kernel
 
         if isinstance(model, DDP):
             # As DDP disables hook functions required for Fisher calculation,
@@ -167,13 +174,14 @@ class FROMP:
             model = model.module
         model.eval()
 
-        # update GGN and inverse for the current task
-        with customize_head(model, class_ids):
-            self.precond.update_curvature(data_loader=data_loader)
-        if is_distributed:
-            self.precond.reduce_curvature()
-        self.precond.accumulate_curvature(to_pre_inv=True)
-        self.precond.update_inv()
+        if not self.use_identity_kernel:
+            # update GGN and inverse for the current task
+            with customize_head(model, class_ids):
+                self.precond.update_curvature(data_loader=data_loader)
+            if is_distributed:
+                self.precond.reduce_curvature()
+            self.precond.accumulate_curvature(to_pre_inv=True)
+            self.precond.update_inv()
 
         # register the current task with the memorable points
         with customize_head(model, class_ids):
@@ -187,7 +195,8 @@ class FROMP:
         # update information (kernel & mean) for each observed task
         for task in self.observed_tasks:
             with customize_head(model, task.class_ids, softmax=True):
-                task.update_kernel(model, self.kernel_fn)
+                if not self.use_identity_kernel:
+                    task.update_kernel(model, self.kernel_fn)
                 task.update_mean(model)
 
     def get_penalty(self, tau=None, eps=None, max_tasks=None, cholesky=False):
