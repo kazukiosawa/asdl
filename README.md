@@ -33,6 +33,5 @@ import asdfghjkl
 ## Supported operations
 - matrix-vector product
     - power method
-    - Lanczos method
     - conjugate gradient method
 - preconditioning gradient
