@@ -4,12 +4,18 @@ from .operation import *
 from .linear import Linear
 from .conv import Conv2d
 from .batchnorm import BatchNorm1d, BatchNorm2d
+from .bias import Bias, BiasExt
+from .scale import Scale, ScaleExt
 
 __all__ = [
     'Linear',
     'Conv2d',
     'BatchNorm1d',
     'BatchNorm2d',
+    'Bias',
+    'Scale',
+    'BiasExt',
+    'ScaleExt',
     'get_op_class',
     'Operation',
     'OP_COV_KRON',
@@ -31,6 +37,10 @@ def get_op_class(module):
         return BatchNorm1d
     elif isinstance(module, nn.BatchNorm2d):
         return BatchNorm2d
+    elif isinstance(module, Bias):
+        return BiasExt
+    elif isinstance(module, Scale):
+        return ScaleExt
     else:
         warnings.warn(f'Failed to lookup operations for Module {module}.')
         return None
