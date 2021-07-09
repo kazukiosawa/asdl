@@ -47,7 +47,7 @@ class PastTask:
             raise ValueError(f'Invalid kernel ndim: {ndim}. ndim must be 3 or 4.')
 
         kernel = add_value_to_diagonal(kernel, eps)
-        self.kernel_inv = torch.inverse(kernel).detach_()
+        self.kernel_inv = torch.linalg.inv(kernel).detach_()
 
     @torch.no_grad()
     def update_mean(self, model):
@@ -193,6 +193,7 @@ class FROMP:
                                                         self.memory_select_method,
                                                         memorable_points_as_tensor,
                                                         is_distributed)
+            
         self.observed_tasks.append(PastTask(memorable_points, class_ids))
 
         # update information (kernel & mean) for each observed task
@@ -256,7 +257,7 @@ def collect_memorable_points(model,
         memorable_points_indices = _collect_memorable_points_class_balanced(**memorable_points_kwargs)
 
     if as_tensor:
-        # crate a Tensor for memorable points on model's device
+        # create a Tensor for memorable points on model's device
         memorable_points = [dataset[idx][0] for idx in memorable_points_indices]
         return torch.stack(memorable_points).to(device)
     else:
