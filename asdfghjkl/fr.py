@@ -120,6 +120,7 @@ class FROMP:
     def __init__(self,
                  model: torch.nn.Module,
                  tau=1.,
+                 temp=1.,
                  eps=1e-5,
                  max_tasks_for_penalty=None,
                  n_memorable_points=10,
@@ -140,6 +141,7 @@ class FROMP:
 
         self.model = model
         self.tau = tau
+        self.temp = temp
         self.eps = eps
         self.max_tasks_for_penalty = max_tasks_for_penalty
         self.n_memorable_points = n_memorable_points
@@ -203,11 +205,13 @@ class FROMP:
                     task.update_kernel(model, self.kernel_fn, self.eps)
                 task.update_mean(model)
 
-    def get_penalty(self, tau=None, max_tasks=None):
+    def get_penalty(self, tau=None, temp=None, max_tasks=None):
         assert self.is_ready, 'Functional regularization is not ready yet, ' \
                               'call FROMP.update_regularization_info(data_loader).'
         if tau is None:
             tau = self.tau
+        if temp is None:
+            temp = self.temp
         if max_tasks is None:
             max_tasks = self.max_tasks_for_penalty
         model = self.model
@@ -226,7 +230,7 @@ class FROMP:
             total_penalty = 0
             for idx in indices:
                 task = observed_tasks[idx]
-                with customize_head(model, task.class_ids, softmax=True):
+                with customize_head(model, task.class_ids, softmax=True, temp=temp):
                     total_penalty += task.get_penalty(model)
 
         return 0.5 * tau * total_penalty
@@ -342,11 +346,11 @@ def _compute_hessian_traces(model, data_loader, dataset, device):
 
 
 @contextmanager
-def customize_head(module: torch.nn.Module, class_ids: List[int] = None, softmax=False):
+def customize_head(module: torch.nn.Module, class_ids: List[int] = None, softmax=False, temp=1.):
 
     def forward_hook(module, input, output):
         if class_ids is not None:
-            output = output[:, class_ids]
+            output = output[:, class_ids] / temp
         if softmax:
             return F.softmax(output, dim=1)
         else:
