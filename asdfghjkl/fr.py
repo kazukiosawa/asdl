@@ -53,23 +53,35 @@ class PastTask:
     def update_mean(self, model):
         self.mean = self._evaluate_mean(model)
 
-    def _evaluate_mean(self, model):
+    def _evaluate_mean(self, model, n_memorable_points_sub=None, idx=None):
         means = []
         memorable_points = self.memorable_points
         if isinstance(memorable_points, DataLoader):
             device = next(model.parameters()).device
-            for inputs, _ in self.memorable_points:
+            for i, (inputs, _) in enumerate(self.memorable_points):
+                if n_memorable_points_sub is not None and n_memorable_points_sub < (i+1) * inputs.shape[0]:
+                    break
                 inputs = inputs.to(device)
                 means.append(model(inputs))
             return torch.cat(means)  # (n, c)
         else:
-            return model(memorable_points)
+            if idx is not None:
+                return model(memorable_points[idx, :])
+            else:
+                return model(memorable_points)
 
-    def get_penalty(self, model):
+    def get_penalty(self, model, n_memorable_points_sub=None):
         assert self.mean is not None
         kernel_inv = self.kernel_inv  # None or (nc, nc) or (c, n, n)
-        current_mean = self._evaluate_mean(model)  # (n, c)
-        b = current_mean - self.mean  # (n, c)
+        idx = None
+        if n_memorable_points_sub is not None:
+            import numpy as np
+            idx = np.random.permutation(range(len(self.memorable_points)))[:n_memorable_points_sub]
+        current_mean = self._evaluate_mean(model, n_memorable_points_sub, idx)  # (n, c)
+        if n_memorable_points_sub is not None:
+            b = current_mean - self.mean[idx] # (n, c)
+        else:
+            b = current_mean - self.mean  # (n, c)
 
         if kernel_inv is None:
             # kernel_inv == identity matrix
@@ -124,6 +136,7 @@ class FROMP:
                  eps=1e-5,
                  max_tasks_for_penalty=None,
                  n_memorable_points=10,
+                 n_memorable_points_sub=10,
                  memory_select_method="lambda_descend",
                  ggn_shape='diag',
                  ggn_type='exact',
@@ -131,6 +144,7 @@ class FROMP:
                  n_mc_samples=1,
                  kernel_type='implicit',
                  use_identity_kernel=False,
+                 use_temp_correction=False,
                  ):
         assert ggn_type in _fisher_types, f'ggn_type: {ggn_type} is not supported.' \
                                           f' choices: {list(_fisher_types.keys())}'
@@ -145,8 +159,10 @@ class FROMP:
         self.eps = eps
         self.max_tasks_for_penalty = max_tasks_for_penalty
         self.n_memorable_points = n_memorable_points
+        self.n_memorable_points_sub = None if n_memorable_points <= n_memorable_points_sub else n_memorable_points_sub
         self.memory_select_method = memory_select_method
         self.use_identity_kernel = use_identity_kernel
+        self.use_temp_correction = use_temp_correction
 
         if isinstance(model, DDP):
             # As DDP disables hook functions required for Fisher calculation,
@@ -194,13 +210,14 @@ class FROMP:
                                                         self.n_memorable_points,
                                                         self.memory_select_method,
                                                         memorable_points_as_tensor,
-                                                        is_distributed)
+                                                        is_distributed,
+                                                        self.n_memorable_points_sub)
             
         self.observed_tasks.append(PastTask(memorable_points, class_ids))
 
         # update information (kernel & mean) for each observed task
         for task in self.observed_tasks:
-            with customize_head(model, task.class_ids, softmax=True):
+            with customize_head(model, task.class_ids, softmax=True, temp=self.temp):
                 if not self.use_identity_kernel:
                     task.update_kernel(model, self.kernel_fn, self.eps)
                 task.update_mean(model)
@@ -231,9 +248,11 @@ class FROMP:
             for idx in indices:
                 task = observed_tasks[idx]
                 with customize_head(model, task.class_ids, softmax=True, temp=temp):
-                    total_penalty += task.get_penalty(model)
+                    total_penalty += task.get_penalty(model, self.n_memorable_points_sub)
 
-        return 0.5 * tau * total_penalty
+        temp_corr = temp**2 if self.use_temp_correction else 1.
+
+        return 0.5 * tau * temp_corr * total_penalty
 
 
 @torch.no_grad()
@@ -242,7 +261,8 @@ def collect_memorable_points(model,
                              n_memorable_points,
                              select_method="lambda_descend",
                              as_tensor=True,
-                             is_distributed=False):
+                             is_distributed=False,
+                             n_memorable_points_sub=None):
     device = next(model.parameters()).device
     dataset = data_loader.dataset
 
@@ -267,7 +287,10 @@ def collect_memorable_points(model,
     else:
         # create a DataLoader for memorable points
         memorable_points = Subset(dataset, memorable_points_indices)
-        batch_size = min(n_memorable_points, data_loader.batch_size)
+        if n_memorable_points_sub is not None:
+            batch_size = n_memorable_points_sub
+        else:
+            batch_size = min(n_memorable_points, data_loader.batch_size)
         return DataLoader(memorable_points,
                           batch_size=batch_size,
                           pin_memory=True,
@@ -349,8 +372,9 @@ def _compute_hessian_traces(model, data_loader, dataset, device):
 def customize_head(module: torch.nn.Module, class_ids: List[int] = None, softmax=False, temp=1.):
 
     def forward_hook(module, input, output):
+        output /= temp
         if class_ids is not None:
-            output = output[:, class_ids] / temp
+            output = output[:, class_ids]
         if softmax:
             return F.softmax(output, dim=1)
         else:
