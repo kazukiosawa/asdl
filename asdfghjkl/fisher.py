@@ -481,7 +481,7 @@ def _grads_scale(model, scale):
 
 def _register_fisher(model, fisher_type, scale=1., accumulate=False):
     """
-    module.fisher_{fisher_type} = op_results
+    module.{fisher_type} = op_results
     op_results = {
         'diag': {'weight': torch.Tensor, 'bias': torch.Tensor},
         'kron': {'A': torch.Tensor, 'B': torch.Tensor},
