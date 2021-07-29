@@ -591,7 +591,6 @@ def woodbury_ifvp(
         loss_fn,
         damping=1e-5,
         data_average=True,
-        fisher_shape=None,
 ):
     """
     Calculate inverse-empirical Fisher vector product by using the Woodbury matrix identity
