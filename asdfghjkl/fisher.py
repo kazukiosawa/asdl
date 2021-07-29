@@ -580,7 +580,7 @@ def _accumulate_fvp(module, src_attr, fisher_type, scale=1., accumulate=False):
 
 
 def _get_fvp_attr(fisher_type):
-    return f'{fisher_type}_vp'
+    return f'{fisher_type}.fvp'
 
 
 def woodbury_ifvp(
