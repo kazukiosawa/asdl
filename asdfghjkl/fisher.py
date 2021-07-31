@@ -6,7 +6,6 @@ import torch
 import torch.nn.functional as F
 from .core import extend
 from .utils import disable_param_grad
-from .gradient import data_loader_gradient
 from .operations import *
 from .symmatrix import SymMatrix, Kron, Diag, UnitWise
 from .matrices import *
