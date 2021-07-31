@@ -166,7 +166,7 @@ def _fisher_core(
     assert fisher_type in _supported_types, f'Invalid fisher type: {fisher_type}.'
     outputs = model(inputs)
 
-    def closure(loss_expr, grad_scale=None, scale=1., accumulate=False):
+    def closure(loss_expr, grad_scale=None, scale=1.):
         model.zero_grad(set_to_none=True)
         loss = loss_expr()
         with disable_param_grad(model):
@@ -180,7 +180,7 @@ def _fisher_core(
             _block_diag_covariance(model)
         if compute_block_diag_fvp:
             _block_diag_cvp(model, vec)
-        _register_fisher(model, fisher_type, base_scale * scale, accumulate)
+        _register_fisher(model, fisher_type, base_scale * scale)
 
     if fisher_type == FISHER_EXACT:
         if loss_type == _LOSS_CROSS_ENTROPY:
@@ -208,14 +208,13 @@ def _fisher_exact_cross_entropy(closure, logits):
     sqrt_probs = torch.sqrt(probs)
     for i in range(n_classes):
         closure(lambda: F.nll_loss(log_probs, _targets[i], reduction='sum'),
-                grad_scale=sqrt_probs[:, i],
-                accumulate=True)
+                grad_scale=sqrt_probs[:, i])
 
 
 def _fisher_exact_mse(closure, outputs):
     _, n_dims = outputs.shape
     for i in range(n_dims):
-        closure(lambda: outputs[:, i].sum(), accumulate=True)
+        closure(lambda: outputs[:, i].sum())
 
 
 def _fisher_mc_cross_entropy(closure, logits, n_mc_samples=1):
@@ -226,8 +225,7 @@ def _fisher_mc_cross_entropy(closure, logits, n_mc_samples=1):
         with torch.no_grad():
             targets = dist.sample()
         closure(lambda: F.nll_loss(log_probs, targets, reduction='sum'),
-                scale=1/n_mc_samples,
-                accumulate=True)
+                scale=1/n_mc_samples)
 
 
 def _fisher_mc_mse(closure, outputs, n_mc_samples=1, var=0.5):
@@ -235,7 +233,7 @@ def _fisher_mc_mse(closure, outputs, n_mc_samples=1, var=0.5):
     for i in range(n_mc_samples):
         with torch.no_grad():
             targets = dist.sample()
-        closure(lambda: 0.5 * (outputs - targets).norm(dim=1).sum(), accumulate=True)
+        closure(lambda: 0.5 * (outputs - targets).norm(dim=1).sum())
 
 
 def _fisher_emp_cross_entropy(closure, outputs, targets):
@@ -360,7 +358,7 @@ def _grads_scale(model, scale):
         operation.grads_scale = None
 
 
-def _register_fisher(model, fisher_type, scale=1., accumulate=False):
+def _register_fisher(model, fisher_type, scale=1.):
     """
     module.{fisher_type} = op_results
     op_results = {
@@ -397,20 +395,15 @@ def _register_fisher(model, fisher_type, scale=1., accumulate=False):
             kron=kron,
             diag=diag,
             unit=unit,
-            scale=scale,
-            accumulate=accumulate
+            scale=scale
         )
         # move block_diag fvp
-        _accumulate_fvp(
-            module, _CVP_BLOCK_DIAG, fisher_type, scale, accumulate
-        )
+        _accumulate_fvp(module, _CVP_BLOCK_DIAG, fisher_type, scale)
 
     # move full fisher
-    _accumulate_fisher(
-        model, _COV_FULL, fisher_type, scale=scale, accumulate=accumulate
-    )
+    _accumulate_fisher(model, _COV_FULL, fisher_type, scale)
     # move full fvp
-    _accumulate_fvp(model, _CVP_FULL, fisher_type, scale, accumulate)
+    _accumulate_fvp(model, _CVP_FULL, fisher_type, scale)
 
 
 def _accumulate_fisher(
@@ -420,8 +413,7 @@ def _accumulate_fisher(
     kron=None,
     diag=None,
     unit=None,
-    scale=1.,
-    accumulate=False
+    scale=1.
 ):
     data = getattr(module, data_src_attr, None)
     if all(v is None for v in [data, kron, diag, unit]):
@@ -430,7 +422,7 @@ def _accumulate_fisher(
     new_fisher = SymMatrix(data, kron, diag, unit, device=device)
     new_fisher.scaling(scale)
     dst_fisher = getattr(module, dst_attr, None)
-    if (dst_fisher is None) or (not accumulate):
+    if dst_fisher is None:
         setattr(module, dst_attr, new_fisher)
     else:
         # accumulate fisher
