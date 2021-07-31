@@ -147,15 +147,6 @@ def zero_fvp(module, fisher_types):
             delattr(module, attr)
 
 
-def _check_fisher_type_shape(fisher_type, fisher_shape):
-    assert fisher_type in _supported_types_for_eig, \
-        f'Invalid fisher_type: {fisher_type}. ' \
-        f'fisher_type must be in {_supported_types_for_eig}.'
-    assert fisher_shape in _supported_shapes_for_eig, \
-        f'Invalid fisher_shape: {fisher_shape}. ' \
-        f'fisher_shape must be in {_supported_shapes_for_eig}.'
-
-
 def fisher_eig(
         model,
         loss_type,
@@ -171,7 +162,6 @@ def fisher_eig(
         is_distributed=False,
         print_progress=False
 ):
-    _check_fisher_type_shape(fisher_type, fisher_shape)
 
     def fvp_fn(vec, x, y):
         return fvp(vec,
@@ -226,7 +216,6 @@ def fisher_free(
         random_seed=None,
         save_log=False
 ):
-    _check_fisher_type_shape(fisher_type, fisher_shape)
 
     def fvp_fn(vec, x, y):
         return fvp(vec,
