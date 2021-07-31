@@ -130,137 +130,16 @@ fisher_for_cross_entropy = partial(fisher, loss_type=_LOSS_CROSS_ENTROPY)
 fisher_for_mse = partial(fisher, loss_type=_LOSS_MSE)
 
 
-def zero_fisher(module, fisher_types):
-    for child in module.children():
-        zero_fisher(child, fisher_types)
-    for ftype in fisher_types:
-        if hasattr(module, ftype):
-            delattr(module, ftype)
-
-
-def zero_fvp(module, fisher_types):
-    for child in module.children():
-        zero_fvp(child, fisher_types)
-    for ftype in fisher_types:
-        attr = _get_fvp_attr(ftype)
-        if hasattr(module, attr):
-            delattr(module, attr)
-
-
-def fisher_eig(
-        model,
-        loss_type,
-        fisher_type,
-        fisher_shape,
-        data_loader=None,
-        inputs=None,
-        targets=None,
-        n_mc_samples=1,
-        top_n=1,
-        max_iters=100,
-        tol=1e-3,
-        is_distributed=False,
-        print_progress=False
-):
-
-    def fvp_fn(vec, x, y):
-        return fvp(vec,
-                   model,
-                   loss_type,
-                   fisher_type,
-                   fisher_shape,
-                   inputs=x,
-                   targets=y,
-                   n_mc_samples=n_mc_samples)
-
-    # for making MC samplings at each iteration deterministic
-    random_seed = torch.rand(1) * 100 if fisher_type == FISHER_MC else None
-
-    eigvals, eigvecs = power_method(fvp_fn,
-                                    model,
-                                    data_loader=data_loader,
-                                    inputs=inputs,
-                                    targets=targets,
-                                    top_n=top_n,
-                                    max_iters=max_iters,
-                                    tol=tol,
-                                    is_distributed=is_distributed,
-                                    print_progress=print_progress,
-                                    random_seed=random_seed
-                                    )
-
-    return eigvals, eigvecs
-
-
-fisher_eig_for_cross_entropy = partial(fisher_eig, loss_type=_LOSS_CROSS_ENTROPY)
-fisher_eig_for_mse = partial(fisher_eig, loss_type=_LOSS_MSE)
-
-
-def fisher_free(
-        model,
-        b,
-        loss_type,
-        fisher_type,
-        fisher_shape,
-        data_loader=None,
-        inputs=None,
-        targets=None,
-        init_x=None,
-        damping=1e-3,
-        n_mc_samples=1,
-        max_iters=None,
-        tol=1e-8,
-        preconditioner=None,
-        is_distributed=False,
-        print_progress=False,
-        random_seed=None,
-        save_log=False
-):
-
-    def fvp_fn(vec, x, y):
-        return fvp(vec,
-                   model,
-                   loss_type,
-                   fisher_type,
-                   fisher_shape,
-                   inputs=x,
-                   targets=y,
-                   n_mc_samples=n_mc_samples)
-
-    # for making MC samplings at each iteration deterministic
-    if fisher_type == FISHER_MC and random_seed is None:
-        random_seed = int(torch.rand(1) * 100)
-
-    return conjugate_gradient_method(fvp_fn,
-                                     b,
-                                     data_loader=data_loader,
-                                     inputs=inputs,
-                                     targets=targets,
-                                     init_x=init_x,
-                                     damping=damping,
-                                     max_iters=max_iters,
-                                     tol=tol,
-                                     preconditioner=preconditioner,
-                                     is_distributed=is_distributed,
-                                     print_progress=print_progress,
-                                     random_seed=random_seed,
-                                     save_log=save_log)
-
-
-fisher_free_for_cross_entropy = partial(fisher_free, loss_type=_LOSS_CROSS_ENTROPY)
-fisher_free_for_mse = partial(fisher_free, loss_type=_LOSS_MSE)
-
-
 def fvp(
-    vec,
-    model,
-    loss_type,
-    fisher_type,
-    fisher_shape,
-    inputs,
-    targets=None,
-    n_mc_samples=1,
-    var=0.5,
+        vec,
+        model,
+        loss_type,
+        fisher_type,
+        fisher_shape,
+        inputs,
+        targets=None,
+        n_mc_samples=1,
+        var=0.5,
 ):
     compute_full_fvp = compute_block_diag_fvp = False
     if fisher_shape == SHAPE_FULL:
@@ -299,6 +178,23 @@ def fvp(
 
 fvp_for_cross_entropy = partial(fvp, loss_type=_LOSS_CROSS_ENTROPY)
 fvp_for_mse = partial(fvp, loss_type=_LOSS_MSE)
+
+
+def zero_fisher(module, fisher_types):
+    for child in module.children():
+        zero_fisher(child, fisher_types)
+    for ftype in fisher_types:
+        if hasattr(module, ftype):
+            delattr(module, ftype)
+
+
+def zero_fvp(module, fisher_types):
+    for child in module.children():
+        zero_fvp(child, fisher_types)
+    for ftype in fisher_types:
+        attr = _get_fvp_attr(ftype)
+        if hasattr(module, attr):
+            delattr(module, attr)
 
 
 def _fisher_core(
@@ -653,3 +549,106 @@ def woodbury_ifvp(
 
     return (vec - torch.matmul(grads, b)) / damping  # (p,)
 
+
+def fisher_eig(
+        model,
+        loss_type,
+        fisher_type,
+        fisher_shape,
+        data_loader=None,
+        inputs=None,
+        targets=None,
+        n_mc_samples=1,
+        top_n=1,
+        max_iters=100,
+        tol=1e-3,
+        is_distributed=False,
+        print_progress=False
+):
+
+    def fvp_fn(vec, x, y):
+        return fvp(vec,
+                   model,
+                   loss_type,
+                   fisher_type,
+                   fisher_shape,
+                   inputs=x,
+                   targets=y,
+                   n_mc_samples=n_mc_samples)
+
+    # for making MC samplings at each iteration deterministic
+    random_seed = torch.rand(1) * 100 if fisher_type == FISHER_MC else None
+
+    eigvals, eigvecs = power_method(fvp_fn,
+                                    model,
+                                    data_loader=data_loader,
+                                    inputs=inputs,
+                                    targets=targets,
+                                    top_n=top_n,
+                                    max_iters=max_iters,
+                                    tol=tol,
+                                    is_distributed=is_distributed,
+                                    print_progress=print_progress,
+                                    random_seed=random_seed
+                                    )
+
+    return eigvals, eigvecs
+
+
+fisher_eig_for_cross_entropy = partial(fisher_eig, loss_type=_LOSS_CROSS_ENTROPY)
+fisher_eig_for_mse = partial(fisher_eig, loss_type=_LOSS_MSE)
+
+
+def fisher_free(
+        model,
+        b,
+        loss_type,
+        fisher_type,
+        fisher_shape,
+        data_loader=None,
+        inputs=None,
+        targets=None,
+        init_x=None,
+        damping=1e-3,
+        n_mc_samples=1,
+        max_iters=None,
+        tol=1e-8,
+        preconditioner=None,
+        is_distributed=False,
+        print_progress=False,
+        random_seed=None,
+        save_log=False
+):
+
+    def fvp_fn(vec, x, y):
+        return fvp(vec,
+                   model,
+                   loss_type,
+                   fisher_type,
+                   fisher_shape,
+                   inputs=x,
+                   targets=y,
+                   n_mc_samples=n_mc_samples)
+
+    # for making MC samplings at each iteration deterministic
+    if fisher_type == FISHER_MC and random_seed is None:
+        random_seed = int(torch.rand(1) * 100)
+
+    return conjugate_gradient_method(fvp_fn,
+                                     b,
+                                     data_loader=data_loader,
+                                     inputs=inputs,
+                                     targets=targets,
+                                     init_x=init_x,
+                                     damping=damping,
+                                     max_iters=max_iters,
+                                     tol=tol,
+                                     preconditioner=preconditioner,
+                                     is_distributed=is_distributed,
+                                     print_progress=print_progress,
+                                     random_seed=random_seed,
+                                     save_log=save_log)
+
+
+fisher_free_for_cross_entropy = partial(fisher_free, loss_type=_LOSS_CROSS_ENTROPY)
+fisher_free_for_mse = partial(fisher_free, loss_type=_LOSS_MSE)
