@@ -49,7 +49,7 @@ _supported_shapes_for_eig = [SHAPE_FULL, SHAPE_BLOCK_DIAG]
 def fisher(
     model,
     loss_type,
-    fisher_types,
+    fisher_type,
     fisher_shapes,
     inputs=None,
     targets=None,
@@ -63,30 +63,26 @@ def fisher(
     matrix_manager=None,
     data_average=True
 ):
-    if isinstance(fisher_types, str):
-        fisher_types = [fisher_types]
     if isinstance(fisher_shapes, str):
         fisher_shapes = [fisher_shapes]
     # remove duplicates
-    fisher_types = set(fisher_types)
     fisher_shapes = set(fisher_shapes)
-    for ftype in fisher_types:
-        assert ftype in _supported_types, \
-            f'Invalid fisher_type: {ftype}. ' \
-            f'fisher_type must be in {_supported_types}.'
+    assert fisher_type in _supported_types, \
+        f'Invalid fisher_type: {fisher_type}. ' \
+        f'fisher_type must be in {_supported_types}.'
     for fshape in fisher_shapes:
         assert fshape in _supported_shapes, \
             f'Invalid fisher_shape: {fshape}. ' \
             f'fisher_shape must be in {_supported_shapes}.'
 
-    zero_fisher(model, fisher_types)
+    zero_fisher(model, fisher_type)
 
     # setup operations for mammoth_utils.autograd.extend
     op_names = [_SHAPE_TO_OP[shape] for shape in fisher_shapes]
 
     # setup matrix manager as needed
     if matrix_manager is None:
-        matrix_manager = MatrixManager(model, fisher_types)
+        matrix_manager = MatrixManager(model, fisher_type)
 
     kwargs = dict(
         compute_full_fisher=SHAPE_FULL in fisher_shapes,
@@ -95,29 +91,28 @@ def fisher(
         var=var
     )
 
-    for ftype in fisher_types:
-        if data_loader is not None:
-            # accumulate fisher for an epoch
-            device = next(model.parameters()).device
-            if data_average:
-                kwargs['base_scale'] = 1 / len(data_loader.dataset)
-            for inputs, targets in data_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
-                with extend(model, op_names):
-                    _fisher_core(
-                        model, loss_type, ftype, inputs, targets, **kwargs
-                    )
-                if stats_name is not None:
-                    matrix_manager.accumulate_matrices(stats_name)
-        else:
-            # compute fisher for a single batch
-            assert inputs is not None
-            if data_average:
-                kwargs['base_scale'] = 1 / inputs.shape[0]
+    if data_loader is not None:
+        # accumulate fisher for an epoch
+        device = next(model.parameters()).device
+        if data_average:
+            kwargs['base_scale'] = 1 / len(data_loader.dataset)
+        for inputs, targets in data_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
             with extend(model, op_names):
                 _fisher_core(
-                    model, loss_type, ftype, inputs, targets, **kwargs
+                    model, loss_type, fisher_type, inputs, targets, **kwargs
                 )
+            if stats_name is not None:
+                matrix_manager.accumulate_matrices(stats_name)
+    else:
+        # compute fisher for a single batch
+        assert inputs is not None
+        if data_average:
+            kwargs['base_scale'] = 1 / inputs.shape[0]
+        with extend(model, op_names):
+            _fisher_core(
+                model, loss_type, fisher_type, inputs, targets, **kwargs
+            )
 
     # reduce matrices
     if is_distributed:
@@ -149,7 +144,7 @@ def fvp(
     else:
         raise ValueError(f'Invalid fisher_shape: {fisher_shape}.')
 
-    zero_fvp(model, [fisher_type])
+    zero_fvp(model, fisher_type)
 
     with extend(model, OP_BATCH_GRADS):
         _fisher_core(
@@ -180,21 +175,19 @@ fvp_for_cross_entropy = partial(fvp, loss_type=_LOSS_CROSS_ENTROPY)
 fvp_for_mse = partial(fvp, loss_type=_LOSS_MSE)
 
 
-def zero_fisher(module, fisher_types):
+def zero_fisher(module, fisher_type):
     for child in module.children():
-        zero_fisher(child, fisher_types)
-    for ftype in fisher_types:
-        if hasattr(module, ftype):
-            delattr(module, ftype)
+        zero_fisher(child, fisher_type)
+    if hasattr(module, fisher_type):
+        delattr(module, fisher_type)
 
 
-def zero_fvp(module, fisher_types):
+def zero_fvp(module, fisher_type):
     for child in module.children():
-        zero_fvp(child, fisher_types)
-    for ftype in fisher_types:
-        attr = _get_fvp_attr(ftype)
-        if hasattr(module, attr):
-            delattr(module, attr)
+        zero_fvp(child, fisher_type)
+    attr = _get_fvp_attr(fisher_type)
+    if hasattr(module, attr):
+        delattr(module, attr)
 
 
 def _fisher_core(
