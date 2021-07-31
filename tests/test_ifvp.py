@@ -4,7 +4,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from asdfghjkl import COV, SHAPE_FULL, SHAPE_BLOCK_DIAG
+from asdfghjkl import FISHER_EMP, SHAPE_FULL, SHAPE_BLOCK_DIAG
 from asdfghjkl import NaturalGradient, LayerWiseNaturalGradient, woodbury_ifvp
 
 
@@ -82,7 +82,7 @@ class TestIFVP(unittest.TestCase):
         damping = self.damping
 
         def _get_ng_by_precondition(ng_fn):
-            precond = ng_fn(model, fisher_type=COV, damping=damping)
+            precond = ng_fn(model, fisher_type=FISHER_EMP, damping=damping)
             precond.update_curvature(inputs, targets)
 
             model.zero_grad()

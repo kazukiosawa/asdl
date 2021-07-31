@@ -40,7 +40,7 @@ __all__ = [
     'woodbury_ifvp'
 ]
 
-_supported_types = [FISHER_EXACT, FISHER_MC, COV]
+_supported_types = [FISHER_EXACT, FISHER_MC, FISHER_EMP]
 _supported_types_for_eig = _supported_types
 _supported_shapes = [SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG]
 _supported_shapes_for_eig = [SHAPE_FULL, SHAPE_BLOCK_DIAG]
@@ -225,9 +225,9 @@ def _fisher_core(
     else:
         assert targets is not None, 'targets need to be specified.'
         if loss_type == _LOSS_CROSS_ENTROPY:
-            _cov_cross_entropy(closure, outputs, targets)
+            _fisher_emp_cross_entropy(closure, outputs, targets)
         else:
-            _cov_mse(closure, outputs, targets)
+            _fisher_emp_mse(closure, outputs, targets)
 
 
 def _fisher_exact_cross_entropy(closure, logits):
@@ -268,11 +268,11 @@ def _fisher_mc_mse(closure, outputs, n_mc_samples=1, var=0.5):
         closure(lambda: 0.5 * (outputs - targets).norm(dim=1).sum(), accumulate=True)
 
 
-def _cov_cross_entropy(closure, outputs, targets):
+def _fisher_emp_cross_entropy(closure, outputs, targets):
     closure(lambda: F.nll_loss(outputs, targets, reduction='sum'))
 
 
-def _cov_mse(closure, outputs, targets):
+def _fisher_emp_mse(closure, outputs, targets):
     closure(lambda: 0.5 * (outputs - targets).norm(dim=1).sum())
 
 

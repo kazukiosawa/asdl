@@ -9,7 +9,7 @@ from .symmatrix import SymMatrix
 HESSIAN = 'hessian'  # Hessian
 FISHER_EXACT = 'fisher_exact'  # exact Fisher
 FISHER_MC = 'fisher_mc'  # Fisher estimation by Monte-Carlo sampling
-COV = 'cov'  # no-centered covariance a.k.a. empirical Fisher
+FISHER_EMP = 'fisher_emp'  # no-centered covariance a.k.a. empirical Fisher
 
 SHAPE_FULL = 'full'  # full
 SHAPE_BLOCK_DIAG = 'block_diag'  # layer-wise block-diagonal
@@ -20,7 +20,7 @@ __all__ = [
     'MatrixManager',
     'FISHER_EXACT',
     'FISHER_MC',
-    'COV',
+    'FISHER_EMP',
     'HESSIAN',
     'SHAPE_FULL',
     'SHAPE_BLOCK_DIAG',
@@ -28,7 +28,7 @@ __all__ = [
     'SHAPE_DIAG'
 ]
 
-_supported_types = [HESSIAN, FISHER_EXACT, FISHER_MC, COV]
+_supported_types = [HESSIAN, FISHER_EXACT, FISHER_MC, FISHER_EMP]
 _supported_shapes = [SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG]
 
 _normalizations = (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d)

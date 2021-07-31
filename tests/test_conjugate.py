@@ -4,7 +4,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from asdfghjkl import FISHER_EXACT, FISHER_MC, COV
+from asdfghjkl import FISHER_EXACT, FISHER_MC, FISHER_EMP
 from asdfghjkl import SHAPE_FULL, SHAPE_BLOCK_DIAG
 from asdfghjkl import fisher_free_for_cross_entropy
 from asdfghjkl import NaturalGradient, LayerWiseNaturalGradient
@@ -138,7 +138,7 @@ class TestCG(unittest.TestCase):
             self._assert_almost_equal(ng, ng2)
 
         for ng_class in [NaturalGradient, LayerWiseNaturalGradient]:
-            for ftype in [FISHER_EXACT, FISHER_MC, COV]:
+            for ftype in [FISHER_EXACT, FISHER_MC, FISHER_EMP]:
                 _test(ng_class, ftype)
 
     def _assert_almost_equal(self, v1, v2):
