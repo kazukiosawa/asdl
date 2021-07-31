@@ -63,6 +63,7 @@ def fisher(
     all_reduce=False,
     is_master=True,
     matrix_manager=None,
+    data_average=True
 ):
     if isinstance(fisher_types, str):
         fisher_types = [fisher_types]
@@ -106,6 +107,8 @@ def fisher(
         if data_loader is not None:
             # accumulate fisher for an epoch
             device = next(model.parameters()).device
+            if data_average:
+                kwargs['base_scale'] = 1 / len(data_loader.dataset)
             for inputs, targets in data_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
                 with extend(model, op_names):
@@ -126,6 +129,8 @@ def fisher(
         else:
             # compute fisher for a single batch
             assert inputs is not None
+            if data_average:
+                kwargs['base_scale'] = 1 / inputs.shape[0]
             with extend(model, op_names):
                 _fisher_core(
                     model, loss_type, ftype, inputs, targets, **kwargs
@@ -336,7 +341,8 @@ def _fisher_core(
         compute_block_diag_fvp=False,
         vec=None,
         n_mc_samples=1,
-        var=0.5
+        var=0.5,
+        base_scale=1
 ):
     assert loss_type in [_LOSS_CROSS_ENTROPY, _LOSS_MSE], f'Invalid loss type: {loss_type}.'
     assert fisher_type in _supported_types, f'Invalid fisher type: {fisher_type}.'
@@ -356,7 +362,7 @@ def _fisher_core(
             _block_diag_covariance(model)
         if compute_block_diag_fvp:
             _block_diag_cvp(model, vec)
-        _register_fisher(model, fisher_type, scale, accumulate)
+        _register_fisher(model, fisher_type, base_scale * scale, accumulate)
 
     if fisher_type == FISHER_EXACT:
         if loss_type == _LOSS_CROSS_ENTROPY:
