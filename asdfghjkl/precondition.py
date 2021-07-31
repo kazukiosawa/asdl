@@ -9,38 +9,11 @@ _supported_modules = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d)
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 
 __all__ = [
-    'Precondition', 'NaturalGradient', 'LayerWiseNaturalGradient', 'KFAC',
-    'DiagNaturalGradient'
+    'NaturalGradient', 'LayerWiseNaturalGradient', 'KFAC', 'DiagNaturalGradient'
 ]
 
 
-class Precondition:
-    def __init__(self):
-        pass
-
-    def update_curvature(self, inputs=None, targets=None, data_loader=None):
-        raise NotImplementedError
-
-    def accumulate_curvature(self):
-        raise NotImplementedError
-
-    def finalize_accumulation(self):
-        raise NotImplementedError
-
-    def reduce_curvature(self):
-        raise NotImplementedError
-
-    def update_inv(self, damping=None):
-        raise NotImplementedError
-
-    def precondition(self):
-        raise NotImplementedError
-
-    def precondition_vector(self, vec):
-        raise NotImplementedError
-
-
-class NaturalGradient(Precondition):
+class NaturalGradient:
     def __init__(self,
                  model,
                  fisher_type=FISHER_EXACT,
