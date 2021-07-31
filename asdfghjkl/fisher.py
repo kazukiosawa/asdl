@@ -56,7 +56,6 @@ def fisher(
     targets=None,
     data_loader=None,
     stats_name=None,
-    compute_param_grad=False,
     n_mc_samples=1,
     var=0.5,
     is_distributed=False,
@@ -85,11 +84,6 @@ def fisher(
 
     # setup operations for mammoth_utils.autograd.extend
     op_names = [_SHAPE_TO_OP[shape] for shape in fisher_shapes]
-    if compute_param_grad:
-        assert COV in fisher_types, \
-            f'"{COV}" must be in fisher_types when compute_param_grad is True.'
-        if data_loader is not None:
-            op_names.append(OP_ACCUMULATE_GRADS)  # accumulate gradient
 
     # setup matrix manager as needed
     if matrix_manager is None:
@@ -98,7 +92,6 @@ def fisher(
     kwargs = dict(
         compute_full_fisher=SHAPE_FULL in fisher_shapes,
         compute_block_diag_fisher=SHAPE_BLOCK_DIAG in fisher_shapes,
-        compute_param_grad=compute_param_grad,
         n_mc_samples=n_mc_samples,
         var=var
     )
@@ -117,15 +110,6 @@ def fisher(
                     )
                 if stats_name is not None:
                     matrix_manager.accumulate_matrices(stats_name)
-            if compute_param_grad:
-                data_loader_gradient(
-                    model,
-                    data_loader,
-                    has_accumulated=True,
-                    is_distributed=is_distributed,
-                    all_reduce=all_reduce,
-                    is_master=is_master
-                )
         else:
             # compute fisher for a single batch
             assert inputs is not None
