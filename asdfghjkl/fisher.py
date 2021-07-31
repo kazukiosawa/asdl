@@ -59,7 +59,6 @@ def fisher(
     is_distributed=False,
     all_reduce=False,
     is_master=True,
-    matrix_manager=None,
     data_average=True,
     fvp=False
 ):
@@ -85,9 +84,8 @@ def fisher(
     # remove duplicates
     op_names = set(op_names)
 
-    # setup matrix manager as needed
-    if matrix_manager is None:
-        matrix_manager = MatrixManager(model, fisher_type)
+    # setup matrix manager
+    matrix_manager = MatrixManager(model, fisher_type)
 
     kwargs = dict(
         compute_full_fisher=SHAPE_FULL in fisher_shapes and not fvp,
