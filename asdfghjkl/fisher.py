@@ -41,9 +41,8 @@ __all__ = [
 ]
 
 _supported_types = [FISHER_EXACT, FISHER_MC, FISHER_EMP]
-_supported_types_for_eig = _supported_types
 _supported_shapes = [SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG]
-_supported_shapes_for_eig = [SHAPE_FULL, SHAPE_BLOCK_DIAG]
+_supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_BLOCK_DIAG]
 
 
 def fisher(
@@ -61,19 +60,25 @@ def fisher(
     all_reduce=False,
     is_master=True,
     matrix_manager=None,
-    data_average=True
+    data_average=True,
+    fvp=False
 ):
     if isinstance(fisher_shapes, str):
         fisher_shapes = [fisher_shapes]
     assert fisher_type in _supported_types, \
         f'Invalid fisher_type: {fisher_type}. ' \
         f'fisher_type must be in {_supported_types}.'
-    for fshape in fisher_shapes:
-        assert fshape in _supported_shapes, \
-            f'Invalid fisher_shape: {fshape}. ' \
-            f'fisher_shape must be in {_supported_shapes}.'
 
-    zero_fisher(model, fisher_type)
+    if not fvp:
+        zero_fisher(model, fisher_type)
+        shapes = _supported_shapes
+    else:
+        zero_fisher(model, fisher_type)
+        shapes = _supported_shapes_for_fvp
+    for fshape in fisher_shapes:
+        assert fshape in shapes, \
+            f'Invalid fisher_shape: {fshape}. ' \
+            f'fisher_shape must be in {shapes}.'
 
     # setup operations for extend
     op_names = [_SHAPE_TO_OP[shape] for shape in fisher_shapes]
@@ -85,8 +90,10 @@ def fisher(
         matrix_manager = MatrixManager(model, fisher_type)
 
     kwargs = dict(
-        compute_full_fisher=SHAPE_FULL in fisher_shapes,
-        compute_block_diag_fisher=SHAPE_BLOCK_DIAG in fisher_shapes,
+        compute_full_fisher=SHAPE_FULL in fisher_shapes and not fvp,
+        compute_block_diag_fisher=SHAPE_BLOCK_DIAG in fisher_shapes and not fvp,
+        compute_full_fvp=SHAPE_FULL in fisher_shapes and fvp,
+        compute_block_diag_fvp=SHAPE_BLOCK_DIAG in fisher_shapes and fvp,
         n_mc_samples=n_mc_samples,
         var=var
     )
@@ -115,7 +122,7 @@ def fisher(
             )
 
     # reduce matrices
-    if is_distributed:
+    if is_distributed and not fvp:
         matrix_manager.reduce_matrices(stats_name, is_master, all_reduce)
 
     return matrix_manager
@@ -123,43 +130,8 @@ def fisher(
 
 fisher_for_cross_entropy = partial(fisher, loss_type=_LOSS_CROSS_ENTROPY)
 fisher_for_mse = partial(fisher, loss_type=_LOSS_MSE)
-
-
-def fvp(
-        vec,
-        model,
-        loss_type,
-        fisher_type,
-        fisher_shapes,
-        inputs,
-        targets=None,
-        n_mc_samples=1,
-        var=0.5,
-):
-    if isinstance(fisher_shapes, str):
-        fisher_shapes = [fisher_shapes]
-    # remove duplicates
-    fisher_shapes = set(fisher_shapes)
-
-    zero_fvp(model, fisher_type)
-
-    with extend(model, OP_BATCH_GRADS):
-        _fisher_core(
-            model,
-            loss_type,
-            fisher_type,
-            inputs,
-            targets,
-            compute_full_fvp=SHAPE_FULL in fisher_shapes,
-            compute_block_diag_fvp=SHAPE_BLOCK_DIAG in fisher_shapes,
-            vec=vec,
-            n_mc_samples=n_mc_samples,
-            var=var
-        )
-
-
-fvp_for_cross_entropy = partial(fvp, loss_type=_LOSS_CROSS_ENTROPY)
-fvp_for_mse = partial(fvp, loss_type=_LOSS_MSE)
+fvp_for_cross_entropy = partial(fisher, loss_type=_LOSS_CROSS_ENTROPY, fvp=True)
+fvp_for_mse = partial(fisher, loss_type=_LOSS_MSE, fvp=True)
 
 
 def zero_fisher(module, fisher_type):
