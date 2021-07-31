@@ -130,19 +130,16 @@ def fvp(
         model,
         loss_type,
         fisher_type,
-        fisher_shape,
+        fisher_shapes,
         inputs,
         targets=None,
         n_mc_samples=1,
         var=0.5,
 ):
-    compute_full_fvp = compute_block_diag_fvp = False
-    if fisher_shape == SHAPE_FULL:
-        compute_full_fvp = True
-    elif fisher_shape == SHAPE_BLOCK_DIAG:
-        compute_block_diag_fvp = True
-    else:
-        raise ValueError(f'Invalid fisher_shape: {fisher_shape}.')
+    if isinstance(fisher_shapes, str):
+        fisher_shapes = [fisher_shapes]
+    # remove duplicates
+    fisher_shapes = set(fisher_shapes)
 
     zero_fvp(model, fisher_type)
 
@@ -153,22 +150,12 @@ def fvp(
             fisher_type,
             inputs,
             targets,
-            compute_full_fvp=compute_full_fvp,
-            compute_block_diag_fvp=compute_block_diag_fvp,
+            compute_full_fvp=SHAPE_FULL in fisher_shapes,
+            compute_block_diag_fvp=SHAPE_BLOCK_DIAG in fisher_shapes,
             vec=vec,
             n_mc_samples=n_mc_samples,
             var=var
         )
-
-    if fisher_shape == SHAPE_FULL:
-        return getattr(model, _get_fvp_attr(fisher_type))
-    else:
-        rst = []
-        for module in model.modules():
-            fvp = getattr(module, _get_fvp_attr(fisher_type), None)
-            if fvp is not None:
-                rst.extend(fvp)
-        return rst
 
 
 fvp_for_cross_entropy = partial(fvp, loss_type=_LOSS_CROSS_ENTROPY)
@@ -560,14 +547,23 @@ def fisher_eig(
 ):
 
     def fvp_fn(vec, x, y):
-        return fvp(vec,
-                   model,
-                   loss_type,
-                   fisher_type,
-                   fisher_shape,
-                   inputs=x,
-                   targets=y,
-                   n_mc_samples=n_mc_samples)
+        fvp(vec,
+            model,
+            loss_type,
+            fisher_type,
+            fisher_shape,
+            inputs=x,
+            targets=y,
+            n_mc_samples=n_mc_samples)
+        if fisher_shape == SHAPE_FULL:
+            return getattr(model, _get_fvp_attr(fisher_type))
+        else:
+            rst = []
+            for module in model.modules():
+                v = getattr(module, _get_fvp_attr(fisher_type), None)
+                if v is not None:
+                    rst.extend(v)
+            return rst
 
     # for making MC samplings at each iteration deterministic
     random_seed = torch.rand(1) * 100 if fisher_type == FISHER_MC else None
@@ -614,14 +610,23 @@ def fisher_free(
 ):
 
     def fvp_fn(vec, x, y):
-        return fvp(vec,
-                   model,
-                   loss_type,
-                   fisher_type,
-                   fisher_shape,
-                   inputs=x,
-                   targets=y,
-                   n_mc_samples=n_mc_samples)
+        fvp(vec,
+            model,
+            loss_type,
+            fisher_type,
+            fisher_shape,
+            inputs=x,
+            targets=y,
+            n_mc_samples=n_mc_samples)
+        if fisher_shape == SHAPE_FULL:
+            return getattr(model, _get_fvp_attr(fisher_type))
+        else:
+            rst = []
+            for module in model.modules():
+                v = getattr(module, _get_fvp_attr(fisher_type), None)
+                if v is not None:
+                    rst.extend(v)
+            return rst
 
     # for making MC samplings at each iteration deterministic
     if fisher_type == FISHER_MC and random_seed is None:
