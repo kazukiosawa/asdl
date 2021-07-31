@@ -65,8 +65,6 @@ def fisher(
 ):
     if isinstance(fisher_shapes, str):
         fisher_shapes = [fisher_shapes]
-    # remove duplicates
-    fisher_shapes = set(fisher_shapes)
     assert fisher_type in _supported_types, \
         f'Invalid fisher_type: {fisher_type}. ' \
         f'fisher_type must be in {_supported_types}.'
@@ -77,8 +75,10 @@ def fisher(
 
     zero_fisher(model, fisher_type)
 
-    # setup operations for mammoth_utils.autograd.extend
+    # setup operations for extend
     op_names = [_SHAPE_TO_OP[shape] for shape in fisher_shapes]
+    # remove duplicates
+    op_names = set(op_names)
 
     # setup matrix manager as needed
     if matrix_manager is None:
