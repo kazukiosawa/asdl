@@ -7,15 +7,12 @@ import torch.distributed as dist
 __all__ = [
     'power_method',
     'conjugate_gradient_method',
-    'mvp',
+    'reduce_params'
 ]
 
 
 def power_method(mvp_fn,
                  model,
-                 data_loader=None,
-                 inputs=None,
-                 targets=None,
                  top_n=1,
                  max_iters=100,
                  tol=1e-3,
@@ -35,15 +32,6 @@ def power_method(mvp_fn,
         if print_progress:
             print(message)
 
-    def _call_mvp(v):
-        return mvp(mvp_fn,
-                   v,
-                   data_loader=data_loader,
-                   inputs=inputs,
-                   targets=targets,
-                   random_seed=random_seed,
-                   is_distributed=is_distributed)
-
     eigvals = []
     eigvecs = []
     for i in range(top_n):
@@ -59,7 +47,7 @@ def power_method(mvp_fn,
         # power iteration
         for j in range(max_iters):
             vec = _orthnormal(vec, eigvecs)
-            Mv = _call_mvp(vec)
+            Mv = _mvp(mvp_fn, vec, random_seed=random_seed)
             eigval = _group_product(Mv, vec).item()
             if j > 0:
                 diff = abs(eigval - last_eigval) / (abs(last_eigval) + 1e-6)
@@ -79,15 +67,11 @@ def power_method(mvp_fn,
 
 def conjugate_gradient_method(mvp_fn,
                               b,
-                              data_loader=None,
-                              inputs=None,
-                              targets=None,
                               init_x=None,
                               damping=1e-3,
                               max_iters=None,
                               tol=1e-8,
                               preconditioner=None,
-                              is_distributed=False,
                               print_progress=False,
                               random_seed=None,
                               save_log=False):
@@ -101,14 +85,7 @@ def conjugate_gradient_method(mvp_fn,
         max_iters = n_dim
 
     def _call_mvp(v):
-        return mvp(mvp_fn,
-                   v,
-                   data_loader=data_loader,
-                   inputs=inputs,
-                   targets=targets,
-                   random_seed=random_seed,
-                   damping=damping,
-                   is_distributed=is_distributed)
+        return _mvp(mvp_fn, v, random_seed, damping)
 
     x = init_x
     if x is None:
@@ -157,58 +134,32 @@ def conjugate_gradient_method(mvp_fn,
         return x
 
 
-def mvp(mvp_fn,
-        vec,
-        data_loader=None,
-        inputs=None,
-        targets=None,
-        random_seed=None,
-        damping=None,
-        is_distributed=False):
-
+def _mvp(mvp_fn,
+         vec,
+         random_seed=None,
+         damping=None):
     if random_seed:
         # for matrices that are not deterministic (e.g., fisher_mc)
         torch.manual_seed(random_seed)
-
-    if data_loader is not None:
-        Mv = _data_loader_mvp(mvp_fn, vec, data_loader)
-    else:
-        assert inputs is not None
-        Mv = mvp_fn(vec, inputs, targets)
-
+    Mv = mvp_fn(vec)
     if damping:
         Mv = _group_add(Mv, vec, damping)
-
-    if is_distributed:
-        Mv = _all_reduce_params(Mv)
-
     return Mv
 
 
-def _data_loader_mvp(mvp_fn, vec, data_loader):
-    device = vec[0].device
-    Mv = None
-    for inputs, targets in data_loader:
-        inputs, targets = inputs.to(device), targets.to(device)
-        _Mv = mvp_fn(vec, inputs, targets)
-        if Mv is None:
-            Mv = _Mv
-        else:
-            Mv = [mv.add(_mv) for mv, _mv in zip(Mv, _Mv)]
-
-    Mv = [mv.div(len(data_loader)) for mv in Mv]
-
-    return Mv
-
-
-def _all_reduce_params(params):
-    world_size = dist.get_world_size()
+def reduce_params(params, is_master=True, all_reduce=False):
     # pack
     packed_tensor = _flatten_parameters(params)
-    # all-reduce
-    dist.all_reduce(packed_tensor)
-    # unpack
-    rst = _unflatten_like_parameters(packed_tensor.div(world_size), params)
+    if all_reduce:
+        # all-reduce
+        dist.all_reduce(packed_tensor)
+    else:
+        dist.reduce(packed_tensor, dst=0)
+    if all_reduce or is_master:
+        # unpack
+        rst = _unflatten_like_parameters(packed_tensor, params)
+    else:
+        rst = None
 
     dist.barrier()
 
