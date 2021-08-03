@@ -75,6 +75,8 @@ class _FisherBase(MatrixManager):
                          fvp=False,
                          vec=None,
                          data_average=True):
+        if isinstance(fisher_shapes, str):
+            fisher_shapes = [fisher_shapes]
         for fshape in fisher_shapes:
             if fvp:
                 assert fshape in _supported_shapes_for_fvp
