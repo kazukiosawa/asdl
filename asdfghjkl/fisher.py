@@ -29,10 +29,10 @@ _LOSS_MSE = 'mse'
 __all__ = [
     'fisher_for_cross_entropy',
     'fisher_for_mse',
-    'fisher_eig_for_cross_entropy',
-    'fisher_eig_for_mse',
     'fvp_for_cross_entropy',
     'fvp_for_mse',
+    'fisher_eig_for_cross_entropy',
+    'fisher_eig_for_mse',
     'fisher_free_for_cross_entropy',
     'fisher_free_for_mse',
     'woodbury_ifvp'
