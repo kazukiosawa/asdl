@@ -4,7 +4,7 @@ from .matrices import SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_DIAG, HESSIAN, MatrixM
 from .mvp import power_method, conjugate_gradient_method
 
 __all__ = [
-    'hessian_eigenvalues',
+    'hessian_eig',
     'hessian',
     'hessian_for_loss',
     'hessian_free'
@@ -12,7 +12,7 @@ __all__ = [
 _supported_shapes = [SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_DIAG]
 
 
-def hessian_eigenvalues(
+def hessian_eig(
     model,
     loss_fn,
     data_loader=None,
