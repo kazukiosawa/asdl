@@ -76,4 +76,4 @@ def jacobian(model, x):
         grads = [p.batch_grads for p in model.parameters() if p.requires_grad]
         grads = torch.hstack([g.view(n, -1) for g in grads])  # (n, p)
         rst.append(grads)
-    return torch.vstack(rst)  # (cn, p)
+    return torch.stack(rst).transpose(0, 1)  # (n, c, p)
