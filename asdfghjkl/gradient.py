@@ -13,7 +13,8 @@ def data_loader_gradient(
     has_accumulated=False,
     is_distributed=False,
     all_reduce=False,
-    is_master=True
+    is_master=True,
+    data_average=False
 ):
     if not has_accumulated:
         # accumulate gradient for an epoch
@@ -27,11 +28,11 @@ def data_loader_gradient(
                 loss.backward()
 
     # take average of accumulated gradient
-    n_batches = len(data_loader)
+    scale = 1 / len(data_loader.dataset) if data_average else 1
     for param in model.parameters():
         if param.grad is None:
             continue
-        param.grad = param.acc_grad.div(n_batches)
+        param.grad = param.acc_grad.mul(scale)
 
     # reduce gradient
     if is_distributed:
