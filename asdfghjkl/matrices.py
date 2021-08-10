@@ -73,7 +73,7 @@ class MatrixManager:
         assert stats_name in self._stats_names, f'stats {stats_name} does not exist.'
 
     def accumulate_matrices(
-        self, stats_name, scale=None, smoothing_weight=None
+        self, stats_name=None, scale=None, smoothing_weight=None
     ):
         """
         Accumulate the latest fisher values to acc_fisher.
