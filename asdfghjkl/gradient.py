@@ -1,9 +1,10 @@
+import torch
 import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from .core import extend
 from .operations import OP_ACCUMULATE_GRADS, OP_BATCH_GRADS
 
-__all__ = ['data_loader_gradient', 'batch_gradient']
+__all__ = ['data_loader_gradient', 'batch_gradient', 'jacobian']
 
 
 def data_loader_gradient(
@@ -61,3 +62,18 @@ def batch_gradient(model, loss_fn, inputs, targets):
         loss.backward()
     return f
 
+
+def jacobian(model, x):
+    f = model(x)
+    assert f.ndim == 2  # (n, c)
+    n, c = f.shape
+    rst = []
+    for i in range(c):
+        with extend(model, OP_BATCH_GRADS):
+            model.zero_grad()
+            loss = f[:, i].sum()
+            loss.backward()
+        grads = [p.batch_grads for p in model.parameters() if p.requires_grad]
+        grads = torch.hstack([g.view(n, -1) for g in grads])  # (n, p)
+        rst.append(grads)
+    return torch.vstack(rst)  # (cn, p)
