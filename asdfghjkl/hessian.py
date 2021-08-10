@@ -1,41 +1,139 @@
 import torch
 from .symmatrix import SymMatrix, Diag
 from .matrices import SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_DIAG, HESSIAN, MatrixManager
-from .mvp import power_method, conjugate_gradient_method
+from .mvp import power_method, conjugate_gradient_method, reduce_params
 
 __all__ = [
-    'hessian_eig',
     'hessian',
-    'hessian_for_loss',
+    'hvp',
+    'hessian_eig',
     'hessian_free'
 ]
 _supported_shapes = [SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_DIAG]
 
 
+class Hessian(MatrixManager):
+    def __init__(self, model):
+        super().__init__(model, HESSIAN)
+
+    def calculate_hessian(self,
+                          loss_fn,
+                          hessian_shapes,
+                          inputs=None,
+                          targets=None,
+                          data_loader=None,
+                          data_average=False):
+        model = self._model
+        device = next(model.parameters()).device
+        if data_loader is not None:
+            scale = 1 / len(data_loader.dataset) if data_average else 1
+            for inputs, targets in data_loader:
+                inputs, targets = inputs.to(device), targets.to(device)
+                _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets)
+                self.accumulate_matrices(scale=scale)
+        else:
+            assert inputs is not None and targets is not None
+            inputs, targets = inputs.to(device), targets.to(device)
+            _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets)
+            scale = 1 / inputs.shape[0] if data_average else 1
+            self.accumulate_matrices(scale=scale)
+
+
+def hessian(model,
+            loss_fn,
+            hessian_shapes,
+            inputs=None,
+            targets=None,
+            data_loader=None,
+            is_distributed=False,
+            all_reduce=False,
+            is_master=True,
+            data_average=False):
+    if isinstance(hessian_shapes, str):
+        hessian_shapes = [hessian_shapes]
+    # remove duplicates
+    hessian_shapes = set(hessian_shapes)
+    for hshape in hessian_shapes:
+        assert hshape in _supported_shapes, f'Invalid hessian_shape: {hshape}. hessian_shape must be in {_supported_shapes}.'
+
+    h = Hessian(model)
+    h.calculate_hessian(loss_fn,
+                        hessian_shapes,
+                        inputs=inputs,
+                        targets=targets,
+                        data_loader=data_loader,
+                        data_average=data_average)
+
+    if is_distributed:
+        h.reduce_matrices(is_master=is_master, all_reduce=all_reduce)
+
+
+def hvp(model,
+        loss_fn,
+        vec,
+        inputs=None,
+        targets=None,
+        data_loader=None,
+        is_distributed=False,
+        all_reduce=False,
+        is_master=True,
+        data_average=False):
+    device = next(model.parameters()).device
+    if data_loader is not None:
+        scale = 1 / len(data_loader.dataset) if data_average else 1
+        rst = None
+        for inputs, targets in data_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            new_rst = _hvp(model, loss_fn, inputs, targets, vec)
+            if rst is None:
+                rst = new_rst
+            else:
+                rst = [v1 + v2 for v1, v2 in zip(rst, new_rst)]
+    else:
+        assert inputs is not None and targets is not None
+        scale = 1 / inputs.shape[0] if data_average else 1
+        inputs, targets = inputs.to(device), targets.to(device)
+        rst = _hvp(model, loss_fn, inputs, targets, vec)
+
+    if is_distributed:
+        rst = reduce_params(rst, is_master, all_reduce)
+
+    return [v * scale for v in rst]
+
+
+def _hvp(model, loss_fn, inputs, targets, vec):
+    model.zero_grad()
+    loss = loss_fn(model(inputs), targets)
+    params = [p for p in model.parameters() if p.requires_grad]
+    grads = torch.autograd.grad(loss, inputs=params, create_graph=True)
+    return torch.autograd.grad(grads, inputs=params, grad_outputs=vec)
+
+
 def hessian_eig(
     model,
     loss_fn,
-    data_loader=None,
     inputs=None,
     targets=None,
+    data_loader=None,
     top_n=1,
     max_iters=100,
     tol=1e-3,
     is_distributed=False,
-    print_progress=False
+    print_progress=False,
+    data_average=False
 ):
-    def hvp_fn(vec, x, y):
-        model.zero_grad()
-        loss = loss_fn(model(x), y)
-        params = [p for p in model.parameters() if p.requires_grad]
-        grads = torch.autograd.grad(loss, inputs=params, create_graph=True)
-        return hvp(vec, grads, params)
+    def hvp_fn(vec):
+        return hvp(model,
+                   loss_fn,
+                   vec,
+                   inputs=inputs,
+                   targets=targets,
+                   data_loader=data_loader,
+                   data_average=data_average,
+                   is_distributed=is_distributed)
 
     eigvals, eigvecs = power_method(hvp_fn,
                                     model,
-                                    data_loader=data_loader,
-                                    inputs=inputs,
-                                    targets=targets,
                                     top_n=top_n,
                                     max_iters=max_iters,
                                     tol=tol,
@@ -58,73 +156,25 @@ def hessian_free(
         tol=1e-8,
         is_distributed=False,
         print_progress=False,
+        data_average=False
 ):
-    def hvp_fn(vec, x, y):
-        model.zero_grad()
-        loss = loss_fn(model(x), y)
-        params = [p for p in model.parameters() if p.requires_grad]
-        grads = torch.autograd.grad(loss, inputs=params, create_graph=True)
-        return hvp(vec, grads, params)
+    def hvp_fn(vec):
+        return hvp(model,
+                   loss_fn,
+                   vec,
+                   inputs=inputs,
+                   targets=targets,
+                   data_loader=data_loader,
+                   data_average=data_average,
+                   is_distributed=is_distributed)
 
     return conjugate_gradient_method(hvp_fn,
                                      b,
-                                     data_loader=data_loader,
-                                     inputs=inputs,
-                                     targets=targets,
                                      init_x=init_x,
                                      damping=damping,
                                      max_iters=max_iters,
                                      tol=tol,
-                                     is_distributed=is_distributed,
                                      print_progress=print_progress)
-
-
-def hvp(vec, grads, params):
-    Hv = torch.autograd.grad(grads, inputs=params, grad_outputs=vec)
-    return Hv
-
-
-def hessian_for_loss(
-    model,
-    loss_fn,
-    hessian_shapes,
-    inputs=None,
-    targets=None,
-    data_loader=None,
-    stats_name=None,
-    is_distributed=False,
-    all_reduce=False,
-    is_master=True,
-    matrix_manager=None,
-):
-    if isinstance(hessian_shapes, str):
-        hessian_shapes = [hessian_shapes]
-    # remove duplicates
-    hessian_shapes = set(hessian_shapes)
-    for hshape in hessian_shapes:
-        assert hshape in _supported_shapes, f'Invalid hessian_shape: {hshape}. hessian_shape must be in {_supported_shapes}.'
-
-    # setup matrix manager as needed
-    if matrix_manager is None:
-        matrix_manager = MatrixManager(model, HESSIAN)
-
-    if data_loader is not None:
-        device = next(model.parameters()).device
-        for inputs, targets in data_loader:
-            inputs, targets = inputs.to(device), targets.to(device)
-            _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets)
-        matrix_manager.accumulate_matrices(
-            stats_name, scale=1 / len(data_loader)
-        )
-    else:
-        assert inputs is not None and targets is not None
-        _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets)
-
-    # reduce matrices
-    if is_distributed:
-        matrix_manager.reduce_matrices(stats_name, is_master, all_reduce)
-
-    return matrix_manager
 
 
 def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
@@ -135,7 +185,7 @@ def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
 
     # full
     if SHAPE_FULL in hessian_shapes:
-        full_hess = hessian(loss, params)
+        full_hess = _hessian(loss, params)
         setattr(model, 'hessian', SymMatrix(data=full_hess, device=device))
     else:
         full_hess = None
@@ -154,7 +204,7 @@ def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
 
         # module hessian
         if full_hess is None:
-            m_hess = hessian(loss, params)
+            m_hess = _hessian(loss, params)
         else:
             m_numel = sum([p.numel() for p in params])
             m_hess = full_hess[idx:idx + m_numel, idx:idx + m_numel]
@@ -179,13 +229,13 @@ def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
                 _idx += b_numel
             diag = Diag(weight=w_hess, bias=b_hess, device=device)
             if hasattr(module, 'hessian'):
-                module.hessian.diag = diag
+                module._hessian.diag = diag
             else:
                 setattr(module, 'hessian', SymMatrix(diag=diag, device=device))
 
 
 # adopted from https://github.com/mariogeiger/hessian/blob/master/hessian/hessian.py
-def hessian(output, inputs, out=None, allow_unused=False, create_graph=False):
+def _hessian(output, inputs, out=None, allow_unused=False, create_graph=False):
     '''
     Compute the Hessian of `output` with respect to `inputs`
     hessian((x * y).sum(), [x, y])
