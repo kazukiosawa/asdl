@@ -50,8 +50,15 @@ class PastTask:
         self.kernel_inv = torch.linalg.inv(kernel).detach_()
 
     @torch.no_grad()
-    def update_mean(self, model):
-        self.mean = self._evaluate_mean(model)
+    def update_mean(self, model, n_batches=2):
+        if n_batches == 1:
+            self.mean = self._evaluate_mean(model)
+
+        else:
+            # Split forward passes into mini-batches to save memory
+            import numpy as np
+            mem_batch_indices = np.array_split(range(len(self.memorable_points)), n_batches)
+            self.mean = torch.cat([self._evaluate_mean(model, idx=idx) for idx in mem_batch_indices])
 
     def _evaluate_mean(self, model, n_memorable_points_sub=None, idx=None):
         means = []
@@ -70,15 +77,13 @@ class PastTask:
             else:
                 return model(memorable_points)
 
-    def get_penalty(self, model, n_memorable_points_sub=None):
+    def get_penalty(self, model, n_memorable_points_sub=None, idx=None):
         assert self.mean is not None
         kernel_inv = self.kernel_inv  # None or (nc, nc) or (c, n, n)
-        idx = None
-        if n_memorable_points_sub is not None:
-            import numpy as np
-            idx = np.random.permutation(range(len(self.memorable_points)))[:n_memorable_points_sub]
+        
         current_mean = self._evaluate_mean(model, n_memorable_points_sub, idx)  # (n, c)
-        if n_memorable_points_sub is not None:
+
+        if idx is not None:
             b = current_mean - self.mean[idx] # (n, c)
         else:
             b = current_mean - self.mean  # (n, c)
@@ -222,7 +227,7 @@ class FROMP:
                     task.update_kernel(model, self.kernel_fn, self.eps)
                 task.update_mean(model)
 
-    def get_penalty(self, tau=None, temp=None, max_tasks=None):
+    def get_penalty(self, tau=None, temp=None, max_tasks=None, mem_indices=None):
         assert self.is_ready, 'Functional regularization is not ready yet, ' \
                               'call FROMP.update_regularization_info(data_loader).'
         if tau is None:
@@ -248,7 +253,7 @@ class FROMP:
             for idx in indices:
                 task = observed_tasks[idx]
                 with customize_head(model, task.class_ids, softmax=True, temp=temp):
-                    total_penalty += task.get_penalty(model, self.n_memorable_points_sub)
+                    total_penalty += task.get_penalty(model, self.n_memorable_points_sub, mem_indices)
 
         temp_corr = temp**2 if self.use_temp_correction else 1.
 
@@ -275,7 +280,11 @@ def collect_memorable_points(model,
         'Invalid memorable points selection method.'
     memorable_points_kwargs = dict(model=model, data_loader=data_loader, dataset=dataset, device=device,
                                     n_memorable_points=n_memorable_points, select_method=select_method)
-    if 'global' in select_method:
+
+    if len(dataset) == n_memorable_points:
+        # Use ALL data points as memorable points
+        memorable_points_indices = range(n_memorable_points)
+    elif 'global' in select_method:
         memorable_points_indices = _collect_memorable_points(**memorable_points_kwargs)
     else:
         memorable_points_indices = _collect_memorable_points_class_balanced(**memorable_points_kwargs)
