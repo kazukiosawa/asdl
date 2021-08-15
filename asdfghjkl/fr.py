@@ -77,17 +77,18 @@ class PastTask:
             else:
                 return model(memorable_points)
 
-    def get_penalty(self, model, n_memorable_points_sub=None, idx=None):
+
+    def get_penalty(self, model, n_memorable_points_sub=None, idx=None, use_kprior_penalty=False):
         assert self.mean is not None
         kernel_inv = self.kernel_inv  # None or (nc, nc) or (c, n, n)
         
         current_mean = self._evaluate_mean(model, n_memorable_points_sub, idx)  # (n, c)
+        mean = self.mean[idx] if idx is not None else self.mean  # (n, c)
 
-        if idx is not None:
-            b = current_mean - self.mean[idx] # (n, c)
-        else:
-            b = current_mean - self.mean  # (n, c)
+        if use_kprior_penalty:
+            return F.cross_entropy(current_mean, mean)
 
+        b = current_mean - mean     # (n, c)
         if kernel_inv is None:
             # kernel_inv == identity matrix
             b = b.flatten()  # (nc,)
@@ -227,7 +228,7 @@ class FROMP:
                     task.update_kernel(model, self.kernel_fn, self.eps)
                 task.update_mean(model)
 
-    def get_penalty(self, tau=None, temp=None, max_tasks=None, mem_indices=None):
+    def get_penalty(self, tau=None, temp=None, max_tasks=None, mem_indices=None, use_kprior_penalty=False):
         assert self.is_ready, 'Functional regularization is not ready yet, ' \
                               'call FROMP.update_regularization_info(data_loader).'
         if tau is None:
@@ -253,7 +254,7 @@ class FROMP:
             for idx in indices:
                 task = observed_tasks[idx]
                 with customize_head(model, task.class_ids, softmax=True, temp=temp):
-                    total_penalty += task.get_penalty(model, self.n_memorable_points_sub, mem_indices)
+                    total_penalty += task.get_penalty(model, self.n_memorable_points_sub, mem_indices, use_kprior_penalty)
 
         temp_corr = temp**2 if self.use_temp_correction else 1.
 
