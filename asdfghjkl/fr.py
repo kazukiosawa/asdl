@@ -25,11 +25,12 @@ _kernel_fns = {'implicit': empirical_implicit_ntk, 'class_wise': empirical_class
 
 
 class PastTask:
-    def __init__(self, memorable_points, class_ids=None):
+    def __init__(self, memorable_points, class_ids=None, memorable_points_indices=None):
         self.memorable_points = memorable_points
         self.kernel_inv = None
         self.mean = None
         self.class_ids = class_ids
+        self.memorable_points_indices = memorable_points_indices
 
     def update_kernel(self, model, kernel_fn, eps=1e-5):
         memorable_points = self.memorable_points
@@ -50,21 +51,21 @@ class PastTask:
         self.kernel_inv = torch.linalg.inv(kernel).detach_()
 
     @torch.no_grad()
-    def update_mean(self, model, n_batches=2):
+    def update_mean(self, model, n_batches=4):
         if n_batches == 1:
-            self.mean = self._evaluate_mean(model)
+            self.mean = self._evaluate_mean(model).cpu()
 
         else:
             # Split forward passes into mini-batches to save memory
             import numpy as np
             mem_batch_indices = np.array_split(range(len(self.memorable_points)), n_batches)
-            self.mean = torch.cat([self._evaluate_mean(model, idx=idx) for idx in mem_batch_indices])
+            self.mean = torch.cat([self._evaluate_mean(model, idx=idx).cpu() for idx in mem_batch_indices])
 
     def _evaluate_mean(self, model, n_memorable_points_sub=None, idx=None):
         means = []
         memorable_points = self.memorable_points
+        device = next(model.parameters()).device
         if isinstance(memorable_points, DataLoader):
-            device = next(model.parameters()).device
             for i, (inputs, _) in enumerate(self.memorable_points):
                 if n_memorable_points_sub is not None and n_memorable_points_sub < (i+1) * inputs.shape[0]:
                     break
@@ -73,9 +74,9 @@ class PastTask:
             return torch.cat(means)  # (n, c)
         else:
             if idx is not None:
-                return model(memorable_points[idx, :])
+                return model(memorable_points[idx, :].to(device))
             else:
-                return model(memorable_points)
+                return model(memorable_points.to(device))
 
 
     def get_penalty(self, model, n_memorable_points_sub=None, idx=None, use_kprior_penalty=False):
@@ -84,6 +85,7 @@ class PastTask:
         
         current_mean = self._evaluate_mean(model, n_memorable_points_sub, idx)  # (n, c)
         mean = self.mean[idx] if idx is not None else self.mean  # (n, c)
+        mean = mean.to(current_mean.device)
 
         if use_kprior_penalty:
             return cross_entropy_with_probs(current_mean, mean)
@@ -271,7 +273,7 @@ class FROMP:
 
         # register the current task with the memorable points
         with customize_head(model, class_ids):
-            memorable_points = collect_memorable_points(model,
+            memorable_points, memorable_points_indices = collect_memorable_points(model,
                                                         data_loader,
                                                         self.n_memorable_points,
                                                         self.memory_select_method,
@@ -279,7 +281,7 @@ class FROMP:
                                                         is_distributed,
                                                         self.n_memorable_points_sub)
             
-        self.observed_tasks.append(PastTask(memorable_points, class_ids))
+        self.observed_tasks.append(PastTask(memorable_points, class_ids, memorable_points_indices))
 
         # update information (kernel & mean) for each observed task
         for task in self.observed_tasks:
@@ -342,7 +344,8 @@ def collect_memorable_points(model,
     memorable_points_kwargs = dict(model=model, data_loader=data_loader, dataset=dataset, device=device,
                                     n_memorable_points=n_memorable_points, select_method=select_method)
 
-    if len(dataset) == n_memorable_points:
+    n_task_data = len(dataset.get_task_targets()) if hasattr(dataset, 'task_indices') else len(dataset)
+    if n_task_data == n_memorable_points:
         # Use ALL data points as memorable points
         memorable_points_indices = range(n_memorable_points)
     elif 'global' in select_method:
@@ -352,8 +355,9 @@ def collect_memorable_points(model,
 
     if as_tensor:
         # create a Tensor for memorable points on model's device
-        memorable_points = [dataset[idx][0] for idx in memorable_points_indices]
-        return torch.stack(memorable_points).to(device)
+        idx_fun = lambda idx: dataset.task_indices[-1][idx] if hasattr(dataset, 'task_indices') else idx
+        memorable_points = [dataset[idx_fun(idx)][0] for idx in memorable_points_indices]
+        return torch.stack(memorable_points).to(device), memorable_points_indices
     else:
         # create a DataLoader for memorable points
         memorable_points = Subset(dataset, memorable_points_indices)
@@ -365,7 +369,7 @@ def collect_memorable_points(model,
                           batch_size=batch_size,
                           pin_memory=True,
                           drop_last=False,
-                          shuffle=False)
+                          shuffle=False), memorable_points_indices
 
 
 def _collect_memorable_points_class_balanced(model, data_loader, dataset, device, n_memorable_points, select_method):
@@ -374,6 +378,8 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
     # extract dataset targets
     if hasattr(dataset, 'targets'):
         targets = torch.tensor(dataset.targets)
+    elif hasattr(dataset, 'task_indices'):
+        targets = torch.tensor(dataset.get_task_targets())
     else:
         targets = torch.tensor([dataset[i][1] for i in range(len(dataset))])
 
