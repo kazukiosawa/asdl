@@ -356,7 +356,8 @@ def collect_memorable_points(model,
     if as_tensor:
         # create a Tensor for memorable points on model's device
         idx_fun = lambda idx: dataset.task_indices[-1][idx] if hasattr(dataset, 'task_indices') else idx
-        memorable_points = [dataset[idx_fun(idx)][0] for idx in memorable_points_indices]
+        memorable_points_indices = [idx_fun(idx) for idx in memorable_points_indices]
+        memorable_points = [dataset[idx][0] for idx in memorable_points_indices]
         return torch.stack(memorable_points).to(device), memorable_points_indices
     else:
         # create a DataLoader for memorable points
