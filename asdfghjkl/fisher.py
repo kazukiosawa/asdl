@@ -298,13 +298,16 @@ def _fisher_for_cross_entropy(
     n_mc_samples=1
 ):
     logits = model(inputs)
+    if logits.ndim > 2:
+        # reduce augmented dimension
+        logits = logits.mean(dim=1)
     log_probs = F.log_softmax(logits, dim=1)
     probs = None
 
     def loss_and_backward(target):
         model.zero_grad(set_to_none=True)
         loss = F.nll_loss(log_probs, target, reduction='sum')
-        loss.backward(retain_graph=True)
+        loss.backward(retain_graph=True, create_graph=True)
         if compute_full_fisher:
             _full_covariance(model)
         if compute_full_fvp:

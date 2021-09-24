@@ -17,12 +17,12 @@ def extend(model, op_names):
     handles = []
 
     def forward_hook(module, in_data, out_data):
-        in_data = in_data[0].clone().detach()
+        in_data = in_data[0].clone()#.detach()
         in_data = _preprocess_in_data(module, in_data, out_data)
         _call_operations_in_forward(module, in_data)
 
         def backward_hook(out_grads):
-            out_grads = out_grads.clone().detach()
+            out_grads = out_grads.clone()#.detach()
             out_grads = _preprocess_out_grads(module, out_grads)
             _call_operations_in_backward(module, in_data, out_grads)
 

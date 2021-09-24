@@ -55,10 +55,18 @@ class Operation:
                 #      -> n x (f_in + 1)
                 # conv2d: n x (c_in)(kernel_size) x out_size
                 #      -> n x {(c_in)(kernel_size) + 1} x out_size
+                if type(module) is torch.nn.Linear:
+                    expected_dim = 2
+                elif type(module) is torch.nn.Conv2d:
+                    expected_dim = 3
+                else:
+                    raise ValueError('Fix handling bias for', type(module))
+
                 shape = list(in_data.shape)
-                shape[1] = 1
+                const_dim = 1 if (in_data.ndim == expected_dim) else 2
+                shape[const_dim] = 1
                 ones = in_data.new_ones(shape)
-                in_data = torch.cat((in_data, ones), dim=1)
+                in_data = torch.cat((in_data, ones), dim=const_dim)
 
             op_results = self.get_op_results()
 
