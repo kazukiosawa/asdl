@@ -205,7 +205,8 @@ class FisherEmpCrossEntropy(_FisherBase):
         return FISHER_EMP
 
     def _fisher_core(self, closure, outputs, targets):
-        closure(lambda: F.nll_loss(outputs, targets, reduction='sum'))
+        log_probs = F.log_softmax(outputs, dim=1)
+        closure(lambda: F.nll_loss(log_probs, targets, reduction='sum'))
 
 
 class FisherExactMSE(_FisherBase):
