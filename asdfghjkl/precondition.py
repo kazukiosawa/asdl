@@ -66,7 +66,7 @@ class NaturalGradient:
                                        inputs=inputs,
                                        targets=targets,
                                        data_loader=data_loader,
-                                       fisher_types=self.fisher_type,
+                                       fisher_type=self.fisher_type,
                                        fisher_shapes=self.fisher_shape,
                                        n_mc_samples=self.n_mc_samples)
         self.fisher_manager = rst
