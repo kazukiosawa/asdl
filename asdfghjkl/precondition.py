@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from .matrices import FISHER_EXACT, SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG  # NOQA
+from .matrices import FISHER_EXACT, FISHER_MC, SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG  # NOQA
 from .fisher import fisher_for_cross_entropy
 from .utils import add_value_to_diagonal
 
@@ -62,13 +62,15 @@ class NaturalGradient:
             delattr(module, attr)
 
     def update_curvature(self, inputs=None, targets=None, data_loader=None):
+        kwargs = dict(fisher_type=self.fisher_type,
+                      fisher_shapes=self.fisher_shape)
+        if self.fisher_type == FISHER_MC:
+            kwargs['n_mc_samples'] = self.n_mc_samples
         rst = fisher_for_cross_entropy(self.model,
                                        inputs=inputs,
                                        targets=targets,
                                        data_loader=data_loader,
-                                       fisher_type=self.fisher_type,
-                                       fisher_shapes=self.fisher_shape,
-                                       n_mc_samples=self.n_mc_samples)
+                                       **kwargs)
         self.fisher_manager = rst
 
     def move_curvature(self, postfix, scale=1., to_pre_inv=False):
