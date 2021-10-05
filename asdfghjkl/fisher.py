@@ -96,10 +96,9 @@ class _FisherBase(MatrixManager):
         def closure(loss_expr, scale=1., grad_scale=None):
             model.zero_grad(set_to_none=True)
             loss = loss_expr()
-            with extend(model, op_names):
-                with _grads_scale(model, grad_scale):
-                    with disable_param_grad(model):
-                        loss.backward(retain_graph=True)
+            with _grads_scale(model, grad_scale):
+                with disable_param_grad(model):
+                    loss.backward(retain_graph=True)
             if SHAPE_FULL in fisher_shapes and not fvp:
                 _full_covariance(model)
             if SHAPE_FULL in fisher_shapes and fvp:
@@ -117,7 +116,8 @@ class _FisherBase(MatrixManager):
             # calculate fisher/fvp for the data_loader
             for inputs, targets in data_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
-                self._fisher_core(closure, model(inputs), targets)
+                with extend(model, op_names):
+                    self._fisher_core(closure, model(inputs), targets)
         else:
             # calculate fisher/fvp for a single batch
             assert inputs is not None
@@ -126,7 +126,8 @@ class _FisherBase(MatrixManager):
             inputs = inputs.to(device)
             if targets is not None:
                 targets = targets.to(device)
-            self._fisher_core(closure, model(inputs), targets)
+            with extend(model, op_names):
+                self._fisher_core(closure, model(inputs), targets)
 
     def _fisher_core(self, closure, outputs, targets):
         raise NotImplementedError
