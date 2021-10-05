@@ -163,6 +163,7 @@ class _FisherBase(MatrixManager):
 
 
 class FisherExactCrossEntropy(_FisherBase):
+    @property
     def fisher_type(self):
         return FISHER_EXACT
 
@@ -182,6 +183,7 @@ class FisherMCCrossEntropy(_FisherBase):
         super().__init__(model)
         self.n_mc_samples = n_mc_samples
 
+    @property
     def fisher_type(self):
         return FISHER_MC
 
@@ -197,6 +199,7 @@ class FisherMCCrossEntropy(_FisherBase):
 
 
 class FisherEmpCrossEntropy(_FisherBase):
+    @property
     def fisher_type(self):
         return FISHER_EMP
 
@@ -205,6 +208,7 @@ class FisherEmpCrossEntropy(_FisherBase):
 
 
 class FisherExactMSE(_FisherBase):
+    @property
     def fisher_type(self):
         return FISHER_EXACT
 
@@ -220,6 +224,7 @@ class FisherMCMSE(_FisherBase):
         self.n_mc_samples = n_mc_samples
         self.var = var
 
+    @property
     def fisher_type(self):
         return FISHER_MC
 
@@ -232,6 +237,7 @@ class FisherMCMSE(_FisherBase):
 
 
 class FisherEmpMSE(_FisherBase):
+    @property
     def fisher_type(self):
         return FISHER_EMP
 
