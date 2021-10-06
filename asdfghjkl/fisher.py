@@ -44,7 +44,7 @@ _supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_BLOCK_DIAG]
 
 
 class _FisherBase(MatrixManager):
-    def __init__(self, model):
+    def __init__(self, model, **kwargs):
         super().__init__(model, self.fisher_type)
 
     @property
