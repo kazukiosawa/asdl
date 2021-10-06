@@ -343,6 +343,6 @@ def _bias_requires_grad(module):
 
 
 def _cholesky_inv(X):
-    u = torch.cholesky(X)
+    u = torch.linalg.cholesky(X)
     return torch.cholesky_inverse(u)
 
