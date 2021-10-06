@@ -86,7 +86,7 @@ class NaturalGradient:
             if fisher_acc is None or replace:
                 self._set_fisher(module, fisher, postfix)
             else:
-                self._set_fisher(module, fisher_acc + fisher, postfix)
+                fisher_acc += fisher
             self._clear_fisher(module)
 
     def finalize_accumulation(self, postfix='acc'):
