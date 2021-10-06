@@ -122,6 +122,7 @@ class SymMatrix:
             self.diag.scaling(scale)
         if self.has_unit:
             self.unit.scaling(scale)
+        return self
 
     def eigenvalues(self):
         assert self.has_data
@@ -230,6 +231,7 @@ class Kron:
     def scaling(self, scale):
         self.A.mul_(scale)
         self.B.mul_(scale)
+        return self
 
     def eigenvalues(self):
         eig_A, _ = torch.symeig(self.A)
@@ -309,6 +311,7 @@ class Diag:
             self.weight.mul_(scale)
         if self.has_bias:
             self.bias.mul_(scale)
+        return self
 
     def eigenvalues(self):
         eig = []
@@ -381,6 +384,7 @@ class UnitWise:
     def scaling(self, scale):
         if self.has_data:
             self.data.mul_(scale)
+        return self
 
     def eigenvalues(self):
         assert self.has_data
