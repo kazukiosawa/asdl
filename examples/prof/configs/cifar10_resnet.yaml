@@ -1,0 +1,6 @@
+arch: CifarResNet
+arch_args:
+    num_classes: 10
+    num_blocks: [2, 2, 2]
+    width_scale: 1
+input_size: "3,32,32"
