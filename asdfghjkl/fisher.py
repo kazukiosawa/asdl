@@ -89,6 +89,8 @@ class _FisherBase(MatrixManager):
 
         # setup operations for extend
         op_names = [_SHAPE_TO_OP[shape] for shape in fisher_shapes]
+        # remove duplicates
+        op_names = set(op_names)
 
         model = self._model
         base_scale = 1.
