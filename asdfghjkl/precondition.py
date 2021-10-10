@@ -20,6 +20,7 @@ class NaturalGradient:
                  pre_inv_postfix=None,
                  n_mc_samples=1,
                  damping=1e-5,
+                 ema_decay=1.,
                  ):
         from torch.nn.parallel import DistributedDataParallel as DDP
         assert not isinstance(model, DDP), f'{DDP} is not supported.'
@@ -29,7 +30,8 @@ class NaturalGradient:
         self.fisher_type = fisher_type
         self.n_mc_samples = n_mc_samples
         self.damping = damping
-        super().__init__()
+        self.ema_decay = ema_decay
+        assert 0.0 < self.ema_decay and self.ema_decay <= 1.0
         self.fisher_shape = SHAPE_FULL
         self.fisher_manager = None
         self._pre_inv_postfix = pre_inv_postfix
@@ -66,15 +68,17 @@ class NaturalGradient:
                                        inputs=inputs,
                                        targets=targets,
                                        data_loader=data_loader,
-                                       fisher_types=self.fisher_type,
+                                       fisher_type=self.fisher_type,
                                        fisher_shapes=self.fisher_shape,
                                        n_mc_samples=self.n_mc_samples)
         self.fisher_manager = rst
 
-    def move_curvature(self, postfix, scale=1., to_pre_inv=False):
-        self.accumulate_curvature(postfix, scale, to_pre_inv, replace=True)
+    def move_curvature(self, postfix, scale=1., ema_decay=None, to_pre_inv=False):
+        self.accumulate_curvature(postfix, scale, ema_decay, to_pre_inv, replace=True)
 
-    def accumulate_curvature(self, postfix='acc', scale=1., to_pre_inv=False, replace=False):
+    def accumulate_curvature(self, postfix='acc', scale=1., ema_decay=None, to_pre_inv=False, replace=False):
+        if ema_decay is None:
+            ema_decay = self.ema_decay
         if to_pre_inv:
             postfix = self._pre_inv_postfix
         for module in self.modules:
@@ -83,10 +87,12 @@ class NaturalGradient:
                 continue
             fisher.scaling(scale)
             fisher_acc = self._get_fisher(module, postfix)
-            if fisher_acc is None or replace:
+            if fisher_acc is None or replace or ema_decay == 1.0:
                 self._set_fisher(module, fisher, postfix)
             else:
-                self._set_fisher(module, fisher_acc + fisher, postfix)
+                fisher.scaling(ema_decay)
+                fisher_acc.scaling(1.0 - ema_decay)
+                fisher_acc += fisher
             self._clear_fisher(module)
 
     def finalize_accumulation(self, postfix='acc'):
@@ -136,8 +142,9 @@ class LayerWiseNaturalGradient(NaturalGradient):
                  fisher_type=FISHER_EXACT,
                  pre_inv_postfix=None,
                  n_mc_samples=1,
-                 damping=1e-5):
-        super().__init__(model, fisher_type, pre_inv_postfix, n_mc_samples, damping)
+                 damping=1e-5,
+                 ema_decay=1.):
+        super().__init__(model, fisher_type, pre_inv_postfix, n_mc_samples, damping, ema_decay)
         self.fisher_shape = SHAPE_BLOCK_DIAG
         self.modules = [
             m for m in model.modules() if isinstance(m, _supported_modules)
@@ -168,8 +175,9 @@ class KFAC(NaturalGradient):
                  fisher_type=FISHER_EXACT,
                  pre_inv_postfix=None,
                  n_mc_samples=1,
-                 damping=1e-5):
-        super().__init__(model, fisher_type, pre_inv_postfix, n_mc_samples, damping)
+                 damping=1e-5,
+                 ema_decay=1.):
+        super().__init__(model, fisher_type, pre_inv_postfix, n_mc_samples, damping, ema_decay)
         self.fisher_shape = SHAPE_KRON
         self.modules = [
             m for m in model.modules() if isinstance(m, _supported_modules)
@@ -277,8 +285,9 @@ class DiagNaturalGradient(NaturalGradient):
                  fisher_type=FISHER_EXACT,
                  pre_inv_postfix=None,
                  n_mc_samples=1,
-                 damping=1e-5):
-        super().__init__(model, fisher_type, pre_inv_postfix, n_mc_samples, damping)
+                 damping=1e-5,
+                 ema_decay=1.):
+        super().__init__(model, fisher_type, pre_inv_postfix, n_mc_samples, damping, ema_decay)
         self.fisher_shape = SHAPE_DIAG
         self.modules = [
             m for m in model.modules() if isinstance(m, _supported_modules)
@@ -341,6 +350,5 @@ def _bias_requires_grad(module):
 
 
 def _cholesky_inv(X):
-    u = torch.cholesky(X)
+    u = torch.linalg.cholesky(X)
     return torch.cholesky_inverse(u)
-
