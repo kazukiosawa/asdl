@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from .matrices import FISHER_EXACT, FISHER_MC, SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG  # NOQA
+from .matrices import FISHER_EXACT, SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG  # NOQA
 from .fisher import fisher_for_cross_entropy
 from .utils import add_value_to_diagonal
 
