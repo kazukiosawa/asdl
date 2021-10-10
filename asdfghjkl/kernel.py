@@ -275,7 +275,7 @@ def empirical_direct_ntk(model, x1, x2=None):
         return torch.einsum('ncp,mdp->nmcd', j1, j2)  # n1 x n2 x c x c
 
 
-def empirical_implicit_ntk(model, x1, x2=None, precond: NaturalGradient= None):
+def empirical_implicit_ntk(model, x1, x2=None, precond: NaturalGradient = None):
     n1 = x1.shape[0]
     y1 = model(x1)
     n_classes = y1.shape[-1]

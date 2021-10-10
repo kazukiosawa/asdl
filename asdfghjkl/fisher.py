@@ -44,7 +44,7 @@ _supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_BLOCK_DIAG]
 
 
 class _FisherBase(MatrixManager):
-    def __init__(self, model):
+    def __init__(self, model, **kwargs):
         super().__init__(model, self.fisher_type)
 
     @property
@@ -167,13 +167,13 @@ class FisherExactCrossEntropy(_FisherBase):
         return FISHER_EXACT
 
     def _fisher_core(self, closure, outputs, unused):
-        probs = F.softmax(outputs)
-        log_probs = F.log_softmax(outputs)
+        probs = F.softmax(outputs, dim=1)
+        log_probs = F.log_softmax(outputs, dim=1)
         _, n_classes = probs.shape
         probs, _targets = torch.sort(probs, dim=1, descending=True)
         sqrt_probs = torch.sqrt(probs)
         for i in range(n_classes):
-            closure(lambda: F.nll_loss(log_probs, _targets[i], reduction='sum'),
+            closure(lambda: F.nll_loss(log_probs, _targets[:, i], reduction='sum'),
                     grad_scale=sqrt_probs[:, i])
 
 
@@ -187,14 +187,14 @@ class FisherMCCrossEntropy(_FisherBase):
         return FISHER_MC
 
     def _fisher_core(self, closure, outputs, unused):
-        probs = F.softmax(outputs)
-        log_probs = F.log_softmax(outputs)
+        probs = F.softmax(outputs, dim=1)
+        log_probs = F.log_softmax(outputs, dim=1)
         dist = torch.distributions.Categorical(probs)
         for i in range(self.n_mc_samples):
             with torch.no_grad():
                 targets = dist.sample()
-                closure(lambda: F.nll_loss(log_probs, targets, reduction='sum'),
-                        scale=1/self.n_mc_samples)
+            closure(lambda: F.nll_loss(log_probs, targets, reduction='sum'),
+                    scale=1/self.n_mc_samples)
 
 
 class FisherEmpCrossEntropy(_FisherBase):
@@ -203,7 +203,8 @@ class FisherEmpCrossEntropy(_FisherBase):
         return FISHER_EMP
 
     def _fisher_core(self, closure, outputs, targets):
-        closure(lambda: F.nll_loss(outputs, targets, reduction='sum'))
+        log_probs = F.log_softmax(outputs, dim=1)
+        closure(lambda: F.nll_loss(log_probs, targets, reduction='sum'))
 
 
 class FisherExactMSE(_FisherBase):
@@ -401,7 +402,7 @@ def _register_fisher(model, fisher_type, scale=1.):
         _accumulate_fvp(module, _CVP_BLOCK_DIAG, fisher_type, scale=scale)
 
     # move full fisher
-    _accumulate_fisher(model, _COV_FULL, fisher_type, scale=scale)
+    _accumulate_fisher(module=model, data_src_attr=_COV_FULL, dst_attr=fisher_type, scale=scale)
     # move full fvp
     _accumulate_fvp(model, _CVP_FULL, fisher_type, scale=scale)
 

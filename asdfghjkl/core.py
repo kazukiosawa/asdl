@@ -8,7 +8,7 @@ from .operations import OP_ACCUMULATE_GRADS, get_op_class
 
 @contextmanager
 def extend(model, op_names):
-    if not isinstance(op_names, (list, tuple)):
+    if not isinstance(op_names, (list, tuple, set)):
         op_names = [op_names]
     accumulate_grads = False
     if OP_ACCUMULATE_GRADS in op_names:

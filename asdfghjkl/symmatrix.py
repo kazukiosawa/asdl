@@ -113,6 +113,21 @@ class SymMatrix:
             unit = self.unit + other.unit
         return SymMatrix(data, kron, diag, unit, device=self.device)
 
+    def __iadd__(self, other):
+        if self.has_data:
+            assert other.has_data
+            self.data.add_(other.data)
+        if self.has_kron:
+            assert other.has_kron
+            self.kron += other.kron
+        if self.has_diag:
+            assert other.has_diag
+            self.diag += other.diag
+        if self.has_unit:
+            assert other.has_unit
+            self.unit += other.unit
+        return self
+
     def scaling(self, scale):
         if self.has_data:
             self.data.mul_(scale)
@@ -122,6 +137,7 @@ class SymMatrix:
             self.diag.scaling(scale)
         if self.has_unit:
             self.unit.scaling(scale)
+        return self
 
     def eigenvalues(self):
         assert self.has_data
@@ -223,6 +239,11 @@ class Kron:
             A=self.A.add(other.A), B=self.B.add(other.B), device=self.device
         )
 
+    def __iadd__(self, other):
+        self.A.add_(other.A)
+        self.B.add_(other.B)
+        return self
+
     @property
     def data(self):
         return [self.A, self.B]
@@ -230,6 +251,7 @@ class Kron:
     def scaling(self, scale):
         self.A.mul_(scale)
         self.B.mul_(scale)
+        return self
 
     def eigenvalues(self):
         eig_A, _ = torch.symeig(self.A)
@@ -292,6 +314,15 @@ class Diag:
             bias = self.bias.add(other.bias)
         return Diag(weight=weight, bias=bias, device=self.device)
 
+    def __iadd__(self, other):
+        if self.has_weight:
+            assert other.has_weight
+            self.weight.add_(other.weight)
+        if self.has_bias:
+            assert other.has_bias
+            self.bias.add_(other.bias)
+        return self
+
     @property
     def data(self):
         return [d for d in [self.weight, self.bias] if d is not None]
@@ -309,6 +340,7 @@ class Diag:
             self.weight.mul_(scale)
         if self.has_bias:
             self.bias.mul_(scale)
+        return self
 
     def eigenvalues(self):
         eig = []
@@ -374,6 +406,13 @@ class UnitWise:
             data = self.data.add(other.data)
         return UnitWise(data=data, device=self.device)
 
+    def __iadd__(self, other):
+        data = None
+        if self.has_data:
+            assert other.has_data
+            self.data.add_(other.data)
+        return self
+
     @property
     def has_data(self):
         return self.data is not None
@@ -381,6 +420,7 @@ class UnitWise:
     def scaling(self, scale):
         if self.has_data:
             self.data.mul_(scale)
+        return self
 
     def eigenvalues(self):
         assert self.has_data
