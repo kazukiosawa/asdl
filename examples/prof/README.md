@@ -47,3 +47,9 @@ The GPU spends most of its time (24.7+16.4=41.1%) on executing the `im2col_kerne
 
 ![image](https://user-images.githubusercontent.com/7961228/136691260-55ec0e9a-2585-41a2-a5c1-b982ec5484d9.png)
  
+
+## (Extra) Improve the GPU utilization
+
+The GPU utilization can easily be improved by increasing the batch size (e.g., from 32 to 1024).
+
+![image](https://user-images.githubusercontent.com/7961228/136691455-7cc9a6c5-84a9-4e66-aa22-75edeb50493f.png)
