@@ -401,12 +401,12 @@ def _register_fisher(model, fisher_type, scale=1.):
             scale=scale
         )
         # move block_diag fvp
-        _accumulate_fvp(module, _CVP_BLOCK_DIAG, fisher_type, scale=scale)
+        _accumulate_fvp(module, _CVP_BLOCK_DIAG, fisher_type, scale)
 
     # move full fisher
-    _accumulate_fisher(module=model, data_src_attr=_COV_FULL, dst_attr=fisher_type, scale=scale)
+    _accumulate_fisher(model, _COV_FULL, fisher_type, scale=scale)
     # move full fvp
-    _accumulate_fvp(model, _CVP_FULL, fisher_type, scale=scale)
+    _accumulate_fvp(model, _CVP_FULL, fisher_type, scale)
 
 
 def _accumulate_fisher(
