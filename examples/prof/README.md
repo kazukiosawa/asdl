@@ -59,3 +59,8 @@ Now the `im2col_kernel` is no longer called and the `sgemm_32x32x32_NT_vec` kern
 The total time for one `KFAC` step looks much better!
 
 ![image](https://user-images.githubusercontent.com/7961228/136821475-4a7577c4-7668-48eb-8d41-ecb6a3973a4d.png)
+
+(Extra) the same execution at NVIDIA Tesla V100
+
+![image](https://user-images.githubusercontent.com/7961228/136837956-a67929b2-2688-48f4-953d-acf233c4cca5.png)
+
