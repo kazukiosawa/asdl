@@ -12,8 +12,8 @@ def extend(model, op_names):
         op_names = list(op_names)
     elif isinstance(op_names, str):
         op_names = [op_names]
-    else:
-        raise TypeError
+    elif not isinstance(op_names, list):
+        raise TypeError(f'Invalid type of op_names: {type(op_names)}')
     accumulate_grads = False
     if OP_ACCUMULATE_GRADS in op_names:
         accumulate_grads = True
