@@ -33,10 +33,9 @@ class Conv2d(Operation):
 
     @staticmethod
     def cov_diag_weight(module, in_data, out_grads):
-        grads = torch.bmm(
-            out_grads, in_data.transpose(2, 1)
-        )  # n x c_out x (c_in)(kernel_size)
-        rst = grads.mul(grads).sum(dim=0)  # c_out x (c_in)(kernel_size)
+        in_in = torch.square(in_data).transpose(0, 1).flatten(start_dim=1)  # (c_in)(kernel_size) x n(out_size)
+        grad_grad = torch.square(out_grads).transpose(0, 1).flatten(start_dim=1)  # c_out x n(out_size)
+        rst = torch.matmul(grad_grad, in_in.T)  # c_out x (c_in)(kernel_size)
         return rst.view_as(module.weight)  # c_out x c_in x k_h x k_w
 
     @staticmethod
