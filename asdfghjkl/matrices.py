@@ -13,6 +13,7 @@ FISHER_EMP = 'fisher_emp'  # no-centered covariance a.k.a. empirical Fisher
 
 SHAPE_FULL = 'full'  # full
 SHAPE_BLOCK_DIAG = 'block_diag'  # layer-wise block-diagonal
+SHAPE_UNITWISE_BLOCK_DIAG = 'unitwise_block_diag' # unit-wise block-diagonal
 SHAPE_KRON = 'kron'  # Kronecker-factored
 SHAPE_DIAG = 'diag'  # diagonal
 
@@ -24,6 +25,7 @@ __all__ = [
     'HESSIAN',
     'SHAPE_FULL',
     'SHAPE_BLOCK_DIAG',
+    'SHAPE_UNITWISE_BLOCK_DIAG',
     'SHAPE_KRON',
     'SHAPE_DIAG'
 ]

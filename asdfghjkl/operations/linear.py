@@ -45,6 +45,16 @@ class Linear(Operation):
         return torch.matmul(out_grads.T, out_grads)  # f_out x f_out
 
     @staticmethod
+    def cov_unit_wise(module, in_data, out_grads):
+        if module.bias is not None:
+            in_data = torch.cat([in_data, torch.ones(in_data.size(0), 1)], 1)
+        f_in = in_data.size(1)
+        f_out = out_grads.size(1)
+        in_in = torch.matmul(in_data.T, in_data)  # f_in x f_in
+        grad_grad = out_grads.mul(out_grads).sum(dim=0)  # f_out
+        return torch.einsum('i, jk -> ijk', grad_grad, in_in).to(in_data.device)
+
+    @staticmethod
     def gram_A(module, in_data1, in_data2):
         return torch.matmul(in_data1, in_data2.T)  # n x n
 
