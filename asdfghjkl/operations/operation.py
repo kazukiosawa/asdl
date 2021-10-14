@@ -63,20 +63,23 @@ class Operation:
     def grads_scale(self, value):
         self._grads_scale = value
 
+    def extend_input(self, in_data):
+        # Extend in_data with ones.
+        # linear: n x f_in
+        #      -> n x (f_in + 1)
+        # conv2d: n x (c_in)(kernel_size) x out_size
+        #      -> n x {(c_in)(kernel_size) + 1} x out_size
+        shape = list(in_data.shape)
+        shape[1] = 1
+        ones = in_data.new_ones(shape)
+        return torch.cat((in_data, ones), dim=1)
+
     def forward_post_process(self, in_data: torch.Tensor):
         module = self._module
 
         if OP_COV_KRON in self._op_names or OP_GRAM_HADAMARD in self._op_names:
             if original_requires_grad(module, 'bias'):
-                # Extend in_data with ones.
-                # linear: n x f_in
-                #      -> n x (f_in + 1)
-                # conv2d: n x (c_in)(kernel_size) x out_size
-                #      -> n x {(c_in)(kernel_size) + 1} x out_size
-                shape = list(in_data.shape)
-                shape[1] = 1
-                ones = in_data.new_ones(shape)
-                in_data = torch.cat((in_data, ones), dim=1)
+                in_data = self.extend_input(in_data)
 
             if OP_COV_KRON in self._op_names:
                 A = self.cov_kron_A(module, in_data)
@@ -111,6 +114,7 @@ class Operation:
             elif op_name == OP_COV_UNIT_WISE:
                 assert original_requires_grad(module, 'weight')
                 assert original_requires_grad(module, 'bias')
+                in_data = self.extend_input(in_data)
                 rst = self.cov_unit_wise(module, in_data, out_grads)
                 self._set_result(OP_COV_UNIT_WISE, rst)
 
