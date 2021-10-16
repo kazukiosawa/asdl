@@ -15,7 +15,8 @@ __all__ = [
     'im2col_2d',
     'im2col_2d_slow',
     'add_value_to_diagonal',
-    'nvtx_range'
+    'nvtx_range',
+    'cholesky_inv'
 ]
 
 
@@ -96,3 +97,8 @@ def nvtx_range(msg):
         yield
     finally:
         nvtx.range_pop()
+
+
+def cholesky_inv(X):
+    u = torch.linalg.cholesky(X)
+    return torch.cholesky_inverse(u)

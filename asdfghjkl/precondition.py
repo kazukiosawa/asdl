@@ -3,7 +3,6 @@ from torch import nn
 
 from .matrices import FISHER_EXACT, SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG  # NOQA
 from .fisher import fisher_for_cross_entropy
-from .utils import add_value_to_diagonal
 
 _supported_modules = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d)
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
@@ -84,13 +83,11 @@ class NaturalGradient:
     def update_inv(self, damping=None):
         if damping is None:
             damping = self.damping
-
         for module in self.modules:
             fisher = self._get_pre_inv_fisher(module)
             if fisher is None:
                 continue
-            inv = _cholesky_inv(add_value_to_diagonal(fisher.data, damping))
-            setattr(fisher, 'inv', inv)
+            fisher.update_inv(damping)
 
     def precondition(self):
         grads = []
@@ -158,34 +155,6 @@ class KFAC(NaturalGradient):
         self.modules = [
             m for m in model.modules() if isinstance(m, _supported_modules)
         ]
-
-    def update_inv(self, damping=None):
-        if damping is None:
-            damping = self.damping
-
-        for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
-            if fisher is None:
-                continue
-            if isinstance(module, _normalizations):
-                unit = fisher.unit.data
-                f = unit.shape[0]
-                dmp = torch.eye(2, device=unit.device, dtype=unit.dtype).repeat(f, 1, 1) * damping
-                inv = torch.inverse(fisher.unit.data + dmp)
-                setattr(fisher.unit, 'inv', inv)
-            else:
-                A = fisher.kron.A
-                B = fisher.kron.B
-                A_eig_mean = A.trace() / A.shape[0]
-                B_eig_mean = B.trace() / B.shape[0]
-                pi = torch.sqrt(A_eig_mean / B_eig_mean)
-                r = damping**0.5
-
-                A_inv = _cholesky_inv(add_value_to_diagonal(A, r * pi))
-                B_inv = _cholesky_inv(add_value_to_diagonal(B, r / pi))
-
-                setattr(fisher.kron, 'A_inv', A_inv)
-                setattr(fisher.kron, 'B_inv', B_inv)
 
     def precondition(self):
         for module in self.modules:
@@ -269,21 +238,6 @@ class DiagNaturalGradient(NaturalGradient):
             m for m in model.modules() if isinstance(m, _supported_modules)
         ]
 
-    def update_inv(self, damping=None):
-        if damping is None:
-            damping = self.damping
-
-        for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
-            if fisher is None:
-                continue
-            elif isinstance(module, _supported_modules):
-                diag_w = fisher.diag.weight
-                setattr(fisher.diag, 'weight_inv', 1 / (diag_w + damping))
-                if _bias_requires_grad(module):
-                    diag_b = fisher.diag.bias
-                    setattr(fisher.diag, 'bias_inv', 1 / (diag_b + damping))
-
     def precondition(self):
         for module in self.modules:
             fisher = self._get_pre_inv_fisher(module)
@@ -325,6 +279,3 @@ def _bias_requires_grad(module):
            and module.bias.requires_grad
 
 
-def _cholesky_inv(X):
-    u = torch.linalg.cholesky(X)
-    return torch.cholesky_inverse(u)

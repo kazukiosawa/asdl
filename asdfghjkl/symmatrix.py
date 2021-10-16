@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import torch
+from .utils import add_value_to_diagonal, cholesky_inv
 
 __all__ = [
     'matrix_to_tril',
@@ -11,6 +12,8 @@ __all__ = [
     'Diag',
     'UnitWise'
 ]
+
+_default_damping = 1e-5
 
 
 def matrix_to_tril(mat: torch.Tensor):
@@ -77,6 +80,7 @@ class SymMatrix:
         self.kron = kron
         self.diag = diag
         self.unit = unit
+        self.inv = None
 
     @property
     def has_data(self):
@@ -233,11 +237,23 @@ class SymMatrix:
 
         return pointer
 
+    def update_inv(self, damping=_default_damping):
+        if self.has_data:
+            self.inv = cholesky_inv(add_value_to_diagonal(self.data, damping))
+        if self.has_kron:
+            self.kron.update_inv(damping)
+        if self.has_diag:
+            self.diag.update_inv(damping)
+        if self.has_unit:
+            self.unit.update_inv(damping)
+
 
 class Kron:
     def __init__(self, A, B):
         self.A = A
         self.B = B
+        self.A_inv = None
+        self.B_inv = None
 
     def __add__(self, other):
         return Kron(A=self.A.add(other.A), B=self.B.add(other.B))
@@ -249,6 +265,10 @@ class Kron:
     @property
     def data(self):
         return [self.A, self.B]
+
+    @property
+    def has_data(self):
+        return self.A is not None and self.B is not None
 
     def scaling(self, scale):
         self.A.mul_(scale)
@@ -299,11 +319,25 @@ class Kron:
         pointer = unflatten(self.B, pointer)
         return pointer
 
+    def update_inv(self, damping=_default_damping):
+        assert self.has_data
+        A = self.A
+        B = self.B
+        A_eig_mean = A.trace() / A.shape[0]
+        B_eig_mean = B.trace() / B.shape[0]
+        pi = torch.sqrt(A_eig_mean / B_eig_mean)
+        r = damping**0.5
+
+        self.A_inv = cholesky_inv(add_value_to_diagonal(A, r * pi))
+        self.B_inv = cholesky_inv(add_value_to_diagonal(B, r / pi))
+
 
 class Diag:
     def __init__(self, weight=None, bias=None):
         self.weight = weight
         self.bias = bias
+        self.weight_inv = None
+        self.bias_inv = None
 
     def __add__(self, other):
         if self.has_weight:
@@ -396,10 +430,17 @@ class Diag:
             pointer = unflatten(self.bias, pointer)
         return pointer
 
+    def update_inv(self, damping=_default_damping):
+        if self.has_weight:
+            self.weight_inv = 1 / (self.weight + damping)
+        if self.has_bias:
+            self.bias_inv = 1 / (self.bias + damping)
+
 
 class UnitWise:
     def __init__(self, data=None):
         self.data = data
+        self.inv = None
 
     def __add__(self, other):
         if self.has_data:
@@ -451,3 +492,10 @@ class UnitWise:
         if self.has_data:
             pointer = unflatten(self.data, pointer)
         return pointer
+
+    def update_inv(self, damping=_default_damping):
+        assert self.has_data
+        data = self.data
+        f = data.shape[0]
+        dmp = torch.eye(2, device=data.device, dtype=data.dtype).repeat(f, 1, 1) * damping
+        self.inv = torch.inverse(data + dmp)
