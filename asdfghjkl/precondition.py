@@ -52,7 +52,7 @@ class NaturalGradient:
         if ema_decay is None:
             ema_decay = self.ema_decay
         if ema_decay is not None and ema_decay < 1:
-            assert accumulate, 'ema_decay is not supported be set when accumulate=False.'
+            assert accumulate, 'ema_decay cannot be < 1 when accumulate=False.'
             scale *= ema_decay
             for module in self.modules:
                 self._scale_fisher(module, 1 - ema_decay)
