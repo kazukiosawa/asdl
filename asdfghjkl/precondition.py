@@ -46,6 +46,11 @@ class NaturalGradient:
         fisher = getattr(module, attr, None)
         return fisher
 
+    def _scale_fisher(self, module, scale):
+        fisher = self._get_fisher(module)
+        if fisher is not None:
+            fisher.scaling(scale)
+
     @property
     def _pre_inv_attr(self):
         return self._get_fisher_attr(self._pre_inv_postfix)
@@ -58,9 +63,9 @@ class NaturalGradient:
             ema_decay = self.ema_decay
         if ema_decay is not None and ema_decay < 1:
             accumulate = True
+            scale *= ema_decay
             for module in self.modules:
-                self._get_fisher(module).scaling(1 - ema_decay)
-                scale *= ema_decay
+                self._scale_fisher(module, 1 - ema_decay)
 
         rst = fisher_for_cross_entropy(self.model,
                                        inputs=inputs,
