@@ -53,28 +53,14 @@ class NaturalGradient:
     def _get_pre_inv_fisher(self, module):
         return getattr(module, self._pre_inv_attr, None)
 
-    def _set_fisher(self, module, data, postfix=None):
-        attr = self._get_fisher_attr(postfix)
-        setattr(module, attr, data)
-
-    def _clear_fisher(self, module, postfix=None):
-        attr = self._get_fisher_attr(postfix)
-        if hasattr(module, attr):
-            delattr(module, attr)
-
     def update_curvature(self, inputs=None, targets=None, data_loader=None, accumulate=False, ema_decay=None, scale=1):
         if ema_decay is None:
             ema_decay = self.ema_decay
         if ema_decay is not None and ema_decay < 1:
             accumulate = True
-        for module in self.modules:
-            if not accumulate:
-                self._clear_fisher(module)
-            else:
-                fisher = self._get_fisher(module)
-                if ema_decay is not None:
-                    fisher.scaling(1 - ema_decay)
-                    scale *= ema_decay
+            for module in self.modules:
+                self._get_fisher(module).scaling(1 - ema_decay)
+                scale *= ema_decay
 
         rst = fisher_for_cross_entropy(self.model,
                                        inputs=inputs,
@@ -82,6 +68,7 @@ class NaturalGradient:
                                        data_loader=data_loader,
                                        fisher_type=self.fisher_type,
                                        fisher_shapes=self.fisher_shape,
+                                       accumulate=accumulate,
                                        scale=scale,
                                        n_mc_samples=self.n_mc_samples)
         self.fisher_manager = rst

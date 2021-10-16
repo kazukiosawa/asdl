@@ -75,6 +75,7 @@ class _FisherBase(MatrixManager):
                          fvp=False,
                          vec=None,
                          data_average=True,
+                         accumulate=False,
                          base_scale=1.):
         if isinstance(fisher_shapes, str):
             fisher_shapes = [fisher_shapes]
@@ -83,10 +84,13 @@ class _FisherBase(MatrixManager):
                 assert fshape in _supported_shapes_for_fvp
             else:
                 assert fshape in _supported_shapes
-        if fvp:
-            self.zero_fvp()
-        else:
-            self.zero_fisher()
+
+        # clean up Fisher/FVP
+        if not accumulate:
+            if fvp:
+                self.zero_fvp()
+            else:
+                self.zero_fisher()
 
         # setup operations for extend
         op_names = [_SHAPE_TO_OP[shape] for shape in fisher_shapes]
@@ -462,6 +466,7 @@ def fisher(
         is_distributed=False,
         all_reduce=False,
         is_master=True,
+        accumulate=False,
         data_average=True,
         scale=1.,
         **kwargs
@@ -491,6 +496,7 @@ def fisher(
         data_loader=data_loader,
         fvp=fvp,
         vec=vec,
+        accumulate=accumulate,
         data_average=data_average,
         base_scale=scale)
     if is_distributed:
