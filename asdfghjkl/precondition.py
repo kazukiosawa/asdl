@@ -31,7 +31,7 @@ class NaturalGradient:
         self.n_mc_samples = n_mc_samples
         self.damping = damping
         self.ema_decay = ema_decay
-        assert 0.0 < self.ema_decay and self.ema_decay <= 1.0
+        assert 0.0 < self.ema_decay <= 1.0
         self.fisher_shape = SHAPE_FULL
         self.fisher_manager = None
         self._pre_inv_postfix = pre_inv_postfix
