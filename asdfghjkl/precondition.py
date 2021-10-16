@@ -20,7 +20,7 @@ class NaturalGradient:
                  pre_inv_postfix=None,
                  n_mc_samples=1,
                  damping=1e-5,
-                 ema_decay=1.,
+                 ema_decay=None,
                  ):
         from torch.nn.parallel import DistributedDataParallel as DDP
         assert not isinstance(model, DDP), f'{DDP} is not supported.'
@@ -31,7 +31,6 @@ class NaturalGradient:
         self.n_mc_samples = n_mc_samples
         self.damping = damping
         self.ema_decay = ema_decay
-        assert 0.0 < self.ema_decay <= 1.0
         self.fisher_shape = SHAPE_FULL
         self.fisher_manager = None
         self._pre_inv_postfix = pre_inv_postfix
@@ -63,44 +62,29 @@ class NaturalGradient:
         if hasattr(module, attr):
             delattr(module, attr)
 
-    def update_curvature(self, inputs=None, targets=None, data_loader=None):
+    def update_curvature(self, inputs=None, targets=None, data_loader=None, accumulate=False, ema_decay=None, scale=1):
+        if ema_decay is None:
+            ema_decay = self.ema_decay
+        if ema_decay is not None and ema_decay < 1:
+            accumulate = True
+        for module in self.modules:
+            if not accumulate:
+                self._clear_fisher(module)
+            else:
+                fisher = self._get_fisher(module)
+                if ema_decay is not None:
+                    fisher.scaling(1 - ema_decay)
+                    scale *= ema_decay
+
         rst = fisher_for_cross_entropy(self.model,
                                        inputs=inputs,
                                        targets=targets,
                                        data_loader=data_loader,
                                        fisher_type=self.fisher_type,
                                        fisher_shapes=self.fisher_shape,
+                                       scale=scale,
                                        n_mc_samples=self.n_mc_samples)
         self.fisher_manager = rst
-
-    def move_curvature(self, postfix, scale=1., ema_decay=None, to_pre_inv=False):
-        self.accumulate_curvature(postfix, scale, ema_decay, to_pre_inv, replace=True)
-
-    def accumulate_curvature(self, postfix='acc', scale=1., ema_decay=None, to_pre_inv=False, replace=False):
-        if ema_decay is None:
-            ema_decay = self.ema_decay
-        if to_pre_inv:
-            postfix = self._pre_inv_postfix
-        for module in self.modules:
-            fisher = self._get_fisher(module)
-            if fisher is None:
-                continue
-            fisher.scaling(scale)
-            fisher_acc = self._get_fisher(module, postfix)
-            if fisher_acc is None or replace or ema_decay == 1.0:
-                self._set_fisher(module, fisher, postfix)
-            else:
-                fisher.scaling(ema_decay)
-                fisher_acc.scaling(1.0 - ema_decay)
-                fisher_acc += fisher
-            self._clear_fisher(module)
-
-    def finalize_accumulation(self, postfix='acc'):
-        for module in self.modules:
-            fisher_acc = self._get_fisher(module, postfix)
-            assert fisher_acc is not None
-            self._set_fisher(module, fisher_acc)
-            self._clear_fisher(module, postfix)
 
     def reduce_curvature(self, all_reduce=True):
         self.fisher_manager.reduce_matrices(all_reduce=all_reduce)
