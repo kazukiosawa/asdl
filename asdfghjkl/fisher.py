@@ -421,12 +421,12 @@ def _accumulate_fisher(
     data = getattr(module, data_src_attr, None)
     if all(v is None for v in [data, kron, diag, unit]):
         return
+    new_fisher = SymMatrix(data, kron, diag, unit).scaling(scale)
     dst_fisher = getattr(module, dst_attr, None)
     if dst_fisher is None:
-        new_fisher = SymMatrix(data, kron, diag, unit).scaling(scale)
         setattr(module, dst_attr, new_fisher)
     else:
-        dst_fisher.accumulate(data, kron, diag, unit, scale=scale)
+        dst_fisher += new_fisher
         # TODO: not accumulate kron.A for fisher_mc, fisher_exact
     if data is not None:
         delattr(module, data_src_attr)

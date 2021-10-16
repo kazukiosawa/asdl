@@ -95,38 +95,41 @@ class SymMatrix:
         return self.unit is not None
 
     def __add__(self, other):
-        data = kron = diag = unit = None
         if self.has_data:
-            assert other.has_data
             data = self.data.add(other.data)
+        else:
+            data = other.data
         if self.has_kron:
-            assert other.has_kron
             kron = self.kron + other.kron
+        else:
+            kron = other.kron
         if self.has_diag:
-            assert other.has_diag
             diag = self.diag + other.diag
+        else:
+            diag = other.diag
         if self.has_unit:
-            assert other.has_unit
             unit = self.unit + other.unit
+        else:
+            unit = other.unit
         return SymMatrix(data, kron, diag, unit)
 
-    def accumulate(self, data=None, kron=None, diag=None, unit=None, scale=1.):
+    def __iadd__(self, other):
         if self.has_data:
-            self.data.add_(data.mul_(scale))
+            self.data.add_(other.data)
         else:
-            self.data = data
+            self.data = other.data
         if self.has_kron:
-            self.kron = self.kron + kron.scaling(scale)
+            self.kron += other.kron
         else:
-            self.kron = kron
+            self.kron = other.kron
         if self.has_diag:
-            self.diag = self.diag + diag.scaling(scale)
+            self.diag += other.diag
         else:
-            self.diag = diag
+            self.diag = other.diag
         if self.has_unit:
-            self.unit = self.unit + unit.scaling(scale)
+            self.unit += other.unit
         else:
-            self.unit = unit
+            self.unit = other.unit
 
     def scaling(self, scale):
         if self.has_data:
@@ -239,6 +242,10 @@ class Kron:
     def __add__(self, other):
         return Kron(A=self.A.add(other.A), B=self.B.add(other.B))
 
+    def __iadd__(self, other):
+        self.A.add_(other.A)
+        self.B.add_(other.B)
+
     @property
     def data(self):
         return [self.A, self.B]
@@ -299,14 +306,25 @@ class Diag:
         self.bias = bias
 
     def __add__(self, other):
-        weight = bias = None
         if self.has_weight:
-            assert other.has_weight
             weight = self.weight.add(other.weight)
+        else:
+            weight = other.weight
         if self.has_bias:
-            assert other.has_bias
             bias = self.bias.add(other.bias)
+        else:
+            bias = other.bias
         return Diag(weight=weight, bias=bias)
+
+    def __iadd__(self, other):
+        if self.has_weight:
+            self.weight.add_(other.weight)
+        else:
+            self.weight = other.weight
+        if self.has_bias:
+            self.bias.add_(other.bias)
+        else:
+            self.bias = other.bias
 
     @property
     def data(self):
@@ -384,11 +402,17 @@ class UnitWise:
         self.data = data
 
     def __add__(self, other):
-        data = None
         if self.has_data:
-            assert other.has_data
             data = self.data.add(other.data)
+        else:
+            data = other.data
         return UnitWise(data=data)
+
+    def __iadd__(self, other):
+        if self.has_data:
+            self.data.add_(other.data)
+        else:
+            self.data = other.data
 
     @property
     def has_data(self):
