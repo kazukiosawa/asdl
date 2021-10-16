@@ -74,7 +74,8 @@ class _FisherBase(MatrixManager):
                          data_loader=None,
                          fvp=False,
                          vec=None,
-                         data_average=True):
+                         data_average=True,
+                         base_scale=1.):
         if isinstance(fisher_shapes, str):
             fisher_shapes = [fisher_shapes]
         for fshape in fisher_shapes:
@@ -93,7 +94,6 @@ class _FisherBase(MatrixManager):
         op_names = list(set(op_names))
 
         model = self._model
-        base_scale = 1.
 
         def closure(loss_expr, scale=1., grad_scale=None):
             model.zero_grad(set_to_none=True)
@@ -114,7 +114,7 @@ class _FisherBase(MatrixManager):
         device = self._device
         if data_loader is not None:
             if data_average:
-                base_scale = 1 / len(data_loader.dataset)
+                base_scale /= len(data_loader.dataset)
             # calculate fisher/fvp for the data_loader
             for inputs, targets in data_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
@@ -124,7 +124,7 @@ class _FisherBase(MatrixManager):
             # calculate fisher/fvp for a single batch
             assert inputs is not None
             if data_average:
-                base_scale = 1 / inputs.shape[0]
+                base_scale /= inputs.shape[0]
             inputs = inputs.to(device)
             if targets is not None:
                 targets = targets.to(device)
@@ -463,6 +463,7 @@ def fisher(
         all_reduce=False,
         is_master=True,
         data_average=True,
+        scale=1.,
         **kwargs
 ):
     assert fisher_type in _supported_types
@@ -490,7 +491,8 @@ def fisher(
         data_loader=data_loader,
         fvp=fvp,
         vec=vec,
-        data_average=data_average)
+        data_average=data_average,
+        base_scale=scale)
     if is_distributed:
         if fvp:
             f.reduce_fvp(is_master, all_reduce)
