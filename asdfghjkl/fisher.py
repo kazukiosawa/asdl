@@ -59,13 +59,13 @@ class _FisherBase(MatrixManager):
         ftype = self.fisher_type
         for module in self._model.modules():
             if hasattr(module, ftype):
-                delattr(module, ftype)
+                getattr(module, ftype).scaling(0)
 
     def zero_fvp(self):
         attr = self.fvp_attr
         for module in self._model.modules():
             if hasattr(module, attr):
-                delattr(module, attr)
+                setattr(module, attr, getattr(module, attr) * 0)
 
     def calculate_fisher(self,
                          fisher_shapes,
@@ -85,8 +85,8 @@ class _FisherBase(MatrixManager):
             else:
                 assert fshape in _supported_shapes
 
-        # clean up Fisher/FVP
         if not accumulate:
+            # set Fisher/FVP zero
             if fvp:
                 self.zero_fvp()
             else:
