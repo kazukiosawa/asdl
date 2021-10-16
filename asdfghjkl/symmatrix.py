@@ -72,14 +72,11 @@ def _load_from_numpy(path, device='cpu'):
 
 
 class SymMatrix:
-    def __init__(
-        self, data=None, kron=None, diag=None, unit=None, device='cpu'
-    ):
+    def __init__(self, data=None, kron=None, diag=None, unit=None):
         self.data = data
         self.kron = kron
         self.diag = diag
         self.unit = unit
-        self.device = device
 
     @property
     def has_data(self):
@@ -111,7 +108,7 @@ class SymMatrix:
         if self.has_unit:
             assert other.has_unit
             unit = self.unit + other.unit
-        return SymMatrix(data, kron, diag, unit, device=self.device)
+        return SymMatrix(data, kron, diag, unit)
 
     def accumulate(self, data=None, kron=None, diag=None, unit=None, scale=1.):
         if self.has_data:
@@ -176,27 +173,30 @@ class SymMatrix:
 
         return relative_paths
 
-    def load(self, path=None, kron_path=None, diag_path=None, unit_path=None):
+    def load(self, path=None, kron_path=None, diag_path=None, unit_path=None, device='cpu'):
         if path:
-            tril = _load_from_numpy(path, self.device)
+            tril = _load_from_numpy(path, device)
             self.data = tril_to_matrix(tril)
         if kron_path is not None:
             if not self.has_kron:
-                self.kron = Kron(A=None, B=None, device=self.device)
+                self.kron = Kron(A=None, B=None)
             self.kron.load(
-                A_path=kron_path['A_tril'], B_path=kron_path['B_tril']
+                A_path=kron_path['A_tril'],
+                B_path=kron_path['B_tril'],
+                device=device
             )
         if diag_path is not None:
             if not self.has_diag:
-                self.diag = Diag(device=self.device)
+                self.diag = Diag()
             self.diag.load(
                 w_path=diag_path.get('weight', None),
-                b_path=diag_path.get('bias', None)
+                b_path=diag_path.get('bias', None),
+                device=device
             )
         if unit_path is not None:
             if not self.has_unit:
-                self.unit = UnitWise(device=self.device)
-            self.unit.load(path=unit_path)
+                self.unit = UnitWise()
+            self.unit.load(path=unit_path, device=device)
 
     def to_vector(self):
         vec = []
@@ -232,15 +232,12 @@ class SymMatrix:
 
 
 class Kron:
-    def __init__(self, A, B, device='cpu'):
+    def __init__(self, A, B):
         self.A = A
         self.B = B
-        self.device = device
 
     def __add__(self, other):
-        return Kron(
-            A=self.A.add(other.A), B=self.B.add(other.B), device=self.device
-        )
+        return Kron(A=self.A.add(other.A), B=self.B.add(other.B))
 
     @property
     def data(self):
@@ -284,10 +281,10 @@ class Kron:
 
         return relative_paths
 
-    def load(self, A_path, B_path):
-        A_tril = _load_from_numpy(A_path, self.device)
+    def load(self, A_path, B_path, device):
+        A_tril = _load_from_numpy(A_path, device)
         self.A = tril_to_matrix(A_tril)
-        B_tril = _load_from_numpy(B_path, self.device)
+        B_tril = _load_from_numpy(B_path, device)
         self.B = tril_to_matrix(B_tril)
 
     def to_matrices(self, unflatten, pointer):
@@ -297,10 +294,9 @@ class Kron:
 
 
 class Diag:
-    def __init__(self, weight=None, bias=None, device='cpu'):
+    def __init__(self, weight=None, bias=None):
         self.weight = weight
         self.bias = bias
-        self.device = device
 
     def __add__(self, other):
         weight = bias = None
@@ -310,7 +306,7 @@ class Diag:
         if self.has_bias:
             assert other.has_bias
             bias = self.bias.add(other.bias)
-        return Diag(weight=weight, bias=bias, device=self.device)
+        return Diag(weight=weight, bias=bias)
 
     @property
     def data(self):
@@ -369,11 +365,11 @@ class Diag:
 
         return relative_paths
 
-    def load(self, w_path=None, b_path=None):
+    def load(self, w_path=None, b_path=None, device='cpu'):
         if w_path:
-            self.weight = _load_from_numpy(w_path, self.device)
+            self.weight = _load_from_numpy(w_path, device)
         if b_path:
-            self.bias = _load_from_numpy(b_path, self.device)
+            self.bias = _load_from_numpy(b_path, device)
 
     def to_matrices(self, unflatten, pointer):
         if self.has_weight:
@@ -384,16 +380,15 @@ class Diag:
 
 
 class UnitWise:
-    def __init__(self, data=None, device='cpu'):
+    def __init__(self, data=None):
         self.data = data
-        self.device = device
 
     def __add__(self, other):
         data = None
         if self.has_data:
             assert other.has_data
             data = self.data.add(other.data)
-        return UnitWise(data=data, device=self.device)
+        return UnitWise(data=data)
 
     @property
     def has_data(self):
@@ -424,9 +419,9 @@ class UnitWise:
         _save_as_numpy(absolute_path, self.data)
         return relative_path
 
-    def load(self, path=None):
+    def load(self, path=None, device='cpu'):
         if path:
-            self.data = _load_from_numpy(path, self.device)
+            self.data = _load_from_numpy(path, device)
 
     def to_matrices(self, unflatten, pointer):
         if self.has_data:
