@@ -174,7 +174,7 @@ class MatrixManager:
                     continue
                 if not _requires_matrix(module):
                     continue
-                matrix = SymMatrix(device=self._device)
+                matrix = SymMatrix()
                 if SHAPE_BLOCK_DIAG in matrix_shapes:
                     _load_path(SHAPE_BLOCK_DIAG, 'path', 'tril', mname)
                 if SHAPE_KRON in matrix_shapes:
@@ -190,7 +190,7 @@ class MatrixManager:
 
             # full matrix
             if SHAPE_FULL in matrix_shapes:
-                matrix = SymMatrix(device=self._device)
+                matrix = SymMatrix()
                 _load_path(SHAPE_FULL, 'path', 'tril')
                 setattr(self._model, mat_type, matrix)
 

@@ -186,7 +186,7 @@ def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
     # full
     if SHAPE_FULL in hessian_shapes:
         full_hess = _hessian(loss, params)
-        setattr(model, 'hessian', SymMatrix(data=full_hess, device=device))
+        setattr(model, 'hessian', SymMatrix(data=full_hess))
     else:
         full_hess = None
 
@@ -212,7 +212,7 @@ def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
 
         # block-diagonal
         if SHAPE_BLOCK_DIAG in hessian_shapes:
-            setattr(module, 'hessian', SymMatrix(data=m_hess, device=device))
+            setattr(module, 'hessian', SymMatrix(data=m_hess))
 
         # diagonal
         if SHAPE_DIAG in hessian_shapes:
@@ -227,11 +227,11 @@ def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
                 b_numel = b.numel()
                 b_hess = m_hess[_idx:_idx + b_numel].view_as(b)
                 _idx += b_numel
-            diag = Diag(weight=w_hess, bias=b_hess, device=device)
+            diag = Diag(weight=w_hess, bias=b_hess)
             if hasattr(module, 'hessian'):
                 module._hessian.diag = diag
             else:
-                setattr(module, 'hessian', SymMatrix(diag=diag, device=device))
+                setattr(module, 'hessian', SymMatrix(diag=diag))
 
 
 # adopted from https://github.com/mariogeiger/hessian/blob/master/hessian/hessian.py

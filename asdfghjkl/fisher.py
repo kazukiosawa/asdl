@@ -423,8 +423,7 @@ def _accumulate_fisher(
         return
     dst_fisher = getattr(module, dst_attr, None)
     if dst_fisher is None:
-        device = next(module.parameters()).device
-        new_fisher = SymMatrix(data, kron, diag, unit, device=device)
+        new_fisher = SymMatrix(data, kron, diag, unit)
         new_fisher.scaling(scale)
         setattr(module, dst_attr, new_fisher)
     else:
