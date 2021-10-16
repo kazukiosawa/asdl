@@ -113,6 +113,24 @@ class SymMatrix:
             unit = self.unit + other.unit
         return SymMatrix(data, kron, diag, unit, device=self.device)
 
+    def accumulate(self, data=None, kron=None, diag=None, unit=None, scale=1.):
+        if self.has_data:
+            self.data.add_(data.mul_(scale))
+        else:
+            self.data = data
+        if self.has_kron:
+            self.kron = self.kron + kron.scaling(scale)
+        else:
+            self.kron = kron
+        if self.has_diag:
+            self.diag = self.diag + diag.scaling(scale)
+        else:
+            self.diag = diag
+        if self.has_unit:
+            self.unit = self.unit + unit.scaling(scale)
+        else:
+            self.unit = unit
+
     def scaling(self, scale):
         if self.has_data:
             self.data.mul_(scale)
