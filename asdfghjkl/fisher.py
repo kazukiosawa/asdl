@@ -371,7 +371,6 @@ def _register_fisher(model, fisher_type, scale=1.):
         'unit_wise': torch.Tensor,
     }
     """
-    device = next(model.parameters()).device
     for module in model.modules():
         operation = getattr(module, 'operation', None)
         if operation is None:
@@ -380,15 +379,13 @@ def _register_fisher(model, fisher_type, scale=1.):
         kron = diag = unit = None
         if OP_COV_KRON in op_results:
             rst = op_results[OP_COV_KRON]
-            kron = Kron(rst['A'], rst['B'], device=device)
+            kron = Kron(rst['A'], rst['B'])
         if OP_COV_DIAG in op_results:
             rst = op_results[OP_COV_DIAG]
-            diag = Diag(
-                rst.get('weight', None), rst.get('bias', None), device=device
-            )
+            diag = Diag(rst.get('weight', None), rst.get('bias', None))
         if OP_COV_UNIT_WISE in op_results:
             rst = op_results[OP_COV_UNIT_WISE]
-            unit = UnitWise(rst, device=device)
+            unit = UnitWise(rst)
         operation.clear_op_results()
         # move block_diag/kron/diag fisher
         _accumulate_fisher(
