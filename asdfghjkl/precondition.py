@@ -16,7 +16,6 @@ class NaturalGradient:
     def __init__(self,
                  model,
                  fisher_type=FISHER_EXACT,
-                 pre_inv_postfix=None,
                  n_mc_samples=1,
                  damping=1e-5,
                  ema_decay=None,
@@ -32,7 +31,6 @@ class NaturalGradient:
         self.ema_decay = ema_decay
         self.fisher_shape = SHAPE_FULL
         self.fisher_manager = None
-        self._pre_inv_postfix = pre_inv_postfix
 
     def _get_fisher_attr(self, postfix=None):
         if postfix is None:
@@ -49,13 +47,6 @@ class NaturalGradient:
         fisher = self._get_fisher(module)
         if fisher is not None:
             fisher.scaling(scale)
-
-    @property
-    def _pre_inv_attr(self):
-        return self._get_fisher_attr(self._pre_inv_postfix)
-
-    def _get_pre_inv_fisher(self, module):
-        return getattr(module, self._pre_inv_attr, None)
 
     def update_curvature(self, inputs=None, targets=None, data_loader=None, accumulate=False, ema_decay=None, scale=1):
         if ema_decay is None:
@@ -84,7 +75,7 @@ class NaturalGradient:
         if damping is None:
             damping = self.damping
         for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
+            fisher = self._get_fisher(module)
             if fisher is None:
                 continue
             fisher.update_inv(damping)
@@ -95,7 +86,7 @@ class NaturalGradient:
             if p.requires_grad and p.grad is not None:
                 grads.append(p.grad.flatten())
         g = torch.cat(grads)
-        fisher = self._get_pre_inv_fisher(self.model)
+        fisher = self._get_fisher(self.model)
         ng = torch.mv(fisher.inv, g)
 
         pointer = 0
@@ -113,11 +104,10 @@ class LayerWiseNaturalGradient(NaturalGradient):
     def __init__(self,
                  model,
                  fisher_type=FISHER_EXACT,
-                 pre_inv_postfix=None,
                  n_mc_samples=1,
                  damping=1e-5,
                  ema_decay=1.):
-        super().__init__(model, fisher_type, pre_inv_postfix, n_mc_samples, damping, ema_decay)
+        super().__init__(model, fisher_type, n_mc_samples, damping, ema_decay)
         self.fisher_shape = SHAPE_BLOCK_DIAG
         self.modules = [
             m for m in model.modules() if isinstance(m, _supported_modules)
@@ -125,7 +115,7 @@ class LayerWiseNaturalGradient(NaturalGradient):
 
     def precondition(self):
         for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
+            fisher = self._get_fisher(module)
             if fisher is None:
                 continue
             g = module.weight.grad.flatten()
@@ -146,11 +136,10 @@ class KFAC(NaturalGradient):
     def __init__(self,
                  model,
                  fisher_type=FISHER_EXACT,
-                 pre_inv_postfix=None,
                  n_mc_samples=1,
                  damping=1e-5,
                  ema_decay=1.):
-        super().__init__(model, fisher_type, pre_inv_postfix, n_mc_samples, damping, ema_decay)
+        super().__init__(model, fisher_type, n_mc_samples, damping, ema_decay)
         self.fisher_shape = SHAPE_KRON
         self.modules = [
             m for m in model.modules() if isinstance(m, _supported_modules)
@@ -158,7 +147,7 @@ class KFAC(NaturalGradient):
 
     def precondition(self):
         for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
+            fisher = self._get_fisher(module)
             if fisher is None:
                 continue
             if isinstance(module, _normalizations):
@@ -189,7 +178,7 @@ class KFAC(NaturalGradient):
     def precondition_vector(self, vec):
         idx = 0
         for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
+            fisher = self._get_fisher(module)
             if fisher is None:
                 continue
             if isinstance(module, _normalizations):
@@ -228,11 +217,10 @@ class DiagNaturalGradient(NaturalGradient):
     def __init__(self,
                  model,
                  fisher_type=FISHER_EXACT,
-                 pre_inv_postfix=None,
                  n_mc_samples=1,
                  damping=1e-5,
                  ema_decay=1.):
-        super().__init__(model, fisher_type, pre_inv_postfix, n_mc_samples, damping, ema_decay)
+        super().__init__(model, fisher_type, n_mc_samples, damping, ema_decay)
         self.fisher_shape = SHAPE_DIAG
         self.modules = [
             m for m in model.modules() if isinstance(m, _supported_modules)
@@ -240,7 +228,7 @@ class DiagNaturalGradient(NaturalGradient):
 
     def precondition(self):
         for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
+            fisher = self._get_fisher(module)
             if fisher is None:
                 continue
             w_inv = fisher.diag.weight_inv
@@ -252,7 +240,7 @@ class DiagNaturalGradient(NaturalGradient):
     def precondition_vector(self, vec):
         idx = 0
         for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
+            fisher = self._get_fisher(module)
             if fisher is None:
                 continue
             assert fisher.diag is not None, module
@@ -265,7 +253,7 @@ class DiagNaturalGradient(NaturalGradient):
         assert idx == len(vec)
 
     def precondition_vector_module(self, vec, module):
-        fisher = self._get_pre_inv_fisher(module)
+        fisher = self._get_fisher(module)
         assert fisher is not None
         assert fisher.diag is not None, module
         vec[0].mul_(fisher.diag.weight_inv)
