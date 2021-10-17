@@ -105,7 +105,7 @@ class _FisherBase(MatrixManager):
 
         def closure(loss_expr, grad_scale=None):
             model.zero_grad(set_to_none=True)
-            self._zero_batch_grads(set_to_none=True)
+            self._zero_op_batch_grads(set_to_none=True)
             loss = loss_expr()
             with _grads_scale(model, grad_scale):
                 with disable_param_grad(model):
@@ -137,7 +137,7 @@ class _FisherBase(MatrixManager):
                 self._fisher_core(closure, model(inputs), targets)
                 self._register_fisher(scale)
 
-    def _zero_batch_grads(self, set_to_none=False):
+    def _zero_op_batch_grads(self, set_to_none=False):
         for module in self._model.modules():
             operation = getattr(module, 'operation', None)
             if operation is None:
