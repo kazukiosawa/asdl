@@ -101,8 +101,8 @@ class SymMatrix:
     def __add__(self, other):
         values = []
         for attr in ['data', 'kron', 'diag', 'unit']:
-            self_value = getattr(self, f'has_{attr}')
-            other_value = getattr(other, f'has_{attr}')
+            self_value = getattr(self, attr)
+            other_value = getattr(other, attr)
             if other_value is not None:
                 if self_value is not None:
                     value = self_value + other_value
@@ -116,8 +116,8 @@ class SymMatrix:
 
     def __iadd__(self, other):
         for attr in ['data', 'kron', 'diag', 'unit']:
-            self_value = getattr(self, f'has_{attr}')
-            other_value = getattr(other, f'has_{attr}')
+            self_value = getattr(self, attr)
+            other_value = getattr(other, attr)
             if other_value is not None:
                 if self_value is not None:
                     value = self_value + other_value
