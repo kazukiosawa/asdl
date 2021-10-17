@@ -58,6 +58,7 @@ class NaturalGradient:
                           accumulate=False,
                           ema_decay=None,
                           data_average=True,
+                          seed=None,
                           scale=1):
         if ema_decay is None:
             ema_decay = self.ema_decay
@@ -75,6 +76,7 @@ class NaturalGradient:
                                        fisher_shapes=self.fisher_shape,
                                        accumulate=accumulate,
                                        data_average=data_average,
+                                       seed=seed,
                                        scale=scale,
                                        n_mc_samples=self.n_mc_samples)
         self.fisher_manager = rst
@@ -85,6 +87,7 @@ class NaturalGradient:
                              data_loader=None,
                              ema_decay=None,
                              data_average=True,
+                             seed=None,
                              scale=1):
         self._update_curvature(inputs,
                                targets,
@@ -92,6 +95,7 @@ class NaturalGradient:
                                accumulate=True,
                                ema_decay=ema_decay,
                                data_average=data_average,
+                               seed=seed,
                                scale=scale)
 
     def refresh_curvature(self,
@@ -99,6 +103,7 @@ class NaturalGradient:
                           targets=None,
                           data_loader=None,
                           data_average=True,
+                          seed=None,
                           scale=1):
         if self.ema_decay is not None:
             warnings.warn(f'ema_decay ({self.ema_decay}) will be ignored.')
@@ -108,6 +113,7 @@ class NaturalGradient:
                                accumulate=False,
                                ema_decay=1,
                                data_average=data_average,
+                               seed=seed,
                                scale=scale)
 
     def reduce_curvature(self, all_reduce=True):
