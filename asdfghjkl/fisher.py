@@ -441,6 +441,20 @@ def _block_diag_cvp(model, vec):
         setattr(module, _CVP_BLOCK_DIAG, new_cvp)
 
 
+def _construct_cov(model, fisher_shapes):
+    if SHAPE_FULL in fisher_shapes:
+        _full_covariance(model)
+    if SHAPE_BLOCK_DIAG in fisher_shapes:
+        _block_diag_covariance(model)
+
+
+def _construct_cvp(model, fisher_shapes, vec):
+    if SHAPE_FULL in fisher_shapes:
+        _full_cvp(model, vec)
+    if SHAPE_BLOCK_DIAG in fisher_shapes:
+        _block_diag_cvp(model, vec)
+
+
 @contextmanager
 def _grads_scale(model, scale):
     for module in model.modules():
@@ -456,20 +470,6 @@ def _grads_scale(model, scale):
         if operation is None:
             continue
         operation.grads_scale = None
-
-
-def _construct_cov(model, fisher_shapes):
-    if SHAPE_FULL in fisher_shapes:
-        _full_covariance(model)
-    if SHAPE_BLOCK_DIAG in fisher_shapes:
-        _block_diag_covariance(model)
-
-
-def _construct_cvp(model, fisher_shapes, vec):
-    if SHAPE_FULL in fisher_shapes:
-        _full_cvp(model, vec)
-    if SHAPE_BLOCK_DIAG in fisher_shapes:
-        _block_diag_cvp(model, vec)
 
 
 def fisher(
