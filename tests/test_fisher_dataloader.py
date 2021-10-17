@@ -57,13 +57,17 @@ for data_average in [True, False]:
                                  data_average=data_average,
                                  seed=1 if fisher_type == FISHER_MC else None)
 
+        # full
         assert_equal(getattr(model1, fisher_type).data, getattr(model2, fisher_type).data)
         for m1, m2 in zip(model1.modules(), model2.modules()):
             if isinstance(m1, (nn.Conv2d, nn.Linear)):
                 f1 = getattr(m1, fisher_type)
                 f2 = getattr(m2, fisher_type)
+                # layer-wise
                 assert_equal(f1.data, f2.data)
+                # kron
                 assert_equal(f1.kron.A, f2.kron.A)
                 assert_equal(f1.kron.B, f2.kron.B)
+                # diag
                 assert_equal(f1.diag.weight, f2.diag.weight)
                 assert_equal(f1.diag.bias, f2.diag.bias)
