@@ -26,8 +26,12 @@ def convnet(n_dim, n_channels, n_classes=10, kernel_size=3):
 bs = 8
 model1 = convnet(32, 16)
 model2 = copy.deepcopy(model1)
+
+# batch
 x = torch.randn(bs, 3, 32, 32)
 y = torch.tensor([0] * bs, dtype=torch.long)
+
+# create a dataset which contains {n_batches} copies of the batch (x, y)
 n_batches = 4
 dataset = torch.utils.data.TensorDataset(x.repeat(n_batches, 1, 1, 1), y.repeat(n_batches))
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=bs, shuffle=False)
