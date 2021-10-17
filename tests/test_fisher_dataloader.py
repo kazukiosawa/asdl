@@ -41,8 +41,9 @@ def assert_equal(tensor1, tensor2):
     assert torch.equal(tensor1, tensor2), f'tensor1: {tensor1.norm().item()}, tensor2: {tensor2.norm().item()}'
 
 
-for data_average in [True, False]:
-    for fisher_type in [FISHER_EMP, FISHER_MC, FISHER_EXACT]:
+for fisher_type in [FISHER_EMP, FISHER_MC, FISHER_EXACT]:
+    print(fisher_type)
+    for data_average in [True, False]:
         # Fisher by a single batch
         fisher_for_cross_entropy(model1,
                                  fisher_type=fisher_type,
