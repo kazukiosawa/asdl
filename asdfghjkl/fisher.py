@@ -221,6 +221,7 @@ class _FisherBase(MatrixManager):
         if dst_fisher is None:
             setattr(module, dst_attr, new_fisher)
         else:
+            # this must be __iadd__ to preserve inv
             dst_fisher += new_fisher
         if data is not None:
             delattr(module, data_src_attr)
