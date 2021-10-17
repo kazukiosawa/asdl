@@ -99,42 +99,33 @@ class SymMatrix:
         return self.unit is not None
 
     def __add__(self, other):
-        if self.has_data:
-            data = self.data.add(other.data)
-        else:
-            data = other.data
-        if self.has_kron:
-            kron = self.kron + other.kron
-        else:
-            kron = other.kron
-        if self.has_diag:
-            diag = self.diag + other.diag
-        else:
-            diag = other.diag
-        if self.has_unit:
-            unit = self.unit + other.unit
-        else:
-            unit = other.unit
-        return SymMatrix(data, kron, diag, unit)
+        values = []
+        for attr in ['data', 'kron', 'diag', 'unit']:
+            self_value = getattr(self, f'has_{attr}')
+            other_value = getattr(other, f'has_{attr}')
+            if other_value is not None:
+                if self_value is not None:
+                    value = self_value + other_value
+                else:
+                    value = other_value
+            else:
+                value = self_value
+            values.append(value)
+
+        return SymMatrix(*values)
 
     def __iadd__(self, other):
-        if self.has_data:
-            self.data.add_(other.data)
-        else:
-            self.data = other.data
-        if self.has_kron:
-            self.kron += other.kron
-        else:
-            self.kron = other.kron
-        if self.has_diag:
-            self.diag += other.diag
-        else:
-            self.diag = other.diag
-        if self.has_unit:
-            self.unit += other.unit
-        else:
-            self.unit = other.unit
-        return self
+        for attr in ['data', 'kron', 'diag', 'unit']:
+            self_value = getattr(self, f'has_{attr}')
+            other_value = getattr(other, f'has_{attr}')
+            if other_value is not None:
+                if self_value is not None:
+                    value = self_value + other_value
+                else:
+                    value = other_value
+            else:
+                value = self_value
+            setattr(self, attr, value)
 
     def scaling(self, scale):
         if self.has_data:
@@ -257,11 +248,25 @@ class Kron:
         self.B_inv = None
 
     def __add__(self, other):
-        return Kron(A=self.A.add(other.A), B=self.B.add(other.B))
+        if not other.has_data:
+            return self
+        if self.has_data:
+            A = self.A.add(other.A)
+            B = self.B.add(other.B)
+        else:
+            A = other.A
+            B = other.B
+        return Kron(A, B)
 
     def __iadd__(self, other):
-        self.A.add_(other.A)
-        self.B.add_(other.B)
+        if not other.has_data:
+            return self
+        if self.has_data:
+            self.A.add_(other.A)
+            self.B.add_(other.B)
+        else:
+            self.A = other.A
+            self.B = other.B
         return self
 
     @property
@@ -342,25 +347,33 @@ class Diag:
         self.bias_inv = None
 
     def __add__(self, other):
-        if self.has_weight:
-            weight = self.weight.add(other.weight)
+        if other.has_weight:
+            if self.has_weight:
+                weight = self.weight.add(other.weight)
+            else:
+                weight = other.weight
         else:
-            weight = other.weight
-        if self.has_bias:
-            bias = self.bias.add(other.bias)
+            weight = self.weight
+        if other.has_bias:
+            if self.has_bias:
+                bias = self.bias.add(other.bias)
+            else:
+                bias = other.bias
         else:
-            bias = other.bias
+            bias = self.bias
         return Diag(weight=weight, bias=bias)
 
     def __iadd__(self, other):
-        if self.has_weight:
-            self.weight.add_(other.weight)
-        else:
-            self.weight = other.weight
-        if self.has_bias:
-            self.bias.add_(other.bias)
-        else:
-            self.bias = other.bias
+        if other.has_weight:
+            if self.has_weight:
+                self.weight.add_(other.weight)
+            else:
+                self.weight = other.weight
+        if other.has_bias:
+            if self.has_bias:
+                self.bias.add_(other.bias)
+            else:
+                self.bias = other.bias
         return self
 
     @property
@@ -446,6 +459,8 @@ class UnitWise:
         self.inv = None
 
     def __add__(self, other):
+        if not other.has_data:
+            return self
         if self.has_data:
             data = self.data.add(other.data)
         else:
@@ -453,6 +468,8 @@ class UnitWise:
         return UnitWise(data=data)
 
     def __iadd__(self, other):
+        if not other.has_data:
+            return self
         if self.has_data:
             self.data.add_(other.data)
         else:
