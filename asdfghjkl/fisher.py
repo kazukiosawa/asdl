@@ -145,7 +145,7 @@ class _FisherBase(MatrixManager):
             op_results = operation.get_op_results()
             if op_results.get(OP_BATCH_GRADS, None):
                 if set_to_none:
-                    op_results[OP_BATCH_GRADS] = None
+                    op_results.pop(OP_BATCH_GRADS, None)
                 else:
                     op_results[OP_BATCH_GRADS] *= 0
 
