@@ -36,7 +36,7 @@ class Operation:
         results = self._op_results
         if len(keys) > 1:
             for key in keys[:-1]:
-                if key not in results:
+                if results.get(key, None) is None:
                     results[key] = {}
                 results = results[key]
         key = keys[-1]
