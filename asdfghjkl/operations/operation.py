@@ -81,7 +81,7 @@ class Operation:
     def backward_pre_process(self, in_data, out_grads):
         if self._grads_scale is not None:
             shape = (-1, ) + (1, ) * (out_grads.ndim - 1)
-            out_grads = torch.mul(out_grads, self._grads_scale.reshape(shape))
+            out_grads.mul_(self._grads_scale.reshape(shape))
 
         module = self._module
         op_results = self.get_op_results()
