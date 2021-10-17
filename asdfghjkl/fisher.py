@@ -298,14 +298,20 @@ def _full_covariance(model):
     for _, batch_g in _module_batch_flatten_grads(model):
         batch_all_g.append(batch_g)
     batch_all_g = torch.cat(batch_all_g, dim=1)  # n x p_all
-    cov_full = torch.matmul(batch_all_g.T, batch_all_g)  # p_all x p_all
-    setattr(model, _COV_FULL, cov_full)
+    new_cov_full = torch.matmul(batch_all_g.T, batch_all_g)  # p_all x p_all
+    cov_full = getattr(model, _COV_FULL, None)
+    if cov_full is not None:
+        new_cov_full += cov_full
+    setattr(model, _COV_FULL, new_cov_full)
 
 
 def _block_diag_covariance(model):
     for module, batch_g in _module_batch_flatten_grads(model):
-        cov_block = torch.matmul(batch_g.T, batch_g)  # p_all x p_all
-        setattr(module, _COV_BLOCK_DIAG, cov_block)
+        new_cov_block = torch.matmul(batch_g.T, batch_g)  # p_all x p_all
+        cov_block = getattr(module, _COV_BLOCK_DIAG, None)
+        if cov_block is not None:
+            new_cov_block += cov_block
+        setattr(module, _COV_BLOCK_DIAG, new_cov_block)
 
 
 def _full_cvp(model, vec):
@@ -324,12 +330,14 @@ def _full_cvp(model, vec):
             batch_all_gvp += batch_gvp
 
     # compute cvp = sum[g(g^t)v]
-    cvp = []
+    new_cvp = []
     for module, batch_grads in _module_batch_grads(model):
         for b_g in batch_grads.values():
-            cvp.append(torch.einsum('n...,n->...', b_g, batch_all_gvp))
-
-    setattr(model, _CVP_FULL, cvp)
+            new_cvp.append(torch.einsum('n...,n->...', b_g, batch_all_gvp))
+    cvp = getattr(model, _CVP_FULL, None)
+    if cvp is not None:
+        new_cvp = [v1 + v2 for v1, v2 in zip(new_cvp, cvp)]
+    setattr(model, _CVP_FULL, new_cvp)
 
 
 def _block_diag_cvp(model, vec):
@@ -341,13 +349,15 @@ def _block_diag_cvp(model, vec):
     """
     batch_gvp_dict = {k: v for k, v in _module_batch_gvp(model, vec)}
     for module, batch_grads in _module_batch_grads(model):
-        cvp = []
+        new_cvp = []
         # compute cvp = sum[g(g^t)v]
         batch_gvp = batch_gvp_dict[module]
         for b_g in batch_grads.values():
-            cvp.append(torch.einsum('n...,n->...', b_g, batch_gvp))
-
-        setattr(module, _CVP_BLOCK_DIAG, cvp)
+            new_cvp.append(torch.einsum('n...,n->...', b_g, batch_gvp))
+        cvp = getattr(module, _CVP_BLOCK_DIAG, None)
+        if cvp is not None:
+            new_cvp = [v1 + v2 for v1, v2 in zip(new_cvp, cvp)]
+        setattr(module, _CVP_BLOCK_DIAG, new_cvp)
 
 
 @contextmanager
