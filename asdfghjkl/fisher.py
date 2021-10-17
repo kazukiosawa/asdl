@@ -141,8 +141,8 @@ class _FisherBase(MatrixManager):
 
     def _register_fisher(self, scale=1.):
         """
-        module.{fisher_type} = op_results
-        op_results = {
+        module.operation.get_op_results():
+        {
             'diag': {'weight': torch.Tensor, 'bias': torch.Tensor},
             'kron': {'A': torch.Tensor, 'B': torch.Tensor},
             'block_diag': torch.Tensor,
