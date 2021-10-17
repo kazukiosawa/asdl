@@ -134,6 +134,7 @@ class SymMatrix:
             self.unit += other.unit
         else:
             self.unit = other.unit
+        return self
 
     def scaling(self, scale):
         if self.has_data:
@@ -261,6 +262,7 @@ class Kron:
     def __iadd__(self, other):
         self.A.add_(other.A)
         self.B.add_(other.B)
+        return self
 
     @property
     def data(self):
@@ -359,6 +361,7 @@ class Diag:
             self.bias.add_(other.bias)
         else:
             self.bias = other.bias
+        return self
 
     @property
     def data(self):
@@ -454,6 +457,7 @@ class UnitWise:
             self.data.add_(other.data)
         else:
             self.data = other.data
+        return self
 
     @property
     def has_data(self):
