@@ -109,14 +109,10 @@ class _FisherBase(MatrixManager):
             with _grads_scale(model, grad_scale):
                 with disable_param_grad(model):
                     loss.backward(retain_graph=True)
-            if SHAPE_FULL in fisher_shapes and not fvp:
-                _full_covariance(model)
-            if SHAPE_FULL in fisher_shapes and fvp:
-                _full_cvp(model, vec)
-            if SHAPE_BLOCK_DIAG in fisher_shapes and not fvp:
-                _block_diag_covariance(model)
-            if SHAPE_BLOCK_DIAG in fisher_shapes and fvp:
-                _block_diag_cvp(model, vec)
+            if fvp:
+                _construct_cvp(model, fisher_shapes, vec)
+            else:
+                _construct_cov(model, fisher_shapes)
 
         device = self._device
         if data_loader is not None:
@@ -460,6 +456,20 @@ def _grads_scale(model, scale):
         if operation is None:
             continue
         operation.grads_scale = None
+
+
+def _construct_cov(model, fisher_shapes):
+    if SHAPE_FULL in fisher_shapes:
+        _full_covariance(model)
+    if SHAPE_BLOCK_DIAG in fisher_shapes:
+        _block_diag_covariance(model)
+
+
+def _construct_cvp(model, fisher_shapes, vec):
+    if SHAPE_FULL in fisher_shapes:
+        _full_cvp(model, vec)
+    if SHAPE_BLOCK_DIAG in fisher_shapes:
+        _block_diag_cvp(model, vec)
 
 
 def fisher(
