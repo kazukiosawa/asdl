@@ -100,6 +100,7 @@ class SymMatrix:
         return self.unit is not None
 
     def __add__(self, other):
+        # NOTE: inv will not be preserved
         values = []
         for attr in ['data', 'kron', 'diag', 'unit']:
             self_value = getattr(self, attr)
@@ -247,6 +248,7 @@ class Kron:
         self.B_inv = None
 
     def __add__(self, other):
+        # NOTE: inv will not be preserved
         if not other.has_data:
             return self
         if self.has_data:
@@ -346,6 +348,7 @@ class Diag:
         self.bias_inv = None
 
     def __add__(self, other):
+        # NOTE: inv will not be preserved
         if other.has_weight:
             if self.has_weight:
                 weight = self.weight.add(other.weight)
@@ -458,6 +461,7 @@ class UnitWise:
         self.inv = None
 
     def __add__(self, other):
+        # NOTE: inv will not be preserved
         if not other.has_data:
             return self
         if self.has_data:
