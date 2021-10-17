@@ -49,7 +49,7 @@ class NaturalGradient:
         if fisher is not None:
             fisher.scaling(scale)
 
-    def _update_curvature(self, inputs=None, targets=None, data_loader=None, accumulate=False, ema_decay=None, scale=1):
+    def _update_curvature(self, inputs=None, targets=None, data_loader=None, accumulate=False, ema_decay=None, data_average=True, scale=1):
         if ema_decay is None:
             ema_decay = self.ema_decay
         if ema_decay is not None and ema_decay < 1:
@@ -65,17 +65,18 @@ class NaturalGradient:
                                        fisher_type=self.fisher_type,
                                        fisher_shapes=self.fisher_shape,
                                        accumulate=accumulate,
+                                       data_average=data_average,
                                        scale=scale,
                                        n_mc_samples=self.n_mc_samples)
         self.fisher_manager = rst
 
-    def accumulate_curvature(self, inputs=None, targets=None, data_loader=None, ema_decay=None, scale=1):
-        self._update_curvature(inputs, targets, data_loader, accumulate=True, ema_decay=ema_decay, scale=scale)
+    def accumulate_curvature(self, inputs=None, targets=None, data_loader=None, ema_decay=None, data_average=True, scale=1):
+        self._update_curvature(inputs, targets, data_loader, accumulate=True, ema_decay=ema_decay, data_average=data_average, scale=scale)
 
-    def refresh_curvature(self, inputs=None, targets=None, data_loader=None, scale=1):
+    def refresh_curvature(self, inputs=None, targets=None, data_loader=None, data_average=True, scale=1):
         if self.ema_decay is not None:
             warnings.warn(f'ema_decay ({self.ema_decay}) will be ignored.')
-        self._update_curvature(inputs, targets, data_loader, accumulate=False, ema_decay=1, scale=scale)
+        self._update_curvature(inputs, targets, data_loader, accumulate=False, ema_decay=1, data_average=data_average, scale=scale)
 
     def reduce_curvature(self, all_reduce=True):
         self.fisher_manager.reduce_matrices(all_reduce=all_reduce)
