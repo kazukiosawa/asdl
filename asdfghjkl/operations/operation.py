@@ -15,9 +15,9 @@ OP_ACCUMULATE_GRADS = 'acc_grad'  # accumulate gradients
 
 
 class Operation:
-    def __init__(self, module, model, op_names):
+    def __init__(self, module, model_for_kernel, op_names):
         self._module = module
-        self._model = model
+        self._model_for_kernel = model_for_kernel
         if isinstance(op_names, str):
             op_names = [op_names]
         # remove duplicates
@@ -77,7 +77,7 @@ class Operation:
 
             if OP_GRAM_HADAMARD in self._op_names:
                 n_data = in_data.shape[0]
-                n1 = self._model.kernel.shape[0]
+                n1 = self._model_for_kernel.kernel.shape[0]
                 if n_data == n1:
                     A = self.gram_A(module, in_data, in_data)
                 else:
@@ -108,17 +108,17 @@ class Operation:
 
             elif op_name == OP_GRAM_HADAMARD:
                 n_data = in_data.shape[0]
-                n1 = self._model.kernel.shape[0]
+                n1 = self._model_for_kernel.kernel.shape[0]
                 if n_data == n1:
                     B = self.gram_B(module, out_grads, out_grads)
                 else:
                     B = self.gram_B(module, out_grads[:n1], out_grads[n1:])
                 A = self._op_results[OP_GRAM_HADAMARD]['A']
-                self._model.kernel += B.mul(A)
+                self._model_for_kernel.kernel += B.mul(A)
 
             elif op_name == OP_GRAM_DIRECT:
                 n_data = in_data.shape[0]
-                n1 = self._model.kernel.shape[0]
+                n1 = self._model_for_kernel.kernel.shape[0]
 
                 grads = self.batch_grads_weight(module, in_data, out_grads)
                 v = [grads]
@@ -135,9 +135,9 @@ class Operation:
                     g2 = g
 
                 if n_data == n1:
-                    self._model.kernel += torch.matmul(g, g2.T)
+                    self._model_for_kernel.kernel += torch.matmul(g, g2.T)
                 else:
-                    self._model.kernel += torch.matmul(g[:n1], g2[n1:].T)
+                    self._model_for_kernel.kernel += torch.matmul(g[:n1], g2[n1:].T)
             else:
                 rst = getattr(self,
                               f'{op_name}_weight')(module, in_data, out_grads)
