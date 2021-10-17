@@ -52,8 +52,12 @@ class _FisherBase(MatrixManager):
         raise NotImplementedError
 
     @property
+    def fisher_attr(self):
+        return self.fisher_type
+
+    @property
     def fvp_attr(self):
-        return _get_fvp_attr(self.fisher_type)
+        return f'{self.fisher_type}_fvp'
 
     def zero_fisher(self):
         ftype = self.fisher_type
@@ -123,7 +127,7 @@ class _FisherBase(MatrixManager):
                 inputs, targets = inputs.to(device), targets.to(device)
                 with extend(model, op_names):
                     self._fisher_core(closure, model(inputs), targets)
-                    _register_fisher(model, self.fisher_type, scale)
+                    self._register_fisher(scale)
         else:
             # calculate fisher/fvp for a single batch
             assert inputs is not None
@@ -134,10 +138,91 @@ class _FisherBase(MatrixManager):
                 targets = targets.to(device)
             with extend(model, op_names):
                 self._fisher_core(closure, model(inputs), targets)
-                _register_fisher(model, self.fisher_type, scale)
+                self._register_fisher(scale)
 
     def _fisher_core(self, closure, outputs, targets):
         raise NotImplementedError
+
+    def _register_fisher(self, scale=1.):
+        """
+        module.{fisher_type} = op_results
+        op_results = {
+            'diag': {'weight': torch.Tensor, 'bias': torch.Tensor},
+            'kron': {'A': torch.Tensor, 'B': torch.Tensor},
+            'block_diag': torch.Tensor,
+            'unit_wise': torch.Tensor,
+        }
+        """
+        model = self._model
+        for module in model.modules():
+            operation = getattr(module, 'operation', None)
+            if operation is None:
+                continue
+            op_results = operation.get_op_results()
+            kron = diag = unit = None
+            if OP_COV_KRON in op_results:
+                rst = op_results[OP_COV_KRON]
+                kron = Kron(rst['A'], rst['B'])
+            if OP_COV_DIAG in op_results:
+                rst = op_results[OP_COV_DIAG]
+                diag = Diag(rst.get('weight', None), rst.get('bias', None))
+            if OP_COV_UNIT_WISE in op_results:
+                rst = op_results[OP_COV_UNIT_WISE]
+                unit = UnitWise(rst)
+            operation.clear_op_results()
+            # move block_diag/kron/diag fisher
+            self._accumulate_fisher(
+                module,
+                _COV_BLOCK_DIAG,
+                kron=kron,
+                diag=diag,
+                unit=unit,
+                scale=scale
+            )
+            # move block_diag fvp
+            self._accumulate_fvp(module, _CVP_BLOCK_DIAG, scale)
+
+        # move full fisher
+        self._accumulate_fisher(model, _COV_FULL, scale=scale)
+        # move full fvp
+        self._accumulate_fvp(model, _CVP_FULL, scale)
+
+    def _accumulate_fisher(
+            self,
+            module,
+            data_src_attr,
+            kron=None,
+            diag=None,
+            unit=None,
+            scale=1.
+    ):
+        dst_attr = self.fisher_attr
+        data = getattr(module, data_src_attr, None)
+        if all(v is None for v in [data, kron, diag, unit]):
+            return
+        new_fisher = SymMatrix(data, kron, diag, unit).scaling(scale)
+        dst_fisher = getattr(module, dst_attr, None)
+        if dst_fisher is None:
+            setattr(module, dst_attr, new_fisher)
+        else:
+            dst_fisher += new_fisher
+        if data is not None:
+            delattr(module, data_src_attr)
+
+    def _accumulate_fvp(self, module, src_attr, scale=1.):
+        dst_attr = self.fvp_attr
+        cvp = getattr(module, src_attr, None)
+        if cvp is None:
+            return
+        cvp = [v * scale for v in cvp]
+        dst_fvp = getattr(module, dst_attr, None)
+        if dst_fvp is None:
+            setattr(module, dst_attr, cvp)
+        else:
+            dst_fvp = [u.add(v) for u, v in zip(dst_fvp, cvp)]
+            setattr(module, dst_attr, dst_fvp)
+
+        delattr(module, src_attr)
 
     def reduce_fisher(self, is_master=True, all_reduce=False):
         self.reduce_matrices(is_master=is_master, all_reduce=all_reduce)
@@ -375,93 +460,6 @@ def _grads_scale(model, scale):
         if operation is None:
             continue
         operation.grads_scale = None
-
-
-def _register_fisher(model, fisher_type, scale=1.):
-    """
-    module.{fisher_type} = op_results
-    op_results = {
-        'diag': {'weight': torch.Tensor, 'bias': torch.Tensor},
-        'kron': {'A': torch.Tensor, 'B': torch.Tensor},
-        'block_diag': torch.Tensor,
-        'unit_wise': torch.Tensor,
-    }
-    """
-    for module in model.modules():
-        operation = getattr(module, 'operation', None)
-        if operation is None:
-            continue
-        op_results = operation.get_op_results()
-        kron = diag = unit = None
-        if OP_COV_KRON in op_results:
-            rst = op_results[OP_COV_KRON]
-            kron = Kron(rst['A'], rst['B'])
-        if OP_COV_DIAG in op_results:
-            rst = op_results[OP_COV_DIAG]
-            diag = Diag(rst.get('weight', None), rst.get('bias', None))
-        if OP_COV_UNIT_WISE in op_results:
-            rst = op_results[OP_COV_UNIT_WISE]
-            unit = UnitWise(rst)
-        operation.clear_op_results()
-        # move block_diag/kron/diag fisher
-        _accumulate_fisher(
-            module,
-            _COV_BLOCK_DIAG,
-            fisher_type,
-            kron=kron,
-            diag=diag,
-            unit=unit,
-            scale=scale
-        )
-        # move block_diag fvp
-        _accumulate_fvp(module, _CVP_BLOCK_DIAG, fisher_type, scale)
-
-    # move full fisher
-    _accumulate_fisher(model, _COV_FULL, fisher_type, scale=scale)
-    # move full fvp
-    _accumulate_fvp(model, _CVP_FULL, fisher_type, scale)
-
-
-def _accumulate_fisher(
-    module,
-    data_src_attr,
-    dst_attr,
-    kron=None,
-    diag=None,
-    unit=None,
-    scale=1.
-):
-    data = getattr(module, data_src_attr, None)
-    if all(v is None for v in [data, kron, diag, unit]):
-        return
-    new_fisher = SymMatrix(data, kron, diag, unit).scaling(scale)
-    dst_fisher = getattr(module, dst_attr, None)
-    if dst_fisher is None:
-        setattr(module, dst_attr, new_fisher)
-    else:
-        dst_fisher += new_fisher
-    if data is not None:
-        delattr(module, data_src_attr)
-
-
-def _accumulate_fvp(module, src_attr, fisher_type, scale=1.):
-    dst_attr = _get_fvp_attr(fisher_type)
-    cvp = getattr(module, src_attr, None)
-    if cvp is None:
-        return
-    cvp = [v * scale for v in cvp]
-    dst_fvp = getattr(module, dst_attr, None)
-    if dst_fvp is None:
-        setattr(module, dst_attr, cvp)
-    else:
-        dst_fvp = [u.add(v) for u, v in zip(dst_fvp, cvp)]
-        setattr(module, dst_attr, dst_fvp)
-
-    delattr(module, src_attr)
-
-
-def _get_fvp_attr(fisher_type):
-    return f'{fisher_type}_fvp'
 
 
 def fisher(
