@@ -76,7 +76,7 @@ class _FisherBase(MatrixManager):
                          vec=None,
                          data_average=True,
                          accumulate=False,
-                         base_scale=1.):
+                         scale=1.):
         if isinstance(fisher_shapes, str):
             fisher_shapes = [fisher_shapes]
         for fshape in fisher_shapes:
@@ -99,7 +99,7 @@ class _FisherBase(MatrixManager):
 
         model = self._model
 
-        def closure(loss_expr, scale=1., grad_scale=None):
+        def closure(loss_expr, grad_scale=None):
             model.zero_grad(set_to_none=True)
             loss = loss_expr()
             with _grads_scale(model, grad_scale):
@@ -113,27 +113,28 @@ class _FisherBase(MatrixManager):
                 _block_diag_covariance(model)
             if SHAPE_BLOCK_DIAG in fisher_shapes and fvp:
                 _block_diag_cvp(model, vec)
-            _register_fisher(model, self.fisher_type, scale * base_scale)
 
         device = self._device
         if data_loader is not None:
             if data_average:
-                base_scale /= len(data_loader.dataset)
+                scale /= len(data_loader.dataset)
             # calculate fisher/fvp for the data_loader
             for inputs, targets in data_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
                 with extend(model, op_names):
                     self._fisher_core(closure, model(inputs), targets)
+                    _register_fisher(model, self.fisher_type, scale)
         else:
             # calculate fisher/fvp for a single batch
             assert inputs is not None
             if data_average:
-                base_scale /= inputs.shape[0]
+                scale /= inputs.shape[0]
             inputs = inputs.to(device)
             if targets is not None:
                 targets = targets.to(device)
             with extend(model, op_names):
                 self._fisher_core(closure, model(inputs), targets)
+                _register_fisher(model, self.fisher_type, scale)
 
     def _fisher_core(self, closure, outputs, targets):
         raise NotImplementedError
@@ -200,7 +201,7 @@ class FisherMCCrossEntropy(_FisherBase):
             with torch.no_grad():
                 targets = dist.sample()
             closure(lambda: F.nll_loss(log_probs, targets, reduction='sum'),
-                    scale=1/self.n_mc_samples)
+                    grad_scale=1 / self.n_mc_samples)
 
 
 class FisherEmpCrossEntropy(_FisherBase):
@@ -239,7 +240,8 @@ class FisherMCMSE(_FisherBase):
         for i in range(self.n_mc_samples):
             with torch.no_grad():
                 targets = dist.sample()
-            closure(lambda: 0.5 * (outputs - targets).norm(dim=1).sum())
+            closure(lambda: 0.5 * (outputs - targets).norm(dim=1).sum(),
+                    grad_scale=1 / self.n_mc_samples)
 
 
 class FisherEmpMSE(_FisherBase):
@@ -428,7 +430,6 @@ def _accumulate_fisher(
         setattr(module, dst_attr, new_fisher)
     else:
         dst_fisher += new_fisher
-        # TODO: not accumulate kron.A for fisher_mc, fisher_exact
     if data is not None:
         delattr(module, data_src_attr)
 
@@ -498,7 +499,7 @@ def fisher(
         vec=vec,
         accumulate=accumulate,
         data_average=data_average,
-        base_scale=scale)
+        scale=scale)
     if is_distributed:
         if fvp:
             f.reduce_fvp(is_master, all_reduce)

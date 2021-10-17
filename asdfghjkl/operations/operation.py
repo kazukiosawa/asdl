@@ -25,7 +25,6 @@ class Operation:
         self._op_names = op_names
         self._save_field = save_field
         self._grads_scale = None
-        self._kron_A = None
 
     def get_op_results(self):
         return getattr(self._module, self._save_field, {})
@@ -64,8 +63,7 @@ class Operation:
 
             if OP_COV_KRON in self._op_names:
                 A = self.cov_kron_A(module, in_data)
-                self._kron_A = A
-                op_results[OP_COV_KRON] = {'A': A.clone()}
+                op_results[OP_COV_KRON] = {'A': A}
 
             if OP_GRAM_HADAMARD in self._op_names:
                 n_data = in_data.shape[0]
@@ -74,30 +72,39 @@ class Operation:
                     A = self.gram_A(module, in_data, in_data)
                 else:
                     A = self.gram_A(module, in_data[:n1], in_data[n1:])
-                op_results[OP_GRAM_HADAMARD] = {'A': A.clone()}
+                op_results[OP_GRAM_HADAMARD] = {'A': A}
 
             self.set_op_results(op_results)
 
     def backward_pre_process(self, in_data, out_grads):
-        if self._grads_scale is not None:
-            shape = (-1, ) + (1, ) * (out_grads.ndim - 1)
-            out_grads.mul_(self._grads_scale.reshape(shape))
+        gs = self._grads_scale
+        if gs is not None:
+            if isinstance(gs, torch.Tensor):
+                assert gs.shape[0] == out_grads.shape[0]
+                shape = (-1, ) + (1, ) * (out_grads.ndim - 1)
+                out_grads.mul_(gs.reshape(shape))
+            else:
+                out_grads.mul_(gs)
 
         module = self._module
         op_results = self.get_op_results()
         for op_name in self._op_names:
             if op_name == OP_COV_KRON:
                 rst = self.cov_kron_B(module, out_grads)
-                if op_name in op_results:
-                    op_results[op_name]['B'] = rst
+                assert op_name in op_results
+                if 'B' in op_results[op_name]:
+                    op_results[op_name]['B'] += rst
                 else:
-                    assert self._kron_A is not None
-                    op_results[op_name] = {'A': self._kron_A.clone(), 'B': rst}
+                    op_results[op_name]['B'] = rst
 
             elif op_name == OP_COV_UNIT_WISE:
                 assert original_requires_grad(module, 'weight')
                 assert original_requires_grad(module, 'bias')
-                op_results[op_name] = self.cov_unit_wise(module, in_data, out_grads)
+                rst = self.cov_unit_wise(module, in_data, out_grads)
+                if op_name in op_results:
+                    op_results[op_name] += rst
+                else:
+                    op_results[op_name] = rst
 
             elif op_name == OP_GRAM_HADAMARD:
                 n_data = in_data.shape[0]
