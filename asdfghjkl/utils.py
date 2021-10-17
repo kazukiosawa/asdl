@@ -87,7 +87,7 @@ def add_value_to_diagonal(x: torch.Tensor, value):
     if ndim > 2:
         shape = tuple(x.shape[:-2]) + (1, 1)
         eye = eye.repeat(*shape)
-    return x.add_(eye, alpha=value)
+    return x.add(eye, alpha=value)
 
 
 @contextmanager
