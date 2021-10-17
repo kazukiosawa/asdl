@@ -60,16 +60,18 @@ class _FisherBase(MatrixManager):
         return f'{self.fisher_type}_fvp'
 
     def zero_fisher(self):
-        ftype = self.fisher_type
+        attr = self.fisher_attr
         for module in self._model.modules():
-            if hasattr(module, ftype):
-                getattr(module, ftype).scaling(0)
+            f = getattr(module, attr, None)
+            if f is not None:
+                f.scaling(0)
 
     def zero_fvp(self):
         attr = self.fvp_attr
         for module in self._model.modules():
-            if hasattr(module, attr):
-                setattr(module, attr, getattr(module, attr) * 0)
+            fvp = getattr(module, attr, None)
+            if fvp is not None:
+                setattr(module, attr, fvp * 0)
 
     def calculate_fisher(self,
                          fisher_shapes,
