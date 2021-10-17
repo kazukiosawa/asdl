@@ -105,6 +105,7 @@ class _FisherBase(MatrixManager):
 
         def closure(loss_expr, grad_scale=None):
             model.zero_grad(set_to_none=True)
+            self._zero_batch_grads(set_to_none=True)
             loss = loss_expr()
             with _grads_scale(model, grad_scale):
                 with disable_param_grad(model):
@@ -135,6 +136,18 @@ class _FisherBase(MatrixManager):
             with extend(model, op_names):
                 self._fisher_core(closure, model(inputs), targets)
                 self._register_fisher(scale)
+
+    def _zero_batch_grads(self, set_to_none=False):
+        for module in self._model.modules():
+            operation = getattr(module, 'operation', None)
+            if operation is None:
+                continue
+            op_results = operation.get_op_results()
+            if op_results.get(OP_BATCH_GRADS, None):
+                if set_to_none:
+                    op_results[OP_BATCH_GRADS] = None
+                else:
+                    op_results[OP_BATCH_GRADS] *= 0
 
     def _fisher_core(self, closure, outputs, targets):
         raise NotImplementedError
@@ -340,7 +353,8 @@ def _module_batch_grads(model):
         operation = getattr(module, 'operation', None)
         if operation is None:
             continue
-        batch_grads = operation.get_op_results()[OP_BATCH_GRADS]
+        op_results = operation.get_op_results()
+        batch_grads = op_results[OP_BATCH_GRADS]
         rst.append((module, batch_grads))
     return rst
 
