@@ -23,8 +23,8 @@ class Operation:
         # remove duplicates
         op_names = set(op_names)
         self._op_names = op_names
-        self._grads_scale = None
         self._op_results = {}
+        self._grads_scale = None
 
     def _set_result(self, value, *keys):
         """
