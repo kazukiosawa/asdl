@@ -40,10 +40,10 @@ class Operation:
                     results[key] = {}
                 results = results[key]
         key = keys[-1]
-        if results.get(key, None):
-            results[key] += value
-        else:
+        if results.get(key, None) is None:
             results[key] = value
+        else:
+            results[key] += value
 
     def get_op_results(self):
         return self._op_results
