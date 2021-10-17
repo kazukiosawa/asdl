@@ -1,4 +1,5 @@
 import os
+from operator import iadd
 import numpy as np
 import torch
 from .utils import add_value_to_diagonal, cholesky_inv
@@ -120,10 +121,9 @@ class SymMatrix:
             other_value = getattr(other, attr)
             if other_value is not None:
                 if self_value is not None:
-                    value = self_value + other_value
+                    iadd(self_value, other_value)
                 else:
-                    value = other_value
-                setattr(self, attr, value)
+                    setattr(self, attr, other_value)
         return self
 
     def scaling(self, scale):
