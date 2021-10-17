@@ -29,7 +29,7 @@ class Operation:
     def _set_result(self, value, *keys):
         """
         Examples:
-             set_result(data, OP_COV_DIAG)
+             set_result(data, OP_COV_UNIT_WISE)
              set_result(data, OP_BATCH_GRADS, 'weight')
              set_result(A, OP_COV_KRON, 'A')
         """
