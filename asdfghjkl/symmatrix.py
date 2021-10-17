@@ -123,9 +123,8 @@ class SymMatrix:
                     value = self_value + other_value
                 else:
                     value = other_value
-            else:
-                value = self_value
-            setattr(self, attr, value)
+                setattr(self, attr, value)
+        return self
 
     def scaling(self, scale):
         if self.has_data:
