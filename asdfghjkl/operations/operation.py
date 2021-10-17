@@ -40,7 +40,7 @@ class Operation:
                     results[key] = {}
                 results = results[key]
         key = keys[-1]
-        if key in results:
+        if results.get(key, None):
             results[key] += value
         else:
             results[key] = value
