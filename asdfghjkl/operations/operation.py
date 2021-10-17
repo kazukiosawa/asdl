@@ -48,6 +48,9 @@ class Operation:
     def get_op_results(self):
         return self._op_results
 
+    def clear_op_results(self):
+        self._op_results = {}
+
     @property
     def grads_scale(self):
         return self._grads_scale
