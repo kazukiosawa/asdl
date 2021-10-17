@@ -9,18 +9,20 @@ _supported_modules = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d)
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 
 __all__ = [
-    'NaturalGradient', 'LayerWiseNaturalGradient', 'KFAC', 'DiagNaturalGradient'
+    'NaturalGradient', 'LayerWiseNaturalGradient', 'KFAC',
+    'DiagNaturalGradient'
 ]
 
 
 class NaturalGradient:
-    def __init__(self,
-                 model,
-                 fisher_type=FISHER_EXACT,
-                 n_mc_samples=1,
-                 damping=1e-5,
-                 ema_decay=None,
-                 ):
+    def __init__(
+        self,
+        model,
+        fisher_type=FISHER_EXACT,
+        n_mc_samples=1,
+        damping=1e-5,
+        ema_decay=None,
+    ):
         from torch.nn.parallel import DistributedDataParallel as DDP
         assert not isinstance(model, DDP), f'{DDP} is not supported.'
         del DDP
@@ -49,7 +51,14 @@ class NaturalGradient:
         if fisher is not None:
             fisher.scaling(scale)
 
-    def _update_curvature(self, inputs=None, targets=None, data_loader=None, accumulate=False, ema_decay=None, data_average=True, scale=1):
+    def _update_curvature(self,
+                          inputs=None,
+                          targets=None,
+                          data_loader=None,
+                          accumulate=False,
+                          ema_decay=None,
+                          data_average=True,
+                          scale=1):
         if ema_decay is None:
             ema_decay = self.ema_decay
         if ema_decay is not None and ema_decay < 1:
@@ -70,13 +79,36 @@ class NaturalGradient:
                                        n_mc_samples=self.n_mc_samples)
         self.fisher_manager = rst
 
-    def accumulate_curvature(self, inputs=None, targets=None, data_loader=None, ema_decay=None, data_average=True, scale=1):
-        self._update_curvature(inputs, targets, data_loader, accumulate=True, ema_decay=ema_decay, data_average=data_average, scale=scale)
+    def accumulate_curvature(self,
+                             inputs=None,
+                             targets=None,
+                             data_loader=None,
+                             ema_decay=None,
+                             data_average=True,
+                             scale=1):
+        self._update_curvature(inputs,
+                               targets,
+                               data_loader,
+                               accumulate=True,
+                               ema_decay=ema_decay,
+                               data_average=data_average,
+                               scale=scale)
 
-    def refresh_curvature(self, inputs=None, targets=None, data_loader=None, data_average=True, scale=1):
+    def refresh_curvature(self,
+                          inputs=None,
+                          targets=None,
+                          data_loader=None,
+                          data_average=True,
+                          scale=1):
         if self.ema_decay is not None:
             warnings.warn(f'ema_decay ({self.ema_decay}) will be ignored.')
-        self._update_curvature(inputs, targets, data_loader, accumulate=False, ema_decay=1, data_average=data_average, scale=scale)
+        self._update_curvature(inputs,
+                               targets,
+                               data_loader,
+                               accumulate=False,
+                               ema_decay=1,
+                               data_average=data_average,
+                               scale=scale)
 
     def reduce_curvature(self, all_reduce=True):
         self.fisher_manager.reduce_matrices(all_reduce=all_reduce)
@@ -209,8 +241,8 @@ class KFAC(NaturalGradient):
                 vec2d = vec[w_idx].view(B_inv.shape[0], -1)
                 idx += 1
                 if _bias_requires_grad(module):
-                    vec2d = torch.cat(
-                        [vec2d, vec[idx].unsqueeze(dim=1)], dim=1)
+                    vec2d = torch.cat([vec2d, vec[idx].unsqueeze(dim=1)],
+                                      dim=1)
                 ng = B_inv.mm(vec2d).mm(A_inv)
                 if _bias_requires_grad(module):
                     vec_w = ng[:, :-1]
@@ -275,5 +307,3 @@ def _bias_requires_grad(module):
     return hasattr(module, 'bias') \
            and module.bias is not None \
            and module.bias.requires_grad
-
-
