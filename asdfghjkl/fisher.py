@@ -82,6 +82,7 @@ class _FisherBase(MatrixManager):
                          vec=None,
                          data_average=True,
                          accumulate=False,
+                         seed=None,
                          scale=1.):
         if isinstance(fisher_shapes, str):
             fisher_shapes = [fisher_shapes]
@@ -124,6 +125,8 @@ class _FisherBase(MatrixManager):
             # calculate fisher/fvp for the data_loader
             for inputs, targets in data_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
+                if seed:
+                    torch.random.manual_seed(seed)
                 with extend(model, op_names):
                     self._fisher_core(closure, model(inputs), targets)
                     self._register_fisher(scale)
@@ -135,6 +138,8 @@ class _FisherBase(MatrixManager):
             inputs = inputs.to(device)
             if targets is not None:
                 targets = targets.to(device)
+            if seed:
+                torch.random.manual_seed(seed)
             with extend(model, op_names):
                 self._fisher_core(closure, model(inputs), targets)
                 self._register_fisher(scale)
@@ -503,6 +508,7 @@ def fisher(
         is_master=True,
         accumulate=False,
         data_average=True,
+        seed=None,
         scale=1.,
         **kwargs
 ):
@@ -533,6 +539,7 @@ def fisher(
         vec=vec,
         accumulate=accumulate,
         data_average=data_average,
+        seed=seed,
         scale=scale)
     if is_distributed:
         if fvp:
