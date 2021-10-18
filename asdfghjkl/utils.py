@@ -127,7 +127,8 @@ class PseudoBatchLoaderGenerator:
     def __init__(self, base_data_loader, pseudo_batch_size, batch_size=None):
         if batch_size is None:
             batch_size = base_data_loader.batch_size
-        assert pseudo_batch_size % batch_size == 0, f'pseudo_batch_size ({pseudo_batch_size}) needs to be divisible by batch_size ({batch_size})'
+        assert pseudo_batch_size % batch_size == 0, f'pseudo_batch_size ({pseudo_batch_size}) ' \
+                                                    f'needs to be divisible by batch_size ({batch_size})'
         base_dataset = base_data_loader.dataset
         sampler_cls = base_data_loader.sampler.__class__
         batch_sampler = BatchSampler(sampler_cls(range(len(base_dataset))),
