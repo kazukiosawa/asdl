@@ -4,6 +4,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.cuda import nvtx
+from torch.utils.data import BatchSampler, Subset, DataLoader
 
 _REQUIRES_GRAD_ATTR = '_original_requires_grad'
 
@@ -16,7 +17,8 @@ __all__ = [
     'im2col_2d_slow',
     'add_value_to_diagonal',
     'nvtx_range',
-    'cholesky_inv'
+    'cholesky_inv',
+    'PseudoBatchLoaderGenerator'
 ]
 
 
@@ -102,3 +104,63 @@ def nvtx_range(msg):
 def cholesky_inv(X):
     u = torch.linalg.cholesky(X)
     return torch.cholesky_inverse(u)
+
+
+class PseudoBatchLoaderGenerator:
+    """
+    Example::
+    >>> # create a base dataloader
+    >>> dataset_size = 10
+    >>> x_all = torch.tensor(range(dataset_size))
+    >>> dataset = torch.utils.data.TensorDataset(x_all)
+    >>> data_loader = torch.utils.data.DataLoader(dataset, shuffle=True)
+    >>>
+    >>> # create a pseudo-batch loader generator
+    >>> pb_loader_generator = PseudoBatchLoaderGenerator(data_loader, 5)
+    >>>
+    >>> for i, pb_loader in enumerate(pb_loader_generator):
+    >>>     print(f'pseudo-batch at step {i}')
+    >>>     print(list(pb_loader))
+
+    Outputs:
+    ```
+    pseudo-batch at step 0
+    [[tensor([0])], [tensor([1])], [tensor([3])], [tensor([6])], [tensor([7])]]
+    pseudo-batch at step 1
+    [[tensor([8])], [tensor([5])], [tensor([4])], [tensor([2])], [tensor([9])]]
+    ```
+    """
+
+    def __init__(self, base_data_loader, pseudo_batch_size, batch_size=None):
+        if batch_size is None:
+            batch_size = base_data_loader.batch_size
+        assert pseudo_batch_size % batch_size == 0, f'pseudo_batch_size ({pseudo_batch_size}) needs to be divisible by batch_size ({batch_size})'
+        base_dataset = base_data_loader.dataset
+        sampler_cls = base_data_loader.sampler.__class__
+        batch_sampler = BatchSampler(sampler_cls(range(len(base_dataset))),
+                                     batch_size=pseudo_batch_size,
+                                     drop_last=True)
+        self.batch_size = batch_size
+        self.batch_sampler = batch_sampler
+        self.base_dataset = base_dataset
+        self.base_data_loader = base_data_loader
+
+    def __iter__(self):
+        loader = self.base_data_loader
+        for indices in self.batch_sampler:
+            subset_in_pseudo_batch = Subset(self.base_dataset, indices)
+            data_loader = DataLoader(subset_in_pseudo_batch,
+                                     batch_size=self.batch_size,
+                                     shuffle=False,
+                                     num_workers=loader.num_workers,
+                                     collate_fn=loader.collate_fn,
+                                     pin_memory=loader.pin_memory,
+                                     drop_last=False,
+                                     timeout=loader.timeout,
+                                     worker_init_fn=loader.worker_init_fn,
+                                     multiprocessing_context=loader.multiprocessing_context,
+                                     generator=loader.generator,
+                                     prefetch_factor=loader.prefetch_factor,
+                                     persistent_workers=loader.persistent_workers)
+            yield data_loader
+
