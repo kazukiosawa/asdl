@@ -47,10 +47,11 @@ class NaturalGradient:
         fisher = getattr(module, attr, None)
         return fisher
 
-    def _scale_fisher(self, module, scale):
-        fisher = self._get_fisher(module)
-        if fisher is not None:
-            fisher.scaling(scale)
+    def _scale_fisher(self, scale):
+        for module in self.modules:
+            fisher = self._get_fisher(module)
+            if fisher is not None:
+                fisher.scaling(scale)
 
     def _update_curvature(self,
                           inputs=None,
@@ -66,8 +67,7 @@ class NaturalGradient:
         if ema_decay != _invalid_ema_decay:
             assert accumulate, 'ema_decay cannot be set when accumulate=False.'
             scale *= ema_decay
-            for module in self.modules:
-                self._scale_fisher(module, 1 - ema_decay)
+            self._scale_fisher(1 - ema_decay)
 
         rst = fisher_for_cross_entropy(self.model,
                                        inputs=inputs,
