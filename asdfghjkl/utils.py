@@ -31,15 +31,16 @@ def restore_original_requires_grad(param):
 
 
 @contextmanager
-def disable_param_grad(model):
-
-    for param in model.parameters():
-        record_original_requires_grad(param)
-        param.requires_grad = False
+def disable_param_grad(model, disable=True):
+    if disable:
+        for param in model.parameters():
+            record_original_requires_grad(param)
+            param.requires_grad = False
 
     yield
-    for param in model.parameters():
-        restore_original_requires_grad(param)
+    if disable:
+        for param in model.parameters():
+            restore_original_requires_grad(param)
 
 
 def im2col_2d(x: torch.Tensor, conv2d: nn.Module):

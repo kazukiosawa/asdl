@@ -82,6 +82,7 @@ class _FisherBase(MatrixManager):
                          vec=None,
                          data_average=True,
                          accumulate=False,
+                         no_param_grad=True,
                          seed=None,
                          scale=1.):
         if isinstance(fisher_shapes, str):
@@ -111,7 +112,7 @@ class _FisherBase(MatrixManager):
             self._zero_op_batch_grads(set_to_none=True)
             loss = loss_expr()
             with _grads_scale(model, grad_scale):
-                with disable_param_grad(model):
+                with disable_param_grad(model, disable=no_param_grad):
                     loss.backward(retain_graph=True)
             if fvp:
                 _construct_cvp(model, fisher_shapes, vec)
@@ -509,6 +510,7 @@ def fisher(
         is_master=True,
         accumulate=False,
         data_average=True,
+        no_param_grad=True,
         seed=None,
         scale=1.,
         **kwargs
@@ -540,6 +542,7 @@ def fisher(
         vec=vec,
         accumulate=accumulate,
         data_average=data_average,
+        no_param_grad=no_param_grad,
         seed=seed,
         scale=scale)
     if is_distributed:
