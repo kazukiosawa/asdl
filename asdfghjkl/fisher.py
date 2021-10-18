@@ -121,8 +121,9 @@ class _FisherBase(MatrixManager):
 
         device = self._device
         if data_loader is not None:
+            data_size = len(data_loader.dataset)
             if data_average:
-                scale /= len(data_loader.dataset)
+                scale /= data_size
             # calculate fisher/fvp for the data_loader
             for inputs, targets in data_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
@@ -134,8 +135,9 @@ class _FisherBase(MatrixManager):
         else:
             # calculate fisher/fvp for a single batch
             assert inputs is not None
+            data_size = inputs.shape[0]
             if data_average:
-                scale /= inputs.shape[0]
+                scale /= data_size
             inputs = inputs.to(device)
             if targets is not None:
                 targets = targets.to(device)
@@ -144,6 +146,13 @@ class _FisherBase(MatrixManager):
             with extend(model, op_names):
                 self._fisher_core(closure, model(inputs), targets)
                 self._register_fisher(scale)
+
+        if not no_param_grad and data_average:
+            # divide gradients by data size
+            # ("loss_expr" function is defined with reduction='sum')
+            for p in model.parameters():
+                if p.grad is not None:
+                    p.grad.div_(data_size)
 
     def _zero_op_batch_grads(self, set_to_none=False):
         for module in self._model.modules():
