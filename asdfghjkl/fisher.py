@@ -106,7 +106,6 @@ class _FisherBase(MatrixManager):
         op_names = list(set(op_names))
 
         model = self._model
-        model.zero_grad(set_to_none=True)
 
         def closure(loss_expr, grad_scale=None):
             self._zero_op_batch_grads(set_to_none=True)
