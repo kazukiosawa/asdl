@@ -9,15 +9,9 @@ from torch.utils.data import BatchSampler, Subset, DataLoader
 _REQUIRES_GRAD_ATTR = '_original_requires_grad'
 
 __all__ = [
-    'original_requires_grad',
-    'record_original_requires_grad',
-    'restore_original_requires_grad',
-    'disable_param_grad',
-    'im2col_2d',
-    'im2col_2d_slow',
-    'add_value_to_diagonal',
-    'nvtx_range',
-    'cholesky_inv',
+    'original_requires_grad', 'record_original_requires_grad',
+    'restore_original_requires_grad', 'disable_param_grad', 'im2col_2d',
+    'im2col_2d_slow', 'add_value_to_diagonal', 'nvtx_range', 'cholesky_inv',
     'PseudoBatchLoaderGenerator'
 ]
 
@@ -32,9 +26,8 @@ def record_original_requires_grad(param):
 
 
 def restore_original_requires_grad(param):
-    param.requires_grad = getattr(
-        param, _REQUIRES_GRAD_ATTR, param.requires_grad
-    )
+    param.requires_grad = getattr(param, _REQUIRES_GRAD_ATTR,
+                                  param.requires_grad)
 
 
 @contextmanager
@@ -61,8 +54,11 @@ def im2col_2d(x: torch.Tensor, conv2d: nn.Module):
         x = F.pad(x, (pw, pw, ph, ph)).data
     x = x.unfold(2, kh, sy)  # n x c x h_out x w_in x kh
     x = x.unfold(3, kw, sx)  # n x c x h_out x w_out x kh x kw
-    x = x.permute(0, 1, 4, 5, 2, 3).contiguous()  # n x c x kh x kw x h_out x w_out
-    x = x.view(x.size(0), x.size(1) * x.size(2) * x.size(3), x.size(4) * x.size(5))  # n x c(kh)(kw) x (h_out)(w_out)
+    x = x.permute(0, 1, 4, 5, 2,
+                  3).contiguous()  # n x c x kh x kw x h_out x w_out
+    x = x.view(x.size(0),
+               x.size(1) * x.size(2) * x.size(3),
+               x.size(4) * x.size(5))  # n x c(kh)(kw) x (h_out)(w_out)
     return x
 
 
@@ -71,13 +67,11 @@ def im2col_2d_slow(x: torch.Tensor, conv2d: nn.Module):
     assert isinstance(conv2d, (nn.Conv2d, nn.ConvTranspose2d))
 
     # n x c(k_h)(k_w) x (h_out)(w_out)
-    Mx = F.unfold(
-        x,
-        conv2d.kernel_size,
-        dilation=conv2d.dilation,
-        padding=conv2d.padding,
-        stride=conv2d.stride
-    )
+    Mx = F.unfold(x,
+                  conv2d.kernel_size,
+                  dilation=conv2d.dilation,
+                  padding=conv2d.padding,
+                  stride=conv2d.stride)
 
     return Mx
 
@@ -130,7 +124,6 @@ class PseudoBatchLoaderGenerator:
     [[tensor([8])], [tensor([5])], [tensor([4])], [tensor([2])], [tensor([9])]]
     ```
     """
-
     def __init__(self, base_data_loader, pseudo_batch_size, batch_size=None):
         if batch_size is None:
             batch_size = base_data_loader.batch_size
@@ -149,18 +142,18 @@ class PseudoBatchLoaderGenerator:
         loader = self.base_data_loader
         for indices in self.batch_sampler:
             subset_in_pseudo_batch = Subset(self.base_dataset, indices)
-            data_loader = DataLoader(subset_in_pseudo_batch,
-                                     batch_size=self.batch_size,
-                                     shuffle=False,
-                                     num_workers=loader.num_workers,
-                                     collate_fn=loader.collate_fn,
-                                     pin_memory=loader.pin_memory,
-                                     drop_last=False,
-                                     timeout=loader.timeout,
-                                     worker_init_fn=loader.worker_init_fn,
-                                     multiprocessing_context=loader.multiprocessing_context,
-                                     generator=loader.generator,
-                                     prefetch_factor=loader.prefetch_factor,
-                                     persistent_workers=loader.persistent_workers)
+            data_loader = DataLoader(
+                subset_in_pseudo_batch,
+                batch_size=self.batch_size,
+                shuffle=False,
+                num_workers=loader.num_workers,
+                collate_fn=loader.collate_fn,
+                pin_memory=loader.pin_memory,
+                drop_last=False,
+                timeout=loader.timeout,
+                worker_init_fn=loader.worker_init_fn,
+                multiprocessing_context=loader.multiprocessing_context,
+                generator=loader.generator,
+                prefetch_factor=loader.prefetch_factor,
+                persistent_workers=loader.persistent_workers)
             yield data_loader
-
