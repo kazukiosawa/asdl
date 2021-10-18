@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.nn.functional import cross_entropy
 
-from asdfghjkl import FISHER_MC, FISHER_EMP
+from asdfghjkl import FISHER_EMP
 from asdfghjkl import NaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient
 
 
@@ -51,6 +51,7 @@ def assert_equal(tensor1, tensor2, msg=''):
     assert torch.equal(tensor1, tensor2), f'{msg} tensor1: {tensor1.norm().item()}, tensor2: {tensor2.norm().item()}, relative_diff: {relative_norm}'
 
 
+# test param.grad by fisher_emp vs loss.backward()
 model1 = convnet(32, 16)
 model2 = copy.deepcopy(model1)
 
@@ -66,27 +67,28 @@ for p1, p2 in zip(model1.parameters(), model2.parameters()):
     assert_equal(p1.grad, p2.grad)
 
 
-def fisher_emp_and_param_grad():
-    model1.zero_grad(set_to_none=True)
-    ngd1 = NaturalGradient(model1, FISHER_EMP)
-    ngd1.refresh_curvature(x, y, no_param_grad=False)
-    assert all(p.grad is not None for p in model1.parameters())
+# time fisher_emp w/ and w/o param.grad vs loss.backward()
+for ng_cls in [NaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient]:
+    print(ng_cls.__name__)
 
+    def fisher_emp_and_param_grad():
+        model1.zero_grad(set_to_none=True)
+        ngd1 = ng_cls(model1, FISHER_EMP)
+        ngd1.refresh_curvature(x, y, no_param_grad=False)
+        assert all(p.grad is not None for p in model1.parameters())
 
-def fisher_emp():
-    model1.zero_grad(set_to_none=True)
-    ngd1 = NaturalGradient(model1, FISHER_EMP)
-    ngd1.refresh_curvature(x, y, no_param_grad=True)
-    assert all(p.grad is None for p in model1.parameters())
+    def fisher_emp():
+        model1.zero_grad(set_to_none=True)
+        ngd1 = ng_cls(model1, FISHER_EMP)
+        ngd1.refresh_curvature(x, y, no_param_grad=True)
+        assert all(p.grad is None for p in model1.parameters())
 
+    def param_grad():
+        model1.zero_grad(set_to_none=True)
+        loss = cross_entropy(model1(x), y)
+        loss.backward()
+        assert all(p.grad is not None for p in model1.parameters())
 
-def param_grad():
-    model1.zero_grad(set_to_none=True)
-    loss = cross_entropy(model1(x), y)
-    loss.backward()
-    assert all(p.grad is not None for p in model1.parameters())
-
-
-time_f(fisher_emp_and_param_grad)
-time_f(fisher_emp)
-time_f(param_grad)
+    time_f(fisher_emp_and_param_grad)
+    time_f(fisher_emp)
+    time_f(param_grad)
