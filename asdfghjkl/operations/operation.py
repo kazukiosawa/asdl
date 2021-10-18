@@ -79,7 +79,7 @@ class Operation:
                 self._set_result(A, OP_COV_KRON, 'A')
 
             if OP_GRAM_HADAMARD in self._op_names:
-                assert self._model_for_kernel is not None, f'fmodel_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
+                assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
                 n_data = in_data.shape[0]
                 n1 = self._model_for_kernel.kernel.shape[0]
                 if n_data == n1:
@@ -111,7 +111,7 @@ class Operation:
                 self._set_result(OP_COV_UNIT_WISE, rst)
 
             elif op_name == OP_GRAM_HADAMARD:
-                assert self._model_for_kernel is not None, f'fmodel_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
+                assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
                 n_data = in_data.shape[0]
                 n1 = self._model_for_kernel.kernel.shape[0]
                 if n_data == n1:
@@ -122,7 +122,7 @@ class Operation:
                 self._model_for_kernel.kernel += B.mul(A)
 
             elif op_name == OP_GRAM_DIRECT:
-                assert self._model_for_kernel is not None, f'fmodel_for_kernel needs to be set for {OP_GRAM_DIRECT}.'
+                assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_DIRECT}.'
                 n_data = in_data.shape[0]
                 n1 = self._model_for_kernel.kernel.shape[0]
 
