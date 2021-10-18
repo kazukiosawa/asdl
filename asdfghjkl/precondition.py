@@ -7,6 +7,7 @@ from .fisher import fisher_for_cross_entropy
 
 _supported_modules = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d)
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
+_invalid_ema_decay = -1
 
 __all__ = [
     'NaturalGradient', 'LayerWiseNaturalGradient', 'KFAC',
@@ -21,7 +22,7 @@ class NaturalGradient:
         fisher_type=FISHER_EXACT,
         n_mc_samples=1,
         damping=1e-5,
-        ema_decay=None,
+        ema_decay=_invalid_ema_decay,
     ):
         from torch.nn.parallel import DistributedDataParallel as DDP
         assert not isinstance(model, DDP), f'{DDP} is not supported.'
@@ -62,7 +63,7 @@ class NaturalGradient:
                           scale=1):
         if ema_decay is None:
             ema_decay = self.ema_decay
-        if ema_decay is not None:
+        if ema_decay != _invalid_ema_decay:
             assert accumulate, 'ema_decay cannot be set when accumulate=False.'
             scale *= ema_decay
             for module in self.modules:
@@ -105,12 +106,13 @@ class NaturalGradient:
                           data_average=True,
                           seed=None,
                           scale=1):
-        if self.ema_decay is not None:
+        if self.ema_decay != _invalid_ema_decay:
             warnings.warn(f'ema_decay ({self.ema_decay}) will be ignored.')
         self._update_curvature(inputs,
                                targets,
                                data_loader,
                                accumulate=False,
+                               ema_decay=_invalid_ema_decay,
                                data_average=data_average,
                                seed=seed,
                                scale=scale)
