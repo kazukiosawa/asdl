@@ -117,6 +117,105 @@ class NaturalGradient:
                                seed=seed,
                                scale=scale)
 
+    def accumulate_pseudo_batch_curvature(self,
+                                          accumulation_step,
+                                          inputs=None,
+                                          targets=None,
+                                          data_loader=None,
+                                          data_average=True,
+                                          ema_decay=None,
+                                          seed=None,
+                                          scale=1,
+                                          pseudo_batch_size=None):
+        """
+        Performs an action (refresh_curvature() or accumulate_curvature())
+        depending on the accumulation_step to create a pseudo-batch curvature:
+
+        The curvature calculated at each step will be divided by pseudo_batch_size
+        when data_average == True.
+            >>> pseudo_batch_curvature = curvature_at_step_0 / pseudo_batch_size
+            >>> pseudo_batch_curvature += curvature_at_step_1 / pseudo_batch_size
+            >>> pseudo_batch_curvature += curvature_at_step_2 / pseudo_batch_size
+
+        When w/o EMA,
+            At the first step, the previous pseudo-batch curvature will be overwritten by
+            the curvature calculated at this step.
+
+            >>> # 1st pseudo-batch
+            >>> pseudo_batch_curvature = curvature_at_step_0  # refresh
+            >>> pseudo_batch_curvature += curvature_at_step_1  # accumulate
+            >>> pseudo_batch_curvature += curvature_at_step_2  # accumulate
+            >>> # 2nd pseudo-batch
+            >>> pseudo_batch_curvature = curvature_at_step_0  # refresh
+            >>> pseudo_batch_curvature += curvature_at_step_1  # accumulate
+            >>> pseudo_batch_curvature += curvature_at_step_2  # accumulate
+
+        When w/ EMA,
+            At th first step, the EMA of curvature will be scaled by (1 - ema_decay) if exists.
+            At each step, the curvature will be scaled by ema_decay.
+
+            >>> # 1st pseudo-batch
+            >>> pseudo_batch_EMA = curvature_at_step_0 * ema_decay  # accumulate (to nothing)
+            >>> pseudo_batch_EMA += curvature_at_step_1 * ema_decay  # accumulate
+            >>> pseudo_batch_EMA += curvature_at_step_2 * ema_decay  # accumulate
+            >>> # 2nd pseudo-batch
+            >>> pseudo_batch_EMA *= (1 - ema_decay)
+            >>> pseudo_batch_EMA += curvature_at_step_0 * ema_decay  # accumulate
+            >>> pseudo_batch_EMA += curvature_at_step_1 * ema_decay  # accumulate
+            >>> pseudo_batch_EMA += curvature_at_step_2 * ema_decay  # accumulate
+
+            NOTE: It is recommend to use ema_decay == 1 for the first pseudo-batch.
+
+
+        Example::
+            >>> model = Net()
+            >>> ng = NaturalGradient(model, ema_decay=0.9)
+            >>> n_accumulations = 3
+            >>> pseudo_batch_size = n_accumulations * data_loader.batch_size
+            >>> for i, (x, y) in enumerate(data_loader):
+            >>>     accumulation_step = i % n_accumulations
+            >>>     is_first_pseudo_batch = int(i / n_accumulations) == 0
+            >>>     ema_decay = 1 if is_first_pseudo_batch else None
+            >>>     ng.accumulate_pseudo_batch_curvature(accumulation_step,
+            >>>                                          inputs=x,
+            >>>                                          targets=y,
+            >>>                                          ema_decay=ema_decay,
+            >>>                                          pseudo_batch_size=pseudo_batch_size)
+
+        NOTE: When dataset size is not divisible by the data_loader.batch_size, there will be an incomplete
+        batch unless data_loader.drop_last == True. Therefore, n_accumulations * data_loader.batch_size can
+        be an incorrect value for the pseudo-batch size. The "correct" value depends on how a user wants to
+        treat the imcomplete batch.
+        """
+        if data_average:
+            assert pseudo_batch_size, 'pseudo_batch_size needs to be specified when data_average==True'
+            data_average = False  # disable local data averaging
+            scale /= pseudo_batch_size
+
+        if ema_decay is None:
+            ema_decay = self.ema_decay
+        keep_ema = ema_decay != _invalid_ema_decay
+        if keep_ema:
+            scale *= ema_decay
+            if accumulation_step == 0:
+                self._scale_fisher(1 - ema_decay)
+
+        if not keep_ema and accumulation_step == 0:
+            self.refresh_curvature(inputs,
+                                   targets,
+                                   data_loader,
+                                   data_average=data_average,
+                                   seed=seed,
+                                   scale=scale)
+        else:
+            self.accumulate_curvature(inputs,
+                                      targets,
+                                      data_loader,
+                                      ema_decay=ema_decay,
+                                      data_average=data_average,
+                                      seed=seed,
+                                      scale=scale)
+
     def reduce_curvature(self, all_reduce=True):
         self.fisher_manager.reduce_matrices(all_reduce=all_reduce)
 
