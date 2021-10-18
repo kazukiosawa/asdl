@@ -1,27 +1,29 @@
+import warnings
 import torch
 from torch import nn
 
 from .matrices import FISHER_EXACT, SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG  # NOQA
 from .fisher import fisher_for_cross_entropy
-from .utils import add_value_to_diagonal
 
 _supported_modules = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d)
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
+_invalid_ema_decay = -1
 
 __all__ = [
-    'NaturalGradient', 'LayerWiseNaturalGradient', 'KFAC', 'DiagNaturalGradient'
+    'NaturalGradient', 'LayerWiseNaturalGradient', 'KFAC',
+    'DiagNaturalGradient'
 ]
 
 
 class NaturalGradient:
-    def __init__(self,
-                 model,
-                 fisher_type=FISHER_EXACT,
-                 pre_inv_postfix=None,
-                 n_mc_samples=1,
-                 damping=1e-5,
-                 ema_decay=1.,
-                 ):
+    def __init__(
+        self,
+        model,
+        fisher_type=FISHER_EXACT,
+        n_mc_samples=1,
+        damping=1e-5,
+        ema_decay=_invalid_ema_decay,
+    ):
         from torch.nn.parallel import DistributedDataParallel as DDP
         assert not isinstance(model, DDP), f'{DDP} is not supported.'
         del DDP
@@ -31,10 +33,8 @@ class NaturalGradient:
         self.n_mc_samples = n_mc_samples
         self.damping = damping
         self.ema_decay = ema_decay
-        assert 0.0 < self.ema_decay and self.ema_decay <= 1.0
         self.fisher_shape = SHAPE_FULL
         self.fisher_manager = None
-        self._pre_inv_postfix = pre_inv_postfix
 
     def _get_fisher_attr(self, postfix=None):
         if postfix is None:
@@ -47,60 +47,75 @@ class NaturalGradient:
         fisher = getattr(module, attr, None)
         return fisher
 
-    @property
-    def _pre_inv_attr(self):
-        return self._get_fisher_attr(self._pre_inv_postfix)
+    def _scale_fisher(self, module, scale):
+        fisher = self._get_fisher(module)
+        if fisher is not None:
+            fisher.scaling(scale)
 
-    def _get_pre_inv_fisher(self, module):
-        return getattr(module, self._pre_inv_attr, None)
+    def _update_curvature(self,
+                          inputs=None,
+                          targets=None,
+                          data_loader=None,
+                          accumulate=False,
+                          ema_decay=None,
+                          data_average=True,
+                          seed=None,
+                          scale=1):
+        if ema_decay is None:
+            ema_decay = self.ema_decay
+        if ema_decay != _invalid_ema_decay:
+            assert accumulate, 'ema_decay cannot be set when accumulate=False.'
+            scale *= ema_decay
+            for module in self.modules:
+                self._scale_fisher(module, 1 - ema_decay)
 
-    def _set_fisher(self, module, data, postfix=None):
-        attr = self._get_fisher_attr(postfix)
-        setattr(module, attr, data)
-
-    def _clear_fisher(self, module, postfix=None):
-        attr = self._get_fisher_attr(postfix)
-        if hasattr(module, attr):
-            delattr(module, attr)
-
-    def update_curvature(self, inputs=None, targets=None, data_loader=None):
         rst = fisher_for_cross_entropy(self.model,
                                        inputs=inputs,
                                        targets=targets,
                                        data_loader=data_loader,
                                        fisher_type=self.fisher_type,
                                        fisher_shapes=self.fisher_shape,
+                                       accumulate=accumulate,
+                                       data_average=data_average,
+                                       seed=seed,
+                                       scale=scale,
                                        n_mc_samples=self.n_mc_samples)
         self.fisher_manager = rst
 
-    def move_curvature(self, postfix, scale=1., ema_decay=None, to_pre_inv=False):
-        self.accumulate_curvature(postfix, scale, ema_decay, to_pre_inv, replace=True)
+    def accumulate_curvature(self,
+                             inputs=None,
+                             targets=None,
+                             data_loader=None,
+                             ema_decay=None,
+                             data_average=True,
+                             seed=None,
+                             scale=1):
+        self._update_curvature(inputs,
+                               targets,
+                               data_loader,
+                               accumulate=True,
+                               ema_decay=ema_decay,
+                               data_average=data_average,
+                               seed=seed,
+                               scale=scale)
 
-    def accumulate_curvature(self, postfix='acc', scale=1., ema_decay=None, to_pre_inv=False, replace=False):
-        if ema_decay is None:
-            ema_decay = self.ema_decay
-        if to_pre_inv:
-            postfix = self._pre_inv_postfix
-        for module in self.modules:
-            fisher = self._get_fisher(module)
-            if fisher is None:
-                continue
-            fisher.scaling(scale)
-            fisher_acc = self._get_fisher(module, postfix)
-            if fisher_acc is None or replace or ema_decay == 1.0:
-                self._set_fisher(module, fisher, postfix)
-            else:
-                fisher.scaling(ema_decay)
-                fisher_acc.scaling(1.0 - ema_decay)
-                fisher_acc += fisher
-            self._clear_fisher(module)
-
-    def finalize_accumulation(self, postfix='acc'):
-        for module in self.modules:
-            fisher_acc = self._get_fisher(module, postfix)
-            assert fisher_acc is not None
-            self._set_fisher(module, fisher_acc)
-            self._clear_fisher(module, postfix)
+    def refresh_curvature(self,
+                          inputs=None,
+                          targets=None,
+                          data_loader=None,
+                          data_average=True,
+                          seed=None,
+                          scale=1):
+        if self.ema_decay != _invalid_ema_decay:
+            warnings.warn(f'ema_decay ({self.ema_decay}) will be ignored.')
+        self._update_curvature(inputs,
+                               targets,
+                               data_loader,
+                               accumulate=False,
+                               ema_decay=_invalid_ema_decay,
+                               data_average=data_average,
+                               seed=seed,
+                               scale=scale)
 
     def reduce_curvature(self, all_reduce=True):
         self.fisher_manager.reduce_matrices(all_reduce=all_reduce)
@@ -108,13 +123,11 @@ class NaturalGradient:
     def update_inv(self, damping=None):
         if damping is None:
             damping = self.damping
-
         for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
+            fisher = self._get_fisher(module)
             if fisher is None:
                 continue
-            inv = _cholesky_inv(add_value_to_diagonal(fisher.data, damping))
-            setattr(fisher, 'inv', inv)
+            fisher.update_inv(damping)
 
     def precondition(self):
         grads = []
@@ -122,7 +135,7 @@ class NaturalGradient:
             if p.requires_grad and p.grad is not None:
                 grads.append(p.grad.flatten())
         g = torch.cat(grads)
-        fisher = self._get_pre_inv_fisher(self.model)
+        fisher = self._get_fisher(self.model)
         ng = torch.mv(fisher.inv, g)
 
         pointer = 0
@@ -140,11 +153,10 @@ class LayerWiseNaturalGradient(NaturalGradient):
     def __init__(self,
                  model,
                  fisher_type=FISHER_EXACT,
-                 pre_inv_postfix=None,
                  n_mc_samples=1,
                  damping=1e-5,
                  ema_decay=1.):
-        super().__init__(model, fisher_type, pre_inv_postfix, n_mc_samples, damping, ema_decay)
+        super().__init__(model, fisher_type, n_mc_samples, damping, ema_decay)
         self.fisher_shape = SHAPE_BLOCK_DIAG
         self.modules = [
             m for m in model.modules() if isinstance(m, _supported_modules)
@@ -152,7 +164,7 @@ class LayerWiseNaturalGradient(NaturalGradient):
 
     def precondition(self):
         for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
+            fisher = self._get_fisher(module)
             if fisher is None:
                 continue
             g = module.weight.grad.flatten()
@@ -173,47 +185,18 @@ class KFAC(NaturalGradient):
     def __init__(self,
                  model,
                  fisher_type=FISHER_EXACT,
-                 pre_inv_postfix=None,
                  n_mc_samples=1,
                  damping=1e-5,
                  ema_decay=1.):
-        super().__init__(model, fisher_type, pre_inv_postfix, n_mc_samples, damping, ema_decay)
+        super().__init__(model, fisher_type, n_mc_samples, damping, ema_decay)
         self.fisher_shape = SHAPE_KRON
         self.modules = [
             m for m in model.modules() if isinstance(m, _supported_modules)
         ]
 
-    def update_inv(self, damping=None):
-        if damping is None:
-            damping = self.damping
-
-        for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
-            if fisher is None:
-                continue
-            if isinstance(module, _normalizations):
-                unit = fisher.unit.data
-                f = unit.shape[0]
-                dmp = torch.eye(2, device=unit.device, dtype=unit.dtype).repeat(f, 1, 1) * damping
-                inv = torch.inverse(fisher.unit.data + dmp)
-                setattr(fisher.unit, 'inv', inv)
-            else:
-                A = fisher.kron.A
-                B = fisher.kron.B
-                A_eig_mean = A.trace() / A.shape[0]
-                B_eig_mean = B.trace() / B.shape[0]
-                pi = torch.sqrt(A_eig_mean / B_eig_mean)
-                r = damping**0.5
-
-                A_inv = _cholesky_inv(add_value_to_diagonal(A, r * pi))
-                B_inv = _cholesky_inv(add_value_to_diagonal(B, r / pi))
-
-                setattr(fisher.kron, 'A_inv', A_inv)
-                setattr(fisher.kron, 'B_inv', B_inv)
-
     def precondition(self):
         for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
+            fisher = self._get_fisher(module)
             if fisher is None:
                 continue
             if isinstance(module, _normalizations):
@@ -244,7 +227,7 @@ class KFAC(NaturalGradient):
     def precondition_vector(self, vec):
         idx = 0
         for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
+            fisher = self._get_fisher(module)
             if fisher is None:
                 continue
             if isinstance(module, _normalizations):
@@ -265,8 +248,8 @@ class KFAC(NaturalGradient):
                 vec2d = vec[w_idx].view(B_inv.shape[0], -1)
                 idx += 1
                 if _bias_requires_grad(module):
-                    vec2d = torch.cat(
-                        [vec2d, vec[idx].unsqueeze(dim=1)], dim=1)
+                    vec2d = torch.cat([vec2d, vec[idx].unsqueeze(dim=1)],
+                                      dim=1)
                 ng = B_inv.mm(vec2d).mm(A_inv)
                 if _bias_requires_grad(module):
                     vec_w = ng[:, :-1]
@@ -283,34 +266,18 @@ class DiagNaturalGradient(NaturalGradient):
     def __init__(self,
                  model,
                  fisher_type=FISHER_EXACT,
-                 pre_inv_postfix=None,
                  n_mc_samples=1,
                  damping=1e-5,
                  ema_decay=1.):
-        super().__init__(model, fisher_type, pre_inv_postfix, n_mc_samples, damping, ema_decay)
+        super().__init__(model, fisher_type, n_mc_samples, damping, ema_decay)
         self.fisher_shape = SHAPE_DIAG
         self.modules = [
             m for m in model.modules() if isinstance(m, _supported_modules)
         ]
 
-    def update_inv(self, damping=None):
-        if damping is None:
-            damping = self.damping
-
-        for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
-            if fisher is None:
-                continue
-            elif isinstance(module, _supported_modules):
-                diag_w = fisher.diag.weight
-                setattr(fisher.diag, 'weight_inv', 1 / (diag_w + damping))
-                if _bias_requires_grad(module):
-                    diag_b = fisher.diag.bias
-                    setattr(fisher.diag, 'bias_inv', 1 / (diag_b + damping))
-
     def precondition(self):
         for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
+            fisher = self._get_fisher(module)
             if fisher is None:
                 continue
             w_inv = fisher.diag.weight_inv
@@ -322,7 +289,7 @@ class DiagNaturalGradient(NaturalGradient):
     def precondition_vector(self, vec):
         idx = 0
         for module in self.modules:
-            fisher = self._get_pre_inv_fisher(module)
+            fisher = self._get_fisher(module)
             if fisher is None:
                 continue
             assert fisher.diag is not None, module
@@ -335,7 +302,7 @@ class DiagNaturalGradient(NaturalGradient):
         assert idx == len(vec)
 
     def precondition_vector_module(self, vec, module):
-        fisher = self._get_pre_inv_fisher(module)
+        fisher = self._get_fisher(module)
         assert fisher is not None
         assert fisher.diag is not None, module
         vec[0].mul_(fisher.diag.weight_inv)
@@ -347,8 +314,3 @@ def _bias_requires_grad(module):
     return hasattr(module, 'bias') \
            and module.bias is not None \
            and module.bias.requires_grad
-
-
-def _cholesky_inv(X):
-    u = torch.linalg.cholesky(X)
-    return torch.cholesky_inverse(u)

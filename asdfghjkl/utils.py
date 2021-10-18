@@ -15,7 +15,8 @@ __all__ = [
     'im2col_2d',
     'im2col_2d_slow',
     'add_value_to_diagonal',
-    'nvtx_range'
+    'nvtx_range',
+    'cholesky_inv'
 ]
 
 
@@ -86,7 +87,7 @@ def add_value_to_diagonal(x: torch.Tensor, value):
     if ndim > 2:
         shape = tuple(x.shape[:-2]) + (1, 1)
         eye = eye.repeat(*shape)
-    return x.add_(eye, alpha=value)
+    return x.add(eye, alpha=value)
 
 
 @contextmanager
@@ -96,3 +97,8 @@ def nvtx_range(msg):
         yield
     finally:
         nvtx.range_pop()
+
+
+def cholesky_inv(X):
+    u = torch.linalg.cholesky(X)
+    return torch.cholesky_inverse(u)

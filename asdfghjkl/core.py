@@ -104,7 +104,7 @@ def _preprocess_out_grads(module, out_grads):
 def _register_operations(model: nn.Module, module: nn.Module, op_names: List):
     op_class = get_op_class(module)
     if op_class is not None:
-        setattr(module, 'operation', op_class(module, model, op_names))
+        setattr(module, 'operation', op_class(module, op_names, model))
 
 
 def _call_operations_in_forward(module, in_data):

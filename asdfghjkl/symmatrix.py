@@ -1,6 +1,8 @@
 import os
+from operator import iadd
 import numpy as np
 import torch
+from .utils import add_value_to_diagonal, cholesky_inv
 
 __all__ = [
     'matrix_to_tril',
@@ -11,6 +13,8 @@ __all__ = [
     'Diag',
     'UnitWise'
 ]
+
+_default_damping = 1e-5
 
 
 def matrix_to_tril(mat: torch.Tensor):
@@ -72,14 +76,12 @@ def _load_from_numpy(path, device='cpu'):
 
 
 class SymMatrix:
-    def __init__(
-        self, data=None, kron=None, diag=None, unit=None, device='cpu'
-    ):
+    def __init__(self, data=None, kron=None, diag=None, unit=None):
         self.data = data
         self.kron = kron
         self.diag = diag
         self.unit = unit
-        self.device = device
+        self.inv = None
 
     @property
     def has_data(self):
@@ -98,34 +100,31 @@ class SymMatrix:
         return self.unit is not None
 
     def __add__(self, other):
-        data = kron = diag = unit = None
-        if self.has_data:
-            assert other.has_data
-            data = self.data.add(other.data)
-        if self.has_kron:
-            assert other.has_kron
-            kron = self.kron + other.kron
-        if self.has_diag:
-            assert other.has_diag
-            diag = self.diag + other.diag
-        if self.has_unit:
-            assert other.has_unit
-            unit = self.unit + other.unit
-        return SymMatrix(data, kron, diag, unit, device=self.device)
+        # NOTE: inv will not be preserved
+        values = []
+        for attr in ['data', 'kron', 'diag', 'unit']:
+            self_value = getattr(self, attr)
+            other_value = getattr(other, attr)
+            if other_value is not None:
+                if self_value is not None:
+                    value = self_value + other_value
+                else:
+                    value = other_value
+            else:
+                value = self_value
+            values.append(value)
+
+        return SymMatrix(*values)
 
     def __iadd__(self, other):
-        if self.has_data:
-            assert other.has_data
-            self.data.add_(other.data)
-        if self.has_kron:
-            assert other.has_kron
-            self.kron += other.kron
-        if self.has_diag:
-            assert other.has_diag
-            self.diag += other.diag
-        if self.has_unit:
-            assert other.has_unit
-            self.unit += other.unit
+        for attr in ['data', 'kron', 'diag', 'unit']:
+            self_value = getattr(self, attr)
+            other_value = getattr(other, attr)
+            if other_value is not None:
+                if self_value is not None:
+                    iadd(self_value, other_value)
+                else:
+                    setattr(self, attr, other_value)
         return self
 
     def scaling(self, scale):
@@ -173,27 +172,30 @@ class SymMatrix:
 
         return relative_paths
 
-    def load(self, path=None, kron_path=None, diag_path=None, unit_path=None):
+    def load(self, path=None, kron_path=None, diag_path=None, unit_path=None, device='cpu'):
         if path:
-            tril = _load_from_numpy(path, self.device)
+            tril = _load_from_numpy(path, device)
             self.data = tril_to_matrix(tril)
         if kron_path is not None:
             if not self.has_kron:
-                self.kron = Kron(A=None, B=None, device=self.device)
+                self.kron = Kron(A=None, B=None)
             self.kron.load(
-                A_path=kron_path['A_tril'], B_path=kron_path['B_tril']
+                A_path=kron_path['A_tril'],
+                B_path=kron_path['B_tril'],
+                device=device
             )
         if diag_path is not None:
             if not self.has_diag:
-                self.diag = Diag(device=self.device)
+                self.diag = Diag()
             self.diag.load(
                 w_path=diag_path.get('weight', None),
-                b_path=diag_path.get('bias', None)
+                b_path=diag_path.get('bias', None),
+                device=device
             )
         if unit_path is not None:
             if not self.has_unit:
-                self.unit = UnitWise(device=self.device)
-            self.unit.load(path=unit_path)
+                self.unit = UnitWise()
+            self.unit.load(path=unit_path, device=device)
 
     def to_vector(self):
         vec = []
@@ -227,26 +229,54 @@ class SymMatrix:
 
         return pointer
 
+    def update_inv(self, damping=_default_damping):
+        if self.has_data:
+            self.inv = cholesky_inv(add_value_to_diagonal(self.data, damping))
+        if self.has_kron:
+            self.kron.update_inv(damping)
+        if self.has_diag:
+            self.diag.update_inv(damping)
+        if self.has_unit:
+            self.unit.update_inv(damping)
+
 
 class Kron:
-    def __init__(self, A, B, device='cpu'):
+    def __init__(self, A, B):
         self.A = A
         self.B = B
-        self.device = device
+        self.A_inv = None
+        self.B_inv = None
 
     def __add__(self, other):
-        return Kron(
-            A=self.A.add(other.A), B=self.B.add(other.B), device=self.device
-        )
+        # NOTE: inv will not be preserved
+        if not other.has_data:
+            return self
+        if self.has_data:
+            A = self.A.add(other.A)
+            B = self.B.add(other.B)
+        else:
+            A = other.A
+            B = other.B
+        return Kron(A, B)
 
     def __iadd__(self, other):
-        self.A.add_(other.A)
-        self.B.add_(other.B)
+        if not other.has_data:
+            return self
+        if self.has_data:
+            self.A.add_(other.A)
+            self.B.add_(other.B)
+        else:
+            self.A = other.A
+            self.B = other.B
         return self
 
     @property
     def data(self):
         return [self.A, self.B]
+
+    @property
+    def has_data(self):
+        return self.A is not None and self.B is not None
 
     def scaling(self, scale):
         self.A.mul_(scale)
@@ -286,10 +316,10 @@ class Kron:
 
         return relative_paths
 
-    def load(self, A_path, B_path):
-        A_tril = _load_from_numpy(A_path, self.device)
+    def load(self, A_path, B_path, device):
+        A_tril = _load_from_numpy(A_path, device)
         self.A = tril_to_matrix(A_tril)
-        B_tril = _load_from_numpy(B_path, self.device)
+        B_tril = _load_from_numpy(B_path, device)
         self.B = tril_to_matrix(B_tril)
 
     def to_matrices(self, unflatten, pointer):
@@ -297,30 +327,55 @@ class Kron:
         pointer = unflatten(self.B, pointer)
         return pointer
 
+    def update_inv(self, damping=_default_damping):
+        assert self.has_data
+        A = self.A
+        B = self.B
+        A_eig_mean = A.trace() / A.shape[0]
+        B_eig_mean = B.trace() / B.shape[0]
+        pi = torch.sqrt(A_eig_mean / B_eig_mean)
+        r = damping**0.5
+
+        self.A_inv = cholesky_inv(add_value_to_diagonal(A, r * pi))
+        self.B_inv = cholesky_inv(add_value_to_diagonal(B, r / pi))
+
 
 class Diag:
-    def __init__(self, weight=None, bias=None, device='cpu'):
+    def __init__(self, weight=None, bias=None):
         self.weight = weight
         self.bias = bias
-        self.device = device
+        self.weight_inv = None
+        self.bias_inv = None
 
     def __add__(self, other):
-        weight = bias = None
-        if self.has_weight:
-            assert other.has_weight
-            weight = self.weight.add(other.weight)
-        if self.has_bias:
-            assert other.has_bias
-            bias = self.bias.add(other.bias)
-        return Diag(weight=weight, bias=bias, device=self.device)
+        # NOTE: inv will not be preserved
+        if other.has_weight:
+            if self.has_weight:
+                weight = self.weight.add(other.weight)
+            else:
+                weight = other.weight
+        else:
+            weight = self.weight
+        if other.has_bias:
+            if self.has_bias:
+                bias = self.bias.add(other.bias)
+            else:
+                bias = other.bias
+        else:
+            bias = self.bias
+        return Diag(weight=weight, bias=bias)
 
     def __iadd__(self, other):
-        if self.has_weight:
-            assert other.has_weight
-            self.weight.add_(other.weight)
-        if self.has_bias:
-            assert other.has_bias
-            self.bias.add_(other.bias)
+        if other.has_weight:
+            if self.has_weight:
+                self.weight.add_(other.weight)
+            else:
+                self.weight = other.weight
+        if other.has_bias:
+            if self.has_bias:
+                self.bias.add_(other.bias)
+            else:
+                self.bias = other.bias
         return self
 
     @property
@@ -380,11 +435,11 @@ class Diag:
 
         return relative_paths
 
-    def load(self, w_path=None, b_path=None):
+    def load(self, w_path=None, b_path=None, device='cpu'):
         if w_path:
-            self.weight = _load_from_numpy(w_path, self.device)
+            self.weight = _load_from_numpy(w_path, device)
         if b_path:
-            self.bias = _load_from_numpy(b_path, self.device)
+            self.bias = _load_from_numpy(b_path, device)
 
     def to_matrices(self, unflatten, pointer):
         if self.has_weight:
@@ -393,24 +448,35 @@ class Diag:
             pointer = unflatten(self.bias, pointer)
         return pointer
 
+    def update_inv(self, damping=_default_damping):
+        if self.has_weight:
+            self.weight_inv = 1 / (self.weight + damping)
+        if self.has_bias:
+            self.bias_inv = 1 / (self.bias + damping)
+
 
 class UnitWise:
-    def __init__(self, data=None, device='cpu'):
+    def __init__(self, data=None):
         self.data = data
-        self.device = device
+        self.inv = None
 
     def __add__(self, other):
-        data = None
+        # NOTE: inv will not be preserved
+        if not other.has_data:
+            return self
         if self.has_data:
-            assert other.has_data
             data = self.data.add(other.data)
-        return UnitWise(data=data, device=self.device)
+        else:
+            data = other.data
+        return UnitWise(data=data)
 
     def __iadd__(self, other):
-        data = None
+        if not other.has_data:
+            return self
         if self.has_data:
-            assert other.has_data
             self.data.add_(other.data)
+        else:
+            self.data = other.data
         return self
 
     @property
@@ -442,11 +508,18 @@ class UnitWise:
         _save_as_numpy(absolute_path, self.data)
         return relative_path
 
-    def load(self, path=None):
+    def load(self, path=None, device='cpu'):
         if path:
-            self.data = _load_from_numpy(path, self.device)
+            self.data = _load_from_numpy(path, device)
 
     def to_matrices(self, unflatten, pointer):
         if self.has_data:
             pointer = unflatten(self.data, pointer)
         return pointer
+
+    def update_inv(self, damping=_default_damping):
+        assert self.has_data
+        data = self.data
+        f = data.shape[0]
+        dmp = torch.eye(2, device=data.device, dtype=data.dtype).repeat(f, 1, 1) * damping
+        self.inv = torch.inverse(data + dmp)
