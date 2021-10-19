@@ -169,7 +169,7 @@ class _FisherBase(MatrixManager):
 
         if calc_emp_loss_grad and data_average:
             # divide gradients by data size
-            # ("loss_expr" function is defined with reduction='sum')
+            # (every loss function returns the sum of loss, not the average)
             for p in model.parameters():
                 if p.grad is not None:
                     p.grad.div_(data_size)
