@@ -119,58 +119,53 @@ class _FisherBase(MatrixManager):
         emp_loss_grad_with_fisher = calc_emp_loss_grad and self.is_fisher_emp
         emp_loss_grad_after_fisher = calc_emp_loss_grad and not self.is_fisher_emp
 
-        def closure(loss_expr, grad_scale=None):
-            self._zero_op_batch_grads(set_to_none=True)
-            loss = loss_expr()
-            with _grads_scale(model, grad_scale):
-                with skip_param_grad(model, disable=emp_loss_grad_with_fisher):
-                    loss.backward(retain_graph=True)
-            if fvp:
-                _construct_cvp(model, fisher_shapes, vec)
-            else:
-                _construct_cov(model, fisher_shapes)
-            if not emp_loss_grad_after_fisher:
+        def fisher_for_one_batch(x, t=None):
+
+            def closure(loss_expr, grad_scale=None):
+                self._zero_op_batch_grads(set_to_none=True)
+                loss = loss_expr()
+                with _grads_scale(model, grad_scale):
+                    with skip_param_grad(model, disable=emp_loss_grad_with_fisher):
+                        loss.backward(retain_graph=True)
+                if fvp:
+                    _construct_cvp(model, fisher_shapes, vec)
+                else:
+                    _construct_cov(model, fisher_shapes)
+                if not emp_loss_grad_after_fisher:
+                    nonlocal total_loss
+                    total_loss += loss.item()
+
+            x = x.to(device)
+            if t is not None:
+                t = t.to(device)
+            if seed:
+                torch.random.manual_seed(seed)
+            with extend(model, op_names):
+                y = model(x)
+                self._fisher_core(closure, y, t)
+                self._register_fisher(scale)
+            if emp_loss_grad_after_fisher:
+                assert t is not None
+                emp_loss = self.loss_fn(y, t)
+                emp_loss.backward()
                 nonlocal total_loss
-                total_loss += loss.item()
+                total_loss += emp_loss.item()
 
         device = self._device
         if data_loader is not None:
+            # calculate fisher/fvp for the data_loader
             data_size = len(data_loader.dataset)
             if data_average:
                 scale /= data_size
-            # calculate fisher/fvp for the data_loader
             for inputs, targets in data_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
-                if seed:
-                    torch.random.manual_seed(seed)
-                with extend(model, op_names):
-                    outputs = model(inputs)
-                    self._fisher_core(closure, outputs, targets)
-                    self._register_fisher(scale)
-                if emp_loss_grad_after_fisher:
-                    emp_loss = self.loss_fn(outputs, targets)
-                    emp_loss.backward()
-                    total_loss += emp_loss.item()
+                fisher_for_one_batch(inputs, targets)
         else:
             # calculate fisher/fvp for a single batch
             assert inputs is not None
             data_size = inputs.shape[0]
             if data_average:
                 scale /= data_size
-            inputs = inputs.to(device)
-            if targets is not None:
-                targets = targets.to(device)
-            if seed:
-                torch.random.manual_seed(seed)
-            with extend(model, op_names):
-                outputs = model(inputs)
-                self._fisher_core(closure, outputs, targets)
-                self._register_fisher(scale)
-            if emp_loss_grad_after_fisher:
-                assert targets is not None
-                emp_loss = self.loss_fn(outputs, targets)
-                emp_loss.backward()
-                total_loss += emp_loss.item()
+            fisher_for_one_batch(inputs, targets)
 
         if calc_emp_loss_grad and data_average:
             # divide gradients by data size
