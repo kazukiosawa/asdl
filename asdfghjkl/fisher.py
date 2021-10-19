@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from .core import extend
-from .utils import disable_param_grad
+from .utils import skip_param_grad
 from .operations import *
 from .symmatrix import SymMatrix, Kron, Diag, UnitWise
 from .matrices import *
@@ -52,6 +52,14 @@ class _FisherBase(MatrixManager):
         raise NotImplementedError
 
     @property
+    def is_fisher_emp(self):
+        return self.fisher_type == FISHER_EMP
+
+    @property
+    def loss_fn(self):
+        raise NotImplementedError
+
+    @property
     def fisher_attr(self):
         return self.fisher_type
 
@@ -82,7 +90,7 @@ class _FisherBase(MatrixManager):
                          vec=None,
                          data_average=True,
                          accumulate=False,
-                         no_param_grad=True,
+                         calc_emp_loss_grad=False,
                          seed=None,
                          scale=1.):
         if isinstance(fisher_shapes, str):
@@ -108,18 +116,22 @@ class _FisherBase(MatrixManager):
         model = self._model
         total_loss = 0
 
+        emp_loss_grad_with_fisher = calc_emp_loss_grad and self.is_fisher_emp
+        emp_loss_grad_after_fisher = calc_emp_loss_grad and not self.is_fisher_emp
+
         def closure(loss_expr, grad_scale=None):
             self._zero_op_batch_grads(set_to_none=True)
             loss = loss_expr()
             with _grads_scale(model, grad_scale):
-                with disable_param_grad(model, disable=no_param_grad):
+                with skip_param_grad(model, disable=emp_loss_grad_with_fisher):
                     loss.backward(retain_graph=True)
             if fvp:
                 _construct_cvp(model, fisher_shapes, vec)
             else:
                 _construct_cov(model, fisher_shapes)
-            nonlocal total_loss
-            total_loss += loss.item()
+            if not emp_loss_grad_after_fisher:
+                nonlocal total_loss
+                total_loss += loss.item()
 
         device = self._device
         if data_loader is not None:
@@ -132,8 +144,13 @@ class _FisherBase(MatrixManager):
                 if seed:
                     torch.random.manual_seed(seed)
                 with extend(model, op_names):
-                    self._fisher_core(closure, model(inputs), targets)
+                    outputs = model(inputs)
+                    self._fisher_core(closure, outputs, targets)
                     self._register_fisher(scale)
+                if emp_loss_grad_after_fisher:
+                    emp_loss = self.loss_fn(outputs, targets)
+                    emp_loss.backward()
+                    total_loss += emp_loss.item()
         else:
             # calculate fisher/fvp for a single batch
             assert inputs is not None
@@ -146,10 +163,16 @@ class _FisherBase(MatrixManager):
             if seed:
                 torch.random.manual_seed(seed)
             with extend(model, op_names):
-                self._fisher_core(closure, model(inputs), targets)
+                outputs = model(inputs)
+                self._fisher_core(closure, outputs, targets)
                 self._register_fisher(scale)
+            if emp_loss_grad_after_fisher:
+                assert targets is not None
+                emp_loss = self.loss_fn(outputs, targets)
+                emp_loss.backward()
+                total_loss += emp_loss.item()
 
-        if not no_param_grad and data_average:
+        if calc_emp_loss_grad and data_average:
             # divide gradients by data size
             # ("loss_expr" function is defined with reduction='sum')
             for p in model.parameters():
@@ -286,7 +309,13 @@ class _FisherBase(MatrixManager):
             return rst
 
 
-class FisherExactCrossEntropy(_FisherBase):
+class _FisherCrossEntropy(_FisherBase):
+    @property
+    def loss_fn(self):
+        return partial(F.cross_entropy, reduction='sum')
+
+
+class FisherExactCrossEntropy(_FisherCrossEntropy):
     @property
     def fisher_type(self):
         return FISHER_EXACT
@@ -302,7 +331,7 @@ class FisherExactCrossEntropy(_FisherBase):
                     grad_scale=sqrt_probs[:, i])
 
 
-class FisherMCCrossEntropy(_FisherBase):
+class FisherMCCrossEntropy(_FisherCrossEntropy):
     def __init__(self, model, n_mc_samples=1):
         super().__init__(model)
         self.n_mc_samples = n_mc_samples
@@ -322,7 +351,7 @@ class FisherMCCrossEntropy(_FisherBase):
                     grad_scale=1 / self.n_mc_samples)
 
 
-class FisherEmpCrossEntropy(_FisherBase):
+class FisherEmpCrossEntropy(_FisherCrossEntropy):
     @property
     def fisher_type(self):
         return FISHER_EMP
@@ -332,7 +361,13 @@ class FisherEmpCrossEntropy(_FisherBase):
         closure(lambda: F.nll_loss(log_probs, targets, reduction='sum'))
 
 
-class FisherExactMSE(_FisherBase):
+class _FisherMSE(_FisherBase):
+    @property
+    def loss_fn(self):
+        return lambda x, y: 0.5 * (x - y).norm(dim=1).sum()
+
+
+class FisherExactMSE(_FisherMSE):
     @property
     def fisher_type(self):
         return FISHER_EXACT
@@ -343,7 +378,7 @@ class FisherExactMSE(_FisherBase):
             closure(lambda: outputs[:, i].sum())
 
 
-class FisherMCMSE(_FisherBase):
+class FisherMCMSE(_FisherMSE):
     def __init__(self, model, n_mc_samples=1, var=0.5):
         super().__init__(model)
         self.n_mc_samples = n_mc_samples
@@ -362,7 +397,7 @@ class FisherMCMSE(_FisherBase):
                     grad_scale=1 / self.n_mc_samples)
 
 
-class FisherEmpMSE(_FisherBase):
+class FisherEmpMSE(_FisherMSE):
     @property
     def fisher_type(self):
         return FISHER_EMP
@@ -525,7 +560,7 @@ def fisher(
         is_master=True,
         accumulate=False,
         data_average=True,
-        no_param_grad=True,
+        calc_emp_loss_grad=False,
         seed=None,
         scale=1.,
         **kwargs
@@ -557,7 +592,7 @@ def fisher(
              vec=vec,
              accumulate=accumulate,
              data_average=data_average,
-             no_param_grad=no_param_grad,
+             calc_emp_loss_grad=calc_emp_loss_grad,
              seed=seed,
              scale=scale)
     if is_distributed:

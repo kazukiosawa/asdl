@@ -10,7 +10,7 @@ _REQUIRES_GRAD_ATTR = '_original_requires_grad'
 
 __all__ = [
     'original_requires_grad', 'record_original_requires_grad',
-    'restore_original_requires_grad', 'disable_param_grad', 'im2col_2d',
+    'restore_original_requires_grad', 'skip_param_grad', 'im2col_2d',
     'im2col_2d_slow', 'add_value_to_diagonal', 'nvtx_range', 'cholesky_inv',
     'PseudoBatchLoaderGenerator'
 ]
@@ -31,14 +31,14 @@ def restore_original_requires_grad(param):
 
 
 @contextmanager
-def disable_param_grad(model, disable=True):
-    if disable:
+def skip_param_grad(model, disable=False):
+    if not disable:
         for param in model.parameters():
             record_original_requires_grad(param)
             param.requires_grad = False
 
     yield
-    if disable:
+    if not disable:
         for param in model.parameters():
             restore_original_requires_grad(param)
 

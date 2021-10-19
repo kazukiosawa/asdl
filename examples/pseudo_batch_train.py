@@ -80,10 +80,10 @@ def train_by_kfac_fisher_emp():
     for i, pseudo_batch_loader in enumerate(psl_generator):
         optimizer.zero_grad(set_to_none=True)
         # forward + backward
-        # (By setting no_param_grad=False, param.grad will be calculated
-        #  together with curvature.)
+        # (By setting calc_emp_loss_grad=True, param.grad
+        #  for the empirical loss will be calculated together with curvature.)
         loss = ng.refresh_curvature(data_loader=pseudo_batch_loader,
-                                    no_param_grad=False)
+                                    calc_emp_loss_grad=True)
         # invert curvature
         ng.update_inv()
         # precondition param.grad
@@ -103,20 +103,12 @@ def train_by_kfac_fisher_mc():
 
     # 1 epoch training
     for i, pseudo_batch_loader in enumerate(psl_generator):
-        pseudo_batch_size = len(pseudo_batch_loader.dataset)
         optimizer.zero_grad(set_to_none=True)
         # forward + backward
-        total_loss = 0
-        for inputs, targets in pseudo_batch_loader:
-            inputs, targets = inputs.to(device), targets.to(device)
-            loss = F.cross_entropy(model(inputs), targets, reduction='sum')
-            loss.backward()
-            total_loss += loss.item() / pseudo_batch_size
-        for p in model.parameters():
-            if p.grad is not None:
-                p.grad.div_(pseudo_batch_size)  # take the data average
-        # update curvature
-        ng.refresh_curvature(data_loader=pseudo_batch_loader)
+        # (By setting calc_emp_loss_grad=True, param.grad
+        #  for the empirical loss will be calculated together with curvature.)
+        loss = ng.refresh_curvature(data_loader=pseudo_batch_loader,
+                                    calc_emp_loss_grad=True)
         # invert curvature
         ng.update_inv()
         # precondition param.grad
@@ -124,7 +116,7 @@ def train_by_kfac_fisher_mc():
         # update param by param.grad
         optimizer.step()
 
-        print(f'step {i} (pseudo-batch-size {len(pseudo_batch_loader.dataset)}): loss {total_loss}')
+        print(f'step {i} (pseudo-batch-size {len(pseudo_batch_loader.dataset)}): loss {loss}')
 
 
 if __name__ == '__main__':

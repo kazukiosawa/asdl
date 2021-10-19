@@ -60,7 +60,7 @@ class NaturalGradient:
                           accumulate=False,
                           ema_decay=None,
                           data_average=True,
-                          no_param_grad=True,
+                          calc_emp_loss_grad=False,
                           seed=None,
                           scale=1):
         if ema_decay is None:
@@ -78,7 +78,7 @@ class NaturalGradient:
                                        fisher_shapes=self.fisher_shape,
                                        accumulate=accumulate,
                                        data_average=data_average,
-                                       no_param_grad=no_param_grad,
+                                       calc_emp_loss_grad=calc_emp_loss_grad,
                                        seed=seed,
                                        scale=scale,
                                        n_mc_samples=self.n_mc_samples)
@@ -91,7 +91,7 @@ class NaturalGradient:
                              data_loader=None,
                              ema_decay=None,
                              data_average=True,
-                             no_param_grad=True,
+                             calc_emp_loss_grad=False,
                              seed=None,
                              scale=1):
         return self._update_curvature(inputs,
@@ -100,7 +100,7 @@ class NaturalGradient:
                                       accumulate=True,
                                       ema_decay=ema_decay,
                                       data_average=data_average,
-                                      no_param_grad=no_param_grad,
+                                      calc_emp_loss_grad=calc_emp_loss_grad,
                                       seed=seed,
                                       scale=scale)
 
@@ -109,7 +109,7 @@ class NaturalGradient:
                           targets=None,
                           data_loader=None,
                           data_average=True,
-                          no_param_grad=True,
+                          calc_emp_loss_grad=False,
                           seed=None,
                           scale=1):
         if self.ema_decay != _invalid_ema_decay:
@@ -120,7 +120,7 @@ class NaturalGradient:
                                       accumulate=False,
                                       ema_decay=_invalid_ema_decay,
                                       data_average=data_average,
-                                      no_param_grad=no_param_grad,
+                                      calc_emp_loss_grad=calc_emp_loss_grad,
                                       seed=seed,
                                       scale=scale)
 
