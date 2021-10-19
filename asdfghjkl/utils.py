@@ -87,6 +87,11 @@ def add_value_to_diagonal(x: torch.Tensor, value):
     return x.add(eye, alpha=value)
 
 
+def cholesky_inv(X):
+    u = torch.linalg.cholesky(X)
+    return torch.cholesky_inverse(u)
+
+
 @contextmanager
 def nvtx_range(msg):
     try:
@@ -94,11 +99,6 @@ def nvtx_range(msg):
         yield
     finally:
         nvtx.range_pop()
-
-
-def cholesky_inv(X):
-    u = torch.linalg.cholesky(X)
-    return torch.cholesky_inverse(u)
 
 
 class PseudoBatchLoaderGenerator:
