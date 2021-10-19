@@ -23,10 +23,11 @@ _CVP_FULL = 'cvp_full'
 _COV_BLOCK_DIAG = 'cov_block_diag'
 _CVP_BLOCK_DIAG = 'cvp_block_diag'
 
-_LOSS_CROSS_ENTROPY = 'cross_entropy'
-_LOSS_MSE = 'mse'
+LOSS_CROSS_ENTROPY = 'cross_entropy'
+LOSS_MSE = 'mse'
 
 __all__ = [
+    'fisher',
     'fisher_for_cross_entropy',
     'fisher_for_mse',
     'fvp_for_cross_entropy',
@@ -35,7 +36,9 @@ __all__ = [
     'fisher_eig_for_mse',
     'fisher_free_for_cross_entropy',
     'fisher_free_for_mse',
-    'woodbury_ifvp'
+    'woodbury_ifvp',
+    'LOSS_CROSS_ENTROPY',
+    'LOSS_MSE'
 ]
 
 _supported_types = [FISHER_EXACT, FISHER_MC, FISHER_EMP]
@@ -561,8 +564,8 @@ def fisher(
         **kwargs
 ):
     assert fisher_type in _supported_types
-    assert loss_type in [_LOSS_CROSS_ENTROPY, _LOSS_MSE]
-    if loss_type == _LOSS_CROSS_ENTROPY:
+    assert loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]
+    if loss_type == LOSS_CROSS_ENTROPY:
         if fisher_type == FISHER_EXACT:
             fisher_cls = FisherExactCrossEntropy
         elif fisher_type == FISHER_MC:
@@ -598,10 +601,10 @@ def fisher(
     return f, loss
 
 
-fisher_for_cross_entropy = partial(fisher, loss_type=_LOSS_CROSS_ENTROPY, fvp=False)
-fisher_for_mse = partial(fisher, loss_type=_LOSS_MSE, fvp=False)
-fvp_for_cross_entropy = partial(fisher, loss_type=_LOSS_CROSS_ENTROPY, fvp=True)
-fvp_for_mse = partial(fisher, loss_type=_LOSS_MSE, fvp=True)
+fisher_for_cross_entropy = partial(fisher, loss_type=LOSS_CROSS_ENTROPY, fvp=False)
+fisher_for_mse = partial(fisher, loss_type=LOSS_MSE, fvp=False)
+fvp_for_cross_entropy = partial(fisher, loss_type=LOSS_CROSS_ENTROPY, fvp=True)
+fvp_for_mse = partial(fisher, loss_type=LOSS_MSE, fvp=True)
 
 
 def fisher_eig(
@@ -651,8 +654,8 @@ def fisher_eig(
     return eigvals, eigvecs
 
 
-fisher_eig_for_cross_entropy = partial(fisher_eig, loss_type=_LOSS_CROSS_ENTROPY)
-fisher_eig_for_mse = partial(fisher_eig, loss_type=_LOSS_MSE)
+fisher_eig_for_cross_entropy = partial(fisher_eig, loss_type=LOSS_CROSS_ENTROPY)
+fisher_eig_for_mse = partial(fisher_eig, loss_type=LOSS_MSE)
 
 
 def fisher_free(
@@ -707,8 +710,8 @@ def fisher_free(
                                      save_log=save_log)
 
 
-fisher_free_for_cross_entropy = partial(fisher_free, loss_type=_LOSS_CROSS_ENTROPY)
-fisher_free_for_mse = partial(fisher_free, loss_type=_LOSS_MSE)
+fisher_free_for_cross_entropy = partial(fisher_free, loss_type=LOSS_CROSS_ENTROPY)
+fisher_free_for_mse = partial(fisher_free, loss_type=LOSS_MSE)
 
 
 def woodbury_ifvp(
