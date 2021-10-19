@@ -114,8 +114,7 @@ class Operation:
             elif op_name == OP_COV_UNIT_WISE:
                 assert original_requires_grad(module, 'weight')
                 assert original_requires_grad(module, 'bias')
-                in_data = self.extend_input(in_data)
-                rst = self.cov_unit_wise(module, in_data, out_grads)
+                rst = self.cov_unit_wise(module, self.extend_input(in_data), out_grads)
                 self._set_result(rst, OP_COV_UNIT_WISE)
 
             elif op_name == OP_GRAM_HADAMARD:
