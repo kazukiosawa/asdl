@@ -116,8 +116,8 @@ class _FisherBase(MatrixManager):
         model = self._model
         total_loss = 0
 
-        emp_loss_grad_with_fisher = calc_emp_loss_grad and self.is_fisher_emp
-        emp_loss_grad_after_fisher = calc_emp_loss_grad and not self.is_fisher_emp
+        calc_emp_loss_grad_with_fisher = calc_emp_loss_grad and self.is_fisher_emp
+        calc_emp_loss_grad_after_fisher = calc_emp_loss_grad and not self.is_fisher_emp
 
         def fisher_for_one_batch(x, t=None):
 
@@ -125,13 +125,13 @@ class _FisherBase(MatrixManager):
                 self._zero_op_batch_grads(set_to_none=True)
                 loss = loss_expr()
                 with _grads_scale(model, grad_scale):
-                    with skip_param_grad(model, disable=emp_loss_grad_with_fisher):
+                    with skip_param_grad(model, disable=calc_emp_loss_grad_with_fisher):
                         loss.backward(retain_graph=True)
                 if fvp:
                     _construct_cvp(model, fisher_shapes, vec)
                 else:
                     _construct_cov(model, fisher_shapes)
-                if not emp_loss_grad_after_fisher:
+                if not calc_emp_loss_grad_after_fisher:
                     nonlocal total_loss
                     total_loss += loss.item()
 
@@ -144,7 +144,7 @@ class _FisherBase(MatrixManager):
                 y = model(x)
                 self._fisher_core(closure, y, t)
                 self._register_fisher(scale)
-            if emp_loss_grad_after_fisher:
+            if calc_emp_loss_grad_after_fisher:
                 assert t is not None
                 emp_loss = self.loss_fn(y, t)
                 emp_loss.backward()
