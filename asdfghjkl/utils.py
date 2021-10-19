@@ -132,17 +132,17 @@ class PseudoBatchLoaderGenerator:
                                                     f'needs to be divisible by batch_size ({batch_size})'
         base_dataset = base_data_loader.dataset
         sampler_cls = base_data_loader.sampler.__class__
-        batch_sampler = BatchSampler(sampler_cls(range(len(base_dataset))),
-                                     batch_size=pseudo_batch_size,
-                                     drop_last=True)
+        pseudo_batch_sampler = BatchSampler(sampler_cls(range(len(base_dataset))),
+                                            batch_size=pseudo_batch_size,
+                                            drop_last=True)
         self.batch_size = batch_size
-        self.batch_sampler = batch_sampler
+        self.pseudo_batch_sampler = pseudo_batch_sampler
         self.base_dataset = base_dataset
         self.base_data_loader = base_data_loader
 
     def __iter__(self):
         loader = self.base_data_loader
-        for indices in self.batch_sampler:
+        for indices in self.pseudo_batch_sampler:
             subset_in_pseudo_batch = Subset(self.base_dataset, indices)
             data_loader = DataLoader(
                 subset_in_pseudo_batch,
