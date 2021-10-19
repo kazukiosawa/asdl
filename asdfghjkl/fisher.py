@@ -106,6 +106,7 @@ class _FisherBase(MatrixManager):
         op_names = list(set(op_names))
 
         model = self._model
+        total_loss = 0
 
         def closure(loss_expr, grad_scale=None):
             self._zero_op_batch_grads(set_to_none=True)
@@ -117,6 +118,8 @@ class _FisherBase(MatrixManager):
                 _construct_cvp(model, fisher_shapes, vec)
             else:
                 _construct_cov(model, fisher_shapes)
+            nonlocal total_loss
+            total_loss += loss.item()
 
         device = self._device
         if data_loader is not None:
@@ -152,6 +155,10 @@ class _FisherBase(MatrixManager):
             for p in model.parameters():
                 if p.grad is not None:
                     p.grad.div_(data_size)
+
+        if data_average:
+            total_loss /= data_size
+        return total_loss
 
     def _zero_op_batch_grads(self, set_to_none=False):
         for module in self._model.modules():
@@ -541,24 +548,24 @@ def fisher(
             fisher_cls = FisherEmpMSE
 
     f = fisher_cls(model, **kwargs)
-    f.calculate_fisher(
-        fisher_shapes,
-        inputs=inputs,
-        targets=targets,
-        data_loader=data_loader,
-        fvp=fvp,
-        vec=vec,
-        accumulate=accumulate,
-        data_average=data_average,
-        no_param_grad=no_param_grad,
-        seed=seed,
-        scale=scale)
+    loss = f.calculate_fisher(
+             fisher_shapes,
+             inputs=inputs,
+             targets=targets,
+             data_loader=data_loader,
+             fvp=fvp,
+             vec=vec,
+             accumulate=accumulate,
+             data_average=data_average,
+             no_param_grad=no_param_grad,
+             seed=seed,
+             scale=scale)
     if is_distributed:
         if fvp:
             f.reduce_fvp(is_master, all_reduce)
         else:
             f.reduce_fisher(is_master, all_reduce)
-    return f
+    return f, loss
 
 
 fisher_for_cross_entropy = partial(fisher, loss_type=_LOSS_CROSS_ENTROPY, fvp=False)

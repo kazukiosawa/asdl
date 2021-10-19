@@ -82,7 +82,8 @@ class NaturalGradient:
                                        seed=seed,
                                        scale=scale,
                                        n_mc_samples=self.n_mc_samples)
-        self.fisher_manager = rst
+        self.fisher_manager = rst[0]
+        return rst[1]  # loss value
 
     def accumulate_curvature(self,
                              inputs=None,
@@ -93,15 +94,15 @@ class NaturalGradient:
                              no_param_grad=True,
                              seed=None,
                              scale=1):
-        self._update_curvature(inputs,
-                               targets,
-                               data_loader,
-                               accumulate=True,
-                               ema_decay=ema_decay,
-                               data_average=data_average,
-                               no_param_grad=no_param_grad,
-                               seed=seed,
-                               scale=scale)
+        return self._update_curvature(inputs,
+                                      targets,
+                                      data_loader,
+                                      accumulate=True,
+                                      ema_decay=ema_decay,
+                                      data_average=data_average,
+                                      no_param_grad=no_param_grad,
+                                      seed=seed,
+                                      scale=scale)
 
     def refresh_curvature(self,
                           inputs=None,
@@ -113,15 +114,15 @@ class NaturalGradient:
                           scale=1):
         if self.ema_decay != _invalid_ema_decay:
             warnings.warn(f'ema_decay ({self.ema_decay}) will be ignored.')
-        self._update_curvature(inputs,
-                               targets,
-                               data_loader,
-                               accumulate=False,
-                               ema_decay=_invalid_ema_decay,
-                               data_average=data_average,
-                               no_param_grad=no_param_grad,
-                               seed=seed,
-                               scale=scale)
+        return self._update_curvature(inputs,
+                                      targets,
+                                      data_loader,
+                                      accumulate=False,
+                                      ema_decay=_invalid_ema_decay,
+                                      data_average=data_average,
+                                      no_param_grad=no_param_grad,
+                                      seed=seed,
+                                      scale=scale)
 
     def reduce_curvature(self, all_reduce=True):
         self.fisher_manager.reduce_matrices(all_reduce=all_reduce)
