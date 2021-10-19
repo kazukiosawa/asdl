@@ -125,16 +125,18 @@ class PseudoBatchLoaderGenerator:
     [[tensor([8])], [tensor([5])], [tensor([4])], [tensor([2])], [tensor([9])]]
     ```
     """
-    def __init__(self, base_data_loader, pseudo_batch_size, batch_size=None):
+    def __init__(self, base_data_loader, pseudo_batch_size, batch_size=None, drop_last=None):
         if batch_size is None:
             batch_size = base_data_loader.batch_size
         assert pseudo_batch_size % batch_size == 0, f'pseudo_batch_size ({pseudo_batch_size}) ' \
                                                     f'needs to be divisible by batch_size ({batch_size})'
+        if drop_last is None:
+            drop_last = base_data_loader.drop_last
         base_dataset = base_data_loader.dataset
         sampler_cls = base_data_loader.sampler.__class__
         pseudo_batch_sampler = BatchSampler(sampler_cls(range(len(base_dataset))),
                                             batch_size=pseudo_batch_size,
-                                            drop_last=True)
+                                            drop_last=drop_last)
         self.batch_size = batch_size
         self.pseudo_batch_sampler = pseudo_batch_sampler
         self.base_dataset = base_dataset
