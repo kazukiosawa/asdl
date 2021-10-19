@@ -11,12 +11,13 @@ class TestUnitWise(unittest.TestCase):
         layer = nn.Linear(2, 2, bias=True)
         layer.weight.data = torch.tensor([[1., 2.], [4., 3.]])
         layer.bias.data = torch.tensor([0.1, -0.1])
-        asdl.fisher_for_cross_entropy(
-            layer,
-            fisher_type=asdl.FISHER_EMP,
-            fisher_shapes=[asdl.SHAPE_UNIT_WISE],
-            inputs=torch.tensor([[-0.5, 0.6], [-0.5, 0.6]]),
-            targets=torch.tensor([0, 0], dtype=torch.int64))
+        asdl.fisher_for_cross_entropy(layer,
+                                      fisher_type=asdl.FISHER_EMP,
+                                      fisher_shapes=[asdl.SHAPE_UNIT_WISE],
+                                      inputs=torch.tensor([[-0.5, 0.6],
+                                                           [-0.5, 0.6]]),
+                                      targets=torch.tensor([0, 0],
+                                                           dtype=torch.int64))
         torch.testing.assert_close(layer.fisher_emp.unit.data,
                                    torch.tensor([[[0.0156, -0.0187, -0.0312],
                                                   [-0.0187, 0.0225, 0.0374],

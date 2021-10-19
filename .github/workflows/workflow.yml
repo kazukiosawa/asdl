@@ -28,6 +28,4 @@ jobs:
     - name: Test
       run: |
         export PYTHONPATH=$PYTHONPATH:$PWD
-        python tests/test_unit_wise.py
-        python tests/test_conjugate.py
-        python tests/test_mvp.py
+        python -m unittest discover -s test
