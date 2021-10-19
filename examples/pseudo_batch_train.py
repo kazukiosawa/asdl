@@ -46,7 +46,7 @@ def train_by_sgd(print_log=True):
     model = Net()
     model.to(device)
 
-    optimizer = torch.optim.SGD(model.parameters(), **sgd_args)
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2, momentum=0.9)
 
     # 1 epoch training
     for i, pseudo_batch_loader in enumerate(psl_generator):
@@ -69,12 +69,12 @@ def train_by_sgd(print_log=True):
             print(f'step {i} (pseudo-batch-size {len(pseudo_batch_loader.dataset)}): loss {total_loss}')
 
 
-def train_by_kfac_fisher_emp():
+def _train_by_kfac(fisher_type):
     model = Net()
     model.to(device)
 
-    optimizer = torch.optim.SGD(model.parameters(), **kfac_args)
-    ng = KFAC(model, 'fisher_emp')
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    ng = KFAC(model, fisher_type)
 
     # 1 epoch training
     for i, pseudo_batch_loader in enumerate(psl_generator):
@@ -92,31 +92,14 @@ def train_by_kfac_fisher_emp():
         optimizer.step()
 
         print(f'step {i} (pseudo-batch-size {len(pseudo_batch_loader.dataset)}): loss {loss}')
+
+
+def train_by_kfac_fisher_emp():
+    _train_by_kfac('fisher_emp')
 
 
 def train_by_kfac_fisher_mc():
-    model = Net()
-    model.to(device)
-
-    optimizer = torch.optim.SGD(model.parameters(), **kfac_args)
-    ng = KFAC(model, 'fisher_mc', n_mc_samples=1)
-
-    # 1 epoch training
-    for i, pseudo_batch_loader in enumerate(psl_generator):
-        optimizer.zero_grad(set_to_none=True)
-        # forward + backward
-        # (By setting calc_emp_loss_grad=True, param.grad
-        #  for the empirical loss will be calculated together with curvature.)
-        loss = ng.refresh_curvature(data_loader=pseudo_batch_loader,
-                                    calc_emp_loss_grad=True)
-        # invert curvature
-        ng.update_inv()
-        # precondition param.grad
-        ng.precondition()
-        # update param by param.grad
-        optimizer.step()
-
-        print(f'step {i} (pseudo-batch-size {len(pseudo_batch_loader.dataset)}): loss {loss}')
+    _train_by_kfac('fisher_mc')
 
 
 if __name__ == '__main__':
@@ -124,6 +107,7 @@ if __name__ == '__main__':
         device = torch.device('cuda')
     else:
         device = torch.device('cpu')
+    torch.random.manual_seed(0)
 
     transform = transforms.Compose(
         [transforms.ToTensor(),
@@ -138,8 +122,6 @@ if __name__ == '__main__':
     psl_generator = PseudoBatchLoaderGenerator(trainloader,
                                                pseudo_batch_size=2**13,
                                                drop_last=True)
-    sgd_args = dict(lr=1e-2, momentum=0.9)
-    kfac_args = dict(lr=1e-2)
     train_by_sgd(print_log=False)  # warmup run
     time_f(train_by_sgd)
     time_f(train_by_kfac_fisher_emp)
