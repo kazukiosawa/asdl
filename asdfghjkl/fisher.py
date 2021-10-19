@@ -621,18 +621,18 @@ def fisher_eig(
 ):
 
     def fvp_fn(vec):
-        f = fisher(model,
-                   loss_type,
-                   fisher_type,
-                   fisher_shape,
-                   inputs=inputs,
-                   targets=targets,
-                   data_loader=data_loader,
-                   fvp=True,
-                   vec=vec,
-                   is_distributed=is_distributed,
-                   all_reduce=True,
-                   **kwargs)
+        f, _ = fisher(model,
+                      loss_type,
+                      fisher_type,
+                      fisher_shape,
+                      inputs=inputs,
+                      targets=targets,
+                      data_loader=data_loader,
+                      fvp=True,
+                      vec=vec,
+                      is_distributed=is_distributed,
+                      all_reduce=True,
+                      **kwargs)
         return f.load_fvp(fisher_shape)
 
     # for making MC samplings at each iteration deterministic
@@ -677,18 +677,18 @@ def fisher_free(
 ):
 
     def fvp_fn(vec):
-        f = fisher(model,
-                   loss_type,
-                   fisher_type,
-                   fisher_shape,
-                   inputs=inputs,
-                   targets=targets,
-                   data_loader=data_loader,
-                   fvp=True,
-                   vec=vec,
-                   is_distributed=is_distributed,
-                   all_reduce=True,
-                   **kwargs)
+        f, _ = fisher(model,
+                      loss_type,
+                      fisher_type,
+                      fisher_shape,
+                      inputs=inputs,
+                      targets=targets,
+                      data_loader=data_loader,
+                      fvp=True,
+                      vec=vec,
+                      is_distributed=is_distributed,
+                      all_reduce=True,
+                      **kwargs)
         return f.load_fvp(fisher_shape)
 
     # for making MC samplings at each iteration deterministic
