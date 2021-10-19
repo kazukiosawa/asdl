@@ -559,6 +559,7 @@ def fisher(
         accumulate=False,
         data_average=True,
         calc_emp_loss_grad=False,
+        return_loss=False,
         seed=None,
         scale=1.,
         **kwargs
@@ -598,7 +599,10 @@ def fisher(
             f.reduce_fvp(is_master, all_reduce)
         else:
             f.reduce_fisher(is_master, all_reduce)
-    return f, loss
+    if return_loss:
+        return f, loss
+    else:
+        return f
 
 
 fisher_for_cross_entropy = partial(fisher, loss_type=LOSS_CROSS_ENTROPY, fvp=False)
@@ -624,18 +628,18 @@ def fisher_eig(
 ):
 
     def fvp_fn(vec):
-        f, _ = fisher(model,
-                      loss_type,
-                      fisher_type,
-                      fisher_shape,
-                      inputs=inputs,
-                      targets=targets,
-                      data_loader=data_loader,
-                      fvp=True,
-                      vec=vec,
-                      is_distributed=is_distributed,
-                      all_reduce=True,
-                      **kwargs)
+        f = fisher(model,
+                   loss_type,
+                   fisher_type,
+                   fisher_shape,
+                   inputs=inputs,
+                   targets=targets,
+                   data_loader=data_loader,
+                   fvp=True,
+                   vec=vec,
+                   is_distributed=is_distributed,
+                   all_reduce=True,
+                   **kwargs)
         return f.load_fvp(fisher_shape)
 
     # for making MC samplings at each iteration deterministic
@@ -680,18 +684,18 @@ def fisher_free(
 ):
 
     def fvp_fn(vec):
-        f, _ = fisher(model,
-                      loss_type,
-                      fisher_type,
-                      fisher_shape,
-                      inputs=inputs,
-                      targets=targets,
-                      data_loader=data_loader,
-                      fvp=True,
-                      vec=vec,
-                      is_distributed=is_distributed,
-                      all_reduce=True,
-                      **kwargs)
+        f = fisher(model,
+                   loss_type,
+                   fisher_type,
+                   fisher_shape,
+                   inputs=inputs,
+                   targets=targets,
+                   data_loader=data_loader,
+                   fvp=True,
+                   vec=vec,
+                   is_distributed=is_distributed,
+                   all_reduce=True,
+                   **kwargs)
         return f.load_fvp(fisher_shape)
 
     # for making MC samplings at each iteration deterministic

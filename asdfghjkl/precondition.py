@@ -82,6 +82,7 @@ class NaturalGradient:
                      accumulate=accumulate,
                      data_average=data_average,
                      calc_emp_loss_grad=calc_emp_loss_grad,
+                     return_loss=True,
                      seed=seed,
                      scale=scale,
                      n_mc_samples=self.n_mc_samples)
