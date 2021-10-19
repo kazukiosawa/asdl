@@ -162,7 +162,7 @@ class LayerWiseNaturalGradient(NaturalGradient):
                  fisher_type=FISHER_EXACT,
                  n_mc_samples=1,
                  damping=1e-5,
-                 ema_decay=1.):
+                 ema_decay=_invalid_ema_decay):
         super().__init__(model, fisher_type, n_mc_samples, damping, ema_decay)
         self.fisher_shape = SHAPE_BLOCK_DIAG
         self.modules = [
@@ -194,7 +194,7 @@ class KFAC(NaturalGradient):
                  fisher_type=FISHER_EXACT,
                  n_mc_samples=1,
                  damping=1e-5,
-                 ema_decay=1.):
+                 ema_decay=_invalid_ema_decay):
         super().__init__(model, fisher_type, n_mc_samples, damping, ema_decay)
         self.fisher_shape = SHAPE_KRON
         self.modules = [
@@ -275,7 +275,7 @@ class DiagNaturalGradient(NaturalGradient):
                  fisher_type=FISHER_EXACT,
                  n_mc_samples=1,
                  damping=1e-5,
-                 ema_decay=1.):
+                 ema_decay=_invalid_ema_decay):
         super().__init__(model, fisher_type, n_mc_samples, damping, ema_decay)
         self.fisher_shape = SHAPE_DIAG
         self.modules = [
