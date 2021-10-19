@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import torchvision
 from torchvision import transforms
 
-from asdfghjkl import KFAC
+from asdfghjkl import KFAC, data_loader_gradient
 from asdfghjkl import PseudoBatchLoaderGenerator
 
 
@@ -50,23 +50,15 @@ def train_by_sgd(print_log=True):
 
     # 1 epoch training
     for i, pseudo_batch_loader in enumerate(psl_generator):
-        pseudo_batch_size = len(pseudo_batch_loader.dataset)
         optimizer.zero_grad(set_to_none=True)
         # forward + backward
-        total_loss = 0
-        for inputs, targets in pseudo_batch_loader:
-            inputs, targets = inputs.to(device), targets.to(device)
-            loss = F.cross_entropy(model(inputs), targets, reduction='sum')
-            loss.backward()
-            total_loss += loss.item() / pseudo_batch_size
-        for p in model.parameters():
-            if p.grad is not None:
-                p.grad.div_(pseudo_batch_size)  # take the data average
+        loss_fn = nn.CrossEntropyLoss(reduction='sum')
+        loss = data_loader_gradient(model, loss_fn, pseudo_batch_loader)
         # update param by param.grad
         optimizer.step()
 
         if print_log:
-            print(f'step {i} (pseudo-batch-size {len(pseudo_batch_loader.dataset)}): loss {total_loss}')
+            print(f'step {i} (pseudo-batch-size {len(pseudo_batch_loader.dataset)}): loss {loss}')
 
 
 def _train_by_kfac(fisher_type):

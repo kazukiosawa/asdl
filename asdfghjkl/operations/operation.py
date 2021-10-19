@@ -11,7 +11,6 @@ OP_GRAM_DIRECT = 'gram_direct'  # direct
 OP_GRAM_HADAMARD = 'gram_hada'  # Hadamard-factored
 
 OP_BATCH_GRADS = 'batch_grads'  # compute batched gradients (per-example gradients)
-OP_ACCUMULATE_GRADS = 'acc_grad'  # accumulate gradients
 
 
 class Operation:
