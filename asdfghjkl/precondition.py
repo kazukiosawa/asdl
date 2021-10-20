@@ -2,15 +2,16 @@ import warnings
 import torch
 from torch import nn
 
-from .matrices import FISHER_EXACT, SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG  # NOQA
+from .matrices import FISHER_EXACT, SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG, modules_for_matrix_shapes  # NOQA
 from .fisher import calculate_fisher, LOSS_CROSS_ENTROPY
 
 _supported_modules = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d)
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 _invalid_ema_decay = -1
+_module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG]
 
 __all__ = [
-    'NaturalGradient', 'LayerWiseNaturalGradient', 'KFAC',
+    'NaturalGradient', 'FullNaturalGradient', 'LayerWiseNaturalGradient', 'KFAC',
     'DiagNaturalGradient'
 ]
 
@@ -20,6 +21,7 @@ class NaturalGradient:
         self,
         model,
         fisher_type=FISHER_EXACT,
+        fisher_shape=SHAPE_FULL,
         loss_type=LOSS_CROSS_ENTROPY,
         n_mc_samples=1,
         damping=1e-5,
@@ -29,31 +31,54 @@ class NaturalGradient:
         assert not isinstance(model, DDP), f'{DDP} is not supported.'
         del DDP
         self.model = model
-        self.modules = [model]
         self.fisher_type = fisher_type
         self.loss_type = loss_type
         self.n_mc_samples = n_mc_samples
         self.damping = damping
         self.ema_decay = ema_decay
-        self.fisher_shape = SHAPE_FULL
         self.fisher_manager = None
+        # check if only one fisher_shape is assigned to each module
+        if isinstance(fisher_shape, list):
+            assert len(fisher_shape) == 1
+        elif isinstance(fisher_shape, dict):
+            assert all(len(v) == 1 for v in fisher_shape.values())
+        self.fisher_shape = fisher_shape
+        self.modules_for = modules_for_matrix_shapes(fisher_shape, list(model.modules()))
 
-    def _get_fisher_attr(self, postfix=None):
+    @property
+    def precondition_for(self):
+        return {SHAPE_LAYER_WISE: self.precondition_layer_wise,
+                SHAPE_KRON: self.precondition_kron,
+                SHAPE_DIAG: self.precondition_diag}
+
+    def parameters_for(self, shape):
+        for module in self.modules_for[shape]:
+            for p in module.parameters():
+                yield p
+
+    def _get_module_fisher(self, module, postfix=None):
         if postfix is None:
-            return self.fisher_type
+            attr = self.fisher_type
         else:
-            return f'{self.fisher_type}_{postfix}'
-
-    def _get_fisher(self, module, postfix=None):
-        attr = self._get_fisher_attr(postfix)
+            attr = f'{self.fisher_type}_{postfix}'
         fisher = getattr(module, attr, None)
         return fisher
 
+    def _get_full_fisher(self):
+        return self._get_module_fisher(self.model)
+
+    @property
+    def _has_full_fisher(self):
+        return self._get_full_fisher() is not None
+
     def _scale_fisher(self, scale):
-        for module in self.modules:
-            fisher = self._get_fisher(module)
-            if fisher is not None:
-                fisher.scaling(scale)
+        for shape in _module_level_shapes:
+            for module in self.modules_for[shape]:
+                fisher = self._get_module_fisher(module)
+                if fisher is not None:
+                    fisher.scaling(scale)
+        if self._has_full_fisher:
+            self._get_full_fisher().scaling(scale)
 
     def _update_curvature(self,
                           inputs=None,
@@ -134,23 +159,36 @@ class NaturalGradient:
     def update_inv(self, damping=None):
         if damping is None:
             damping = self.damping
-        for module in self.modules:
-            fisher = self._get_fisher(module)
-            if fisher is None:
-                continue
-            fisher.update_inv(damping)
+        for shape in _module_level_shapes:
+            for module in self.modules_for[shape]:
+                fisher = self._get_module_fisher(module)
+                if fisher is None:
+                    continue
+                fisher.update_inv(damping)
+        if self._has_full_fisher:
+            self._get_full_fisher().update_inv(damping)
 
     def precondition(self):
+        for shape in _module_level_shapes:
+            for module in self.modules_for[shape]:
+                fisher = self._get_module_fisher(module)
+                if fisher is None:
+                    continue
+                self.precondition_for[shape](module, fisher)
+        if self._has_full_fisher:
+            self.precondition_full()
+
+    def precondition_full(self):
         grads = []
-        for p in self.model.parameters():
+        for p in self.parameters_for(SHAPE_FULL):
             if p.requires_grad and p.grad is not None:
                 grads.append(p.grad.flatten())
         g = torch.cat(grads)
-        fisher = self._get_fisher(self.model)
+        fisher = self._get_full_fisher()
         ng = torch.mv(fisher.inv, g)
 
         pointer = 0
-        for p in self.model.parameters():
+        for p in self.parameters_for(SHAPE_FULL):
             if p.requires_grad and p.grad is not None:
                 numel = p.grad.numel()
                 val = ng[pointer:pointer + numel]
@@ -158,6 +196,67 @@ class NaturalGradient:
                 pointer += numel
 
         assert pointer == ng.numel()
+
+    @staticmethod
+    def precondition_layer_wise(module, fisher):
+        g = module.weight.grad.flatten()
+        if _bias_requires_grad(module):
+            g = torch.cat([g, module.bias.grad.flatten()])
+        ng = torch.mv(fisher.inv, g)
+
+        if _bias_requires_grad(module):
+            w_numel = module.weight.numel()
+            grad_w = ng[:w_numel]
+            module.bias.grad.copy_(ng[w_numel:])
+        else:
+            grad_w = ng
+        module.weight.grad.copy_(grad_w.reshape_as(module.weight.grad))
+
+    @staticmethod
+    def precondition_kron(module, fisher):
+        if isinstance(module, _normalizations):
+            inv = fisher.unit.inv  # (f, 2, 2)
+            assert _bias_requires_grad(module)
+            grad_w = module.weight.grad  # (f,)
+            grad_b = module.bias.grad  # (f,)
+            g = torch.stack([grad_w, grad_b], dim=1)  # (f, 2)
+            g = g.unsqueeze(2)  # (f, 2, 1)
+            ng = torch.matmul(inv, g).squeeze(2)  # (f, 2)
+            module.weight.grad.copy_(ng[:, 0])
+            module.bias.grad.copy_(ng[:, 1])
+        else:
+            A_inv = fisher.kron.A_inv
+            B_inv = fisher.kron.B_inv
+            grad2d = module.weight.grad.view(B_inv.shape[0], -1)
+            if _bias_requires_grad(module):
+                grad2d = torch.cat(
+                    [grad2d, module.bias.grad.unsqueeze(dim=1)], dim=1)
+            ng = B_inv.mm(grad2d).mm(A_inv)
+            if _bias_requires_grad(module):
+                grad_w = ng[:, :-1]
+                module.bias.grad.copy_(ng[:, -1])
+            else:
+                grad_w = ng
+            module.weight.grad.copy_(grad_w.reshape_as(module.weight.grad))
+
+    @staticmethod
+    def precondition_diag(module, fisher):
+        w_inv = fisher.diag.weight_inv
+        module.weight.grad.mul_(w_inv)
+        if _bias_requires_grad(module):
+            b_inv = fisher.diag.bias_inv
+            module.bias.grad.mul_(b_inv)
+
+
+class FullNaturalGradient(NaturalGradient):
+    def __init__(self,
+                 model,
+                 fisher_type=FISHER_EXACT,
+                 loss_type=LOSS_CROSS_ENTROPY,
+                 n_mc_samples=1,
+                 damping=1e-5,
+                 ema_decay=_invalid_ema_decay):
+        super().__init__(model, fisher_type, SHAPE_FULL, loss_type, n_mc_samples, damping, ema_decay)
 
 
 class LayerWiseNaturalGradient(NaturalGradient):
@@ -168,29 +267,7 @@ class LayerWiseNaturalGradient(NaturalGradient):
                  n_mc_samples=1,
                  damping=1e-5,
                  ema_decay=_invalid_ema_decay):
-        super().__init__(model, fisher_type, loss_type, n_mc_samples, damping, ema_decay)
-        self.fisher_shape = SHAPE_LAYER_WISE
-        self.modules = [
-            m for m in model.modules() if isinstance(m, _supported_modules)
-        ]
-
-    def precondition(self):
-        for module in self.modules:
-            fisher = self._get_fisher(module)
-            if fisher is None:
-                continue
-            g = module.weight.grad.flatten()
-            if _bias_requires_grad(module):
-                g = torch.cat([g, module.bias.grad.flatten()])
-            ng = torch.mv(fisher.inv, g)
-
-            if _bias_requires_grad(module):
-                w_numel = module.weight.numel()
-                grad_w = ng[:w_numel]
-                module.bias.grad.copy_(ng[w_numel:])
-            else:
-                grad_w = ng
-            module.weight.grad.copy_(grad_w.reshape_as(module.weight.grad))
+        super().__init__(model, fisher_type, SHAPE_LAYER_WISE, loss_type, n_mc_samples, damping, ema_decay)
 
 
 class KFAC(NaturalGradient):
@@ -201,46 +278,12 @@ class KFAC(NaturalGradient):
                  n_mc_samples=1,
                  damping=1e-5,
                  ema_decay=_invalid_ema_decay):
-        super().__init__(model, fisher_type, loss_type, n_mc_samples, damping, ema_decay)
-        self.fisher_shape = SHAPE_KRON
-        self.modules = [
-            m for m in model.modules() if isinstance(m, _supported_modules)
-        ]
-
-    def precondition(self):
-        for module in self.modules:
-            fisher = self._get_fisher(module)
-            if fisher is None:
-                continue
-            if isinstance(module, _normalizations):
-                inv = fisher.unit.inv  # (f, 2, 2)
-                assert _bias_requires_grad(module)
-                grad_w = module.weight.grad  # (f,)
-                grad_b = module.bias.grad  # (f,)
-                g = torch.stack([grad_w, grad_b], dim=1)  # (f, 2)
-                g = g.unsqueeze(2)  # (f, 2, 1)
-                ng = torch.matmul(inv, g).squeeze(2)  # (f, 2)
-                module.weight.grad.copy_(ng[:, 0])
-                module.bias.grad.copy_(ng[:, 1])
-            else:
-                A_inv = fisher.kron.A_inv
-                B_inv = fisher.kron.B_inv
-                grad2d = module.weight.grad.view(B_inv.shape[0], -1)
-                if _bias_requires_grad(module):
-                    grad2d = torch.cat(
-                        [grad2d, module.bias.grad.unsqueeze(dim=1)], dim=1)
-                ng = B_inv.mm(grad2d).mm(A_inv)
-                if _bias_requires_grad(module):
-                    grad_w = ng[:, :-1]
-                    module.bias.grad.copy_(ng[:, -1])
-                else:
-                    grad_w = ng
-                module.weight.grad.copy_(grad_w.reshape_as(module.weight.grad))
+        super().__init__(model, fisher_type, SHAPE_KRON, loss_type, n_mc_samples, damping, ema_decay)
 
     def precondition_vector(self, vec):
         idx = 0
         for module in self.modules:
-            fisher = self._get_fisher(module)
+            fisher = self._get_module_fisher(module)
             if fisher is None:
                 continue
             if isinstance(module, _normalizations):
@@ -283,27 +326,12 @@ class DiagNaturalGradient(NaturalGradient):
                  n_mc_samples=1,
                  damping=1e-5,
                  ema_decay=_invalid_ema_decay):
-        super().__init__(model, fisher_type, loss_type, n_mc_samples, damping, ema_decay)
-        self.fisher_shape = SHAPE_DIAG
-        self.modules = [
-            m for m in model.modules() if isinstance(m, _supported_modules)
-        ]
-
-    def precondition(self):
-        for module in self.modules:
-            fisher = self._get_fisher(module)
-            if fisher is None:
-                continue
-            w_inv = fisher.diag.weight_inv
-            module.weight.grad.mul_(w_inv)
-            if _bias_requires_grad(module):
-                b_inv = fisher.diag.bias_inv
-                module.bias.grad.mul_(b_inv)
+        super().__init__(model, fisher_type, SHAPE_DIAG, loss_type, n_mc_samples, damping, ema_decay)
 
     def precondition_vector(self, vec):
         idx = 0
         for module in self.modules:
-            fisher = self._get_fisher(module)
+            fisher = self._get_module_fisher(module)
             if fisher is None:
                 continue
             assert fisher.diag is not None, module
@@ -316,7 +344,7 @@ class DiagNaturalGradient(NaturalGradient):
         assert idx == len(vec)
 
     def precondition_vector_module(self, vec, module):
-        fisher = self._get_fisher(module)
+        fisher = self._get_module_fisher(module)
         assert fisher is not None
         assert fisher.diag is not None, module
         vec[0].mul_(fisher.diag.weight_inv)

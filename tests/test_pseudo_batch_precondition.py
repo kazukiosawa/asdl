@@ -4,7 +4,7 @@ import torch
 from torch import nn
 
 from asdfghjkl import FISHER_EXACT, FISHER_EMP
-from asdfghjkl import NaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient
+from asdfghjkl import FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient
 from asdfghjkl import PseudoBatchLoaderGenerator
 
 
@@ -42,7 +42,7 @@ def assert_equal(tensor1, tensor2, msg=''):
 
 
 damping = 1e-2
-for ngd_cls in [NaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient]:
+for ngd_cls in [FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient]:
     for fisher_type in [FISHER_EMP, FISHER_EXACT]:
         print(ngd_cls.__name__, fisher_type)
         model1 = convnet(32, 16)
@@ -62,7 +62,7 @@ for ngd_cls in [NaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGrad
             break
         ngd2.update_inv()
 
-        if ngd_cls == NaturalGradient:
+        if ngd_cls == FullNaturalGradient:
             f1 = getattr(model1, fisher_type)
             f2 = getattr(model2, fisher_type)
             assert_equal(f1.data, f2.data, 'full_data')

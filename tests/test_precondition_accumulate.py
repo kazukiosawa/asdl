@@ -5,7 +5,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from asdfghjkl import FISHER_EXACT, FISHER_MC, FISHER_EMP, LOSS_MSE, LOSS_CROSS_ENTROPY
-from asdfghjkl import NaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient
+from asdfghjkl import FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient
 
 
 def convnet(n_dim, n_channels, n_classes=10, kernel_size=3):
@@ -37,7 +37,7 @@ def assert_equal(tensor1, tensor2, msg=''):
     assert torch.equal(tensor1, tensor2), f'{msg} tensor1: {tensor1.norm().item()}, tensor2: {tensor2.norm().item()}, relative_diff: {relative_norm}'
 
 
-for ngd_cls in [NaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient]:
+for ngd_cls in [FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient]:
     for fisher_type in [FISHER_EMP, FISHER_MC, FISHER_EXACT]:
         for loss_type in [LOSS_MSE, LOSS_CROSS_ENTROPY]:
             print(ngd_cls.__name__, fisher_type, loss_type)
@@ -65,7 +65,7 @@ for ngd_cls in [NaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGrad
                                       seed=1 if fisher_type == FISHER_MC else None)
             ngd2.update_inv()
 
-            if ngd_cls == NaturalGradient:
+            if ngd_cls == FullNaturalGradient:
                 f1 = getattr(model1, fisher_type)
                 f2 = getattr(model2, fisher_type)
                 assert_equal(f1.data, f2.data, 'full_data')
