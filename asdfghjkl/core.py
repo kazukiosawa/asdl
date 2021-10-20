@@ -1,7 +1,9 @@
 from typing import List
 from contextlib import contextmanager
+import inspect
 
 import torch.nn as nn
+from torch.nn import Module
 from .utils import im2col_2d, record_original_requires_grad
 from .operations import get_op_class
 
@@ -12,8 +14,7 @@ def extend(model, op_names):
         op_names = list(op_names)
     elif isinstance(op_names, str):
         op_names = [op_names]
-    elif not isinstance(op_names, list):
-        raise TypeError(f'Invalid type of op_names: {type(op_names)}')
+    op_names = _get_module_wise_op_names(model, op_names)
     handles = []
 
     def forward_hook(module, in_data, out_data):
@@ -49,6 +50,27 @@ def extend(model, op_names):
         handle.remove()
     for module in model.modules():
         _remove_operations(module)
+
+
+def _get_module_wise_op_names(model, op_names):
+    if isinstance(op_names, dict):
+        if all(isinstance(key, Module) for key in op_names):
+            for module in model.modules():
+                assert module in op_names, f'op_names for module {module} is not specified.'
+            # already module-wise
+            return op_names
+        elif all(inspect.isclass(key) and issubclass(key, Module) for key in op_names):
+            # convert class-wise op_names to module-wise op_names
+            rst = {}
+            for module in model.modules():
+                try:
+                    rst[module] = op_names[module.__class__]
+                except KeyError:
+                    print(f'op_names for class {module.__class__} is not specified.')
+            return rst
+    assert isinstance(op_names, list), f'Invalid type of op_names: {type(op_names)}'
+    # apply common op_names to all modules
+    return {module: op_names for module in model.modules()}
 
 
 def _preprocess_in_data(module, in_data, out_data):
