@@ -213,6 +213,7 @@ class FROMP:
                  kernel_type='implicit',
                  use_identity_kernel=False,
                  use_temp_correction=False,
+                 penalty_type='fromp',
                  ):
         assert ggn_type in _fisher_types, f'ggn_type: {ggn_type} is not supported.' \
                                           f' choices: {list(_fisher_types.keys())}'
@@ -231,6 +232,7 @@ class FROMP:
         self.memory_select_method = memory_select_method
         self.use_identity_kernel = use_identity_kernel
         self.use_temp_correction = use_temp_correction
+        self.penalty_type = penalty_type
 
         if isinstance(model, DDP):
             # As DDP disables hook functions required for Fisher calculation,
@@ -285,7 +287,7 @@ class FROMP:
 
         # update information (kernel & mean) for each observed task
         for task in self.observed_tasks:
-            with customize_head(model, task.class_ids, softmax=True, temp=self.temp):
+            with customize_head(model, task.class_ids, softmax=self.penalty_type!='der', temp=self.temp):
                 if not self.use_identity_kernel:
                     task.update_kernel(model, self.kernel_fn, self.eps)
                 task.update_mean(model)
@@ -315,7 +317,7 @@ class FROMP:
             total_penalty = 0
             for idx in indices:
                 task = observed_tasks[idx]
-                with customize_head(model, task.class_ids, softmax=True, temp=temp):
+                with customize_head(model, task.class_ids, softmax=self.penalty_type!='der', temp=temp):
                     total_penalty += task.get_penalty(model, self.n_memorable_points_sub, mem_indices, use_kprior_penalty)
 
         temp_corr = temp**2 if self.use_temp_correction else 1.
