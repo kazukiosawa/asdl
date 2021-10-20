@@ -104,17 +104,17 @@ class _FisherBase(MatrixManager):
             else:
                 assert fshape in _supported_shapes
 
+        # setup operations for extend
+        op_names = [_SHAPE_TO_OP[shape] for shape in fisher_shapes]
+        # remove duplicates
+        op_names = list(set(op_names))
+
         if not accumulate:
             # set Fisher/FVP zero
             if fvp:
                 self.zero_fvp()
             else:
                 self.zero_fisher()
-
-        # setup operations for extend
-        op_names = [_SHAPE_TO_OP[shape] for shape in fisher_shapes]
-        # remove duplicates
-        op_names = list(set(op_names))
 
         model = self._model
         total_loss = 0
