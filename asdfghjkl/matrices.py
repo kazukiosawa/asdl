@@ -67,7 +67,7 @@ def matrix_shapes_to_values(matrix_shapes, shape_to_value_mapping):
 
 def modules_for_matrix_shapes(matrix_shapes, modules):
     """
-    Maps matrix shapes to corresponding modules
+    Get the corresponding modules for each matrix shape
     """
     if isinstance(matrix_shapes, str):
         matrix_shapes = [matrix_shapes]
