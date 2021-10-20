@@ -1,6 +1,6 @@
 import torch
 from .symmatrix import SymMatrix, Diag
-from .matrices import SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_DIAG, HESSIAN, MatrixManager
+from .matrices import SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_DIAG, HESSIAN, MatrixManager
 from .mvp import power_method, conjugate_gradient_method, reduce_params
 
 __all__ = [
@@ -9,7 +9,7 @@ __all__ = [
     'hessian_eig',
     'hessian_free'
 ]
-_supported_shapes = [SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_DIAG]
+_supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_DIAG]
 
 
 class Hessian(MatrixManager):
@@ -190,7 +190,7 @@ def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
     else:
         full_hess = None
 
-    if SHAPE_BLOCK_DIAG not in hessian_shapes \
+    if SHAPE_LAYER_WISE not in hessian_shapes \
             and SHAPE_DIAG not in hessian_shapes:
         return
 
@@ -211,7 +211,7 @@ def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
             idx += m_numel
 
         # block-diagonal
-        if SHAPE_BLOCK_DIAG in hessian_shapes:
+        if SHAPE_LAYER_WISE in hessian_shapes:
             setattr(module, 'hessian', SymMatrix(data=m_hess))
 
         # diagonal

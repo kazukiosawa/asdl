@@ -4,7 +4,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from asdfghjkl import FISHER_EMP, SHAPE_FULL, SHAPE_BLOCK_DIAG
+from asdfghjkl import FISHER_EMP, SHAPE_FULL, SHAPE_LAYER_WISE
 from asdfghjkl import NaturalGradient, LayerWiseNaturalGradient, woodbury_ifvp
 
 

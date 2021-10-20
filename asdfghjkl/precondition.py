@@ -2,7 +2,7 @@ import warnings
 import torch
 from torch import nn
 
-from .matrices import FISHER_EXACT, SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG  # NOQA
+from .matrices import FISHER_EXACT, SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG  # NOQA
 from .fisher import fisher, LOSS_CROSS_ENTROPY
 
 _supported_modules = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d)
@@ -169,7 +169,7 @@ class LayerWiseNaturalGradient(NaturalGradient):
                  damping=1e-5,
                  ema_decay=_invalid_ema_decay):
         super().__init__(model, fisher_type, loss_type, n_mc_samples, damping, ema_decay)
-        self.fisher_shape = SHAPE_BLOCK_DIAG
+        self.fisher_shape = SHAPE_LAYER_WISE
         self.modules = [
             m for m in model.modules() if isinstance(m, _supported_modules)
         ]

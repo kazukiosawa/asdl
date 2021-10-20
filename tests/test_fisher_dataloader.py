@@ -5,7 +5,7 @@ from torch import nn
 
 from asdfghjkl import fisher_for_cross_entropy
 from asdfghjkl import FISHER_EXACT, FISHER_MC, FISHER_EMP
-from asdfghjkl import SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG
+from asdfghjkl import SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG
 
 
 def convnet(n_dim, n_channels, n_classes=10, kernel_size=3):
@@ -47,7 +47,7 @@ for fisher_type in [FISHER_EMP, FISHER_MC, FISHER_EXACT]:
         # Fisher by a single batch
         fisher_for_cross_entropy(model1,
                                  fisher_type=fisher_type,
-                                 fisher_shapes=[SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG],
+                                 fisher_shapes=[SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG],
                                  inputs=x,
                                  targets=y,
                                  data_average=data_average,
@@ -57,7 +57,7 @@ for fisher_type in [FISHER_EMP, FISHER_MC, FISHER_EXACT]:
         # Fisher by data loader (contains copies of the same batch)
         fisher_for_cross_entropy(model2,
                                  fisher_type=fisher_type,
-                                 fisher_shapes=[SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG],
+                                 fisher_shapes=[SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG],
                                  data_loader=dataloader,
                                  data_average=data_average,
                                  seed=1 if fisher_type == FISHER_MC else None)

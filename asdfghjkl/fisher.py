@@ -13,7 +13,7 @@ from .mvp import power_method, conjugate_gradient_method, reduce_params
 
 _SHAPE_TO_OP = {
     SHAPE_FULL: OP_BATCH_GRADS,  # full
-    SHAPE_BLOCK_DIAG: OP_BATCH_GRADS,  # block-diagonal
+    SHAPE_LAYER_WISE: OP_BATCH_GRADS,  # layer-wise block-diagonal
     SHAPE_KRON: OP_COV_KRON,  # Kronecker-factored
     SHAPE_DIAG: OP_COV_DIAG,  # diagonal
 }
@@ -42,8 +42,8 @@ __all__ = [
 ]
 
 _supported_types = [FISHER_EXACT, FISHER_MC, FISHER_EMP]
-_supported_shapes = [SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG]
-_supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_BLOCK_DIAG]
+_supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG]
+_supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_LAYER_WISE]
 
 
 class _FisherBase(MatrixManager):
@@ -120,10 +120,10 @@ class _FisherBase(MatrixManager):
                         loss.backward(retain_graph=True)
                 if fvp:
                     _full_cvp(model, modules_for[SHAPE_FULL], vec)
-                    _layer_wise_cvp(modules_for[SHAPE_BLOCK_DIAG], vec)
+                    _layer_wise_cvp(modules_for[SHAPE_LAYER_WISE], vec)
                 else:
                     _full_covariance(model, modules_for[SHAPE_FULL])
-                    _layer_wise_covariance(modules_for[SHAPE_BLOCK_DIAG])
+                    _layer_wise_covariance(modules_for[SHAPE_LAYER_WISE])
                 if not calc_emp_loss_grad_after_fisher:
                     nonlocal total_loss
                     total_loss += loss.item()
@@ -192,7 +192,6 @@ class _FisherBase(MatrixManager):
         {
             'diag': {'weight': torch.Tensor, 'bias': torch.Tensor},
             'kron': {'A': torch.Tensor, 'B': torch.Tensor},
-            'block_diag': torch.Tensor,
             'unit_wise': torch.Tensor,
         }
         """
@@ -222,7 +221,7 @@ class _FisherBase(MatrixManager):
                 unit=unit,
                 scale=scale
             )
-            # move block_diag fvp
+            # move layer-wise fvp
             self._accumulate_fvp(module, _CVP_LAYER_WISE, scale)
 
         # move full fisher

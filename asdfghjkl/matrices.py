@@ -14,10 +14,10 @@ FISHER_MC = 'fisher_mc'  # Fisher estimation by Monte-Carlo sampling
 FISHER_EMP = 'fisher_emp'  # no-centered covariance a.k.a. empirical Fisher
 
 SHAPE_FULL = 'full'  # full
-SHAPE_BLOCK_DIAG = 'block_diag'  # layer-wise block-diagonal
+SHAPE_LAYER_WISE = 'layer_wise'  # layer-wise block-diagonal
 SHAPE_KRON = 'kron'  # Kronecker-factored
 SHAPE_DIAG = 'diag'  # diagonal
-ALL_SHAPES = [SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG]
+ALL_SHAPES = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG]
 
 __all__ = [
     'MatrixManager',
@@ -26,14 +26,14 @@ __all__ = [
     'FISHER_EMP',
     'HESSIAN',
     'SHAPE_FULL',
-    'SHAPE_BLOCK_DIAG',
+    'SHAPE_LAYER_WISE',
     'SHAPE_KRON',
     'SHAPE_DIAG',
     'matrix_shapes_to_values'
 ]
 
 _supported_types = [HESSIAN, FISHER_EXACT, FISHER_MC, FISHER_EMP]
-_supported_shapes = [SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG]
+_supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG]
 
 _normalizations = (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d)
 
@@ -225,8 +225,8 @@ class MatrixManager:
                 if not _requires_matrix(module):
                     continue
                 matrix = SymMatrix()
-                if SHAPE_BLOCK_DIAG in matrix_shapes:
-                    _load_path(SHAPE_BLOCK_DIAG, 'path', 'tril', mname)
+                if SHAPE_LAYER_WISE in matrix_shapes:
+                    _load_path(SHAPE_LAYER_WISE, 'path', 'tril', mname)
                 if SHAPE_KRON in matrix_shapes:
                     if isinstance(module, _normalizations):
                         _load_path(
@@ -353,7 +353,7 @@ class MatrixManager:
                 continue
             matrix = getattr(module, stats_attr, None)
             assert matrix is not None, f'{matrix_type} for {mname} does not exist.'
-            if matrix_shape == SHAPE_BLOCK_DIAG:
+            if matrix_shape == SHAPE_LAYER_WISE:
                 assert matrix.has_data, f'{matrix_type}.{matrix_shape} for {mname} does not exist.'
                 rst = reduce_fn(rst, getattr(matrix, metrics_fn)())
             elif matrix_shape == SHAPE_KRON:
