@@ -20,8 +20,8 @@ _SHAPE_TO_OP = {
 
 _COV_FULL = 'cov_full'
 _CVP_FULL = 'cvp_full'
-_COV_BLOCK_DIAG = 'cov_block_diag'
-_CVP_BLOCK_DIAG = 'cvp_block_diag'
+_COV_LAYER_WISE = 'cov_layer_wise'
+_CVP_LAYER_WISE = 'cvp_layer_wise'
 
 LOSS_CROSS_ENTROPY = 'cross_entropy'
 LOSS_MSE = 'mse'
@@ -96,29 +96,8 @@ class _FisherBase(MatrixManager):
                          calc_emp_loss_grad=False,
                          seed=None,
                          scale=1.):
-        if isinstance(fisher_shapes, str):
-            fisher_shapes = [fisher_shapes]
-
-        def shapes_to_names(shapes):
-            for shape in shapes:
-                if fvp:
-                    assert shape in _supported_shapes_for_fvp, f'Invalid shape for fvp: {shape}.'
-                else:
-                    assert shape in _supported_shapes, f'Invalid shape for fisher: {shape}.'
-            names = [_SHAPE_TO_OP[shape] for shape in shapes]
-            # remove duplicates
-            names = list(set(names))
-            return names
-
-        # setup op_names for extend
-        if isinstance(fisher_shapes, list):
-            op_names = shapes_to_names(fisher_shapes)
-        elif isinstance(fisher_shapes, dict):
-            op_names = {}
-            for key, value in fisher_shapes.items():
-                op_names[key] = shapes_to_names(value)
-        else:
-            raise TypeError(f'Invalid type of fisher_shapes: {type(fisher_shapes)}.')
+        model = self._model
+        op_names, modules_for = matrix_shapes_to_values(fisher_shapes, _SHAPE_TO_OP, list(model.modules()))
 
         if not accumulate:
             # set Fisher/FVP zero
@@ -127,9 +106,7 @@ class _FisherBase(MatrixManager):
             else:
                 self.zero_fisher()
 
-        model = self._model
         total_loss = 0
-
         calc_emp_loss_grad_with_fisher = calc_emp_loss_grad and self.is_fisher_emp
         calc_emp_loss_grad_after_fisher = calc_emp_loss_grad and not self.is_fisher_emp
 
@@ -142,9 +119,11 @@ class _FisherBase(MatrixManager):
                     with skip_param_grad(model, disable=calc_emp_loss_grad_with_fisher):
                         loss.backward(retain_graph=True)
                 if fvp:
-                    _construct_cvp(model, fisher_shapes, vec)
+                    _full_cvp(model, modules_for[SHAPE_FULL], vec)
+                    _layer_wise_cvp(modules_for[SHAPE_BLOCK_DIAG], vec)
                 else:
-                    _construct_cov(model, fisher_shapes)
+                    _full_covariance(model, modules_for[SHAPE_FULL])
+                    _layer_wise_covariance(modules_for[SHAPE_BLOCK_DIAG])
                 if not calc_emp_loss_grad_after_fisher:
                     nonlocal total_loss
                     total_loss += loss.item()
@@ -234,17 +213,17 @@ class _FisherBase(MatrixManager):
                 rst = op_results[OP_COV_UNIT_WISE]
                 unit = UnitWise(rst)
             operation.clear_op_results()
-            # move block_diag/kron/diag fisher
+            # move layer-wise/kron/diag fisher
             self._accumulate_fisher(
                 module,
-                _COV_BLOCK_DIAG,
+                _COV_LAYER_WISE,
                 kron=kron,
                 diag=diag,
                 unit=unit,
                 scale=scale
             )
             # move block_diag fvp
-            self._accumulate_fvp(module, _CVP_BLOCK_DIAG, scale)
+            self._accumulate_fvp(module, _CVP_LAYER_WISE, scale)
 
         # move full fisher
         self._accumulate_fisher(model, _COV_FULL, scale=scale)
@@ -415,21 +394,23 @@ class FisherEmpMSE(_FisherMSE):
         closure(lambda: 0.5 * (outputs - targets).norm(dim=1).sum())
 
 
-def _module_batch_grads(model):
+def _module_batch_grads(modules):
     rst = []
-    for module in model.modules():
+    for module in modules:
         operation = getattr(module, 'operation', None)
         if operation is None:
             continue
         op_results = operation.get_op_results()
-        batch_grads = op_results[OP_BATCH_GRADS]
+        batch_grads = op_results.get(OP_BATCH_GRADS, None)
+        if batch_grads is None:
+            continue
         rst.append((module, batch_grads))
     return rst
 
 
-def _module_batch_flatten_grads(model):
+def _module_batch_flatten_grads(modules):
     rst = []
-    for module, batch_grads in _module_batch_grads(model):
+    for module, batch_grads in _module_batch_grads(modules):
         batch_flatten_grads = torch.cat(
             [g.flatten(start_dim=1) for g in batch_grads.values()],
             dim=1
@@ -438,10 +419,10 @@ def _module_batch_flatten_grads(model):
     return rst
 
 
-def _module_batch_gvp(model, vec):
+def _module_batch_gvp(modules, vec):
     rst = []
     pointer = 0
-    for module, batch_grads in _module_batch_grads(model):
+    for module, batch_grads in _module_batch_grads(modules):
         batch_gvp = None
         for b_g in batch_grads.values():
             v = vec[pointer]
@@ -456,9 +437,11 @@ def _module_batch_gvp(model, vec):
     return rst
 
 
-def _full_covariance(model):
+def _full_covariance(model, modules):
+    if len(modules) == 0:
+        return
     batch_all_g = []
-    for _, batch_g in _module_batch_flatten_grads(model):
+    for _, batch_g in _module_batch_flatten_grads(modules):
         batch_all_g.append(batch_g)
     batch_all_g = torch.cat(batch_all_g, dim=1)  # n x p_all
     new_cov_full = torch.matmul(batch_all_g.T, batch_all_g)  # p_all x p_all
@@ -468,25 +451,29 @@ def _full_covariance(model):
     setattr(model, _COV_FULL, new_cov_full)
 
 
-def _block_diag_covariance(model):
-    for module, batch_g in _module_batch_flatten_grads(model):
+def _layer_wise_covariance(modules):
+    if len(modules) == 0:
+        return
+    for module, batch_g in _module_batch_flatten_grads(modules):
         new_cov_block = torch.matmul(batch_g.T, batch_g)  # p_all x p_all
-        cov_block = getattr(module, _COV_BLOCK_DIAG, None)
+        cov_block = getattr(module, _COV_LAYER_WISE, None)
         if cov_block is not None:
             new_cov_block += cov_block
-        setattr(module, _COV_BLOCK_DIAG, new_cov_block)
+        setattr(module, _COV_LAYER_WISE, new_cov_block)
 
 
-def _full_cvp(model, vec):
+def _full_cvp(model, modules, vec):
     """
     g: n x p
     v: p
     c = sum[gg^t]: p x p
     cvp = sum[gg^t]v = sum[g(g^t)v]: p
     """
+    if len(modules) == 0:
+        return
     # compute batched (g^t)v
     batch_all_gvp = None
-    for module, batch_gvp in _module_batch_gvp(model, vec):
+    for module, batch_gvp in _module_batch_gvp(modules, vec):
         if batch_all_gvp is None:
             batch_all_gvp = batch_gvp
         else:
@@ -494,7 +481,7 @@ def _full_cvp(model, vec):
 
     # compute cvp = sum[g(g^t)v]
     new_cvp = []
-    for module, batch_grads in _module_batch_grads(model):
+    for module, batch_grads in _module_batch_grads(modules):
         for b_g in batch_grads.values():
             new_cvp.append(torch.einsum('n...,n->...', b_g, batch_all_gvp))
     cvp = getattr(model, _CVP_FULL, None)
@@ -503,38 +490,26 @@ def _full_cvp(model, vec):
     setattr(model, _CVP_FULL, new_cvp)
 
 
-def _block_diag_cvp(model, vec):
+def _layer_wise_cvp(modules, vec):
     """
     g: n x p
     v: p
     c = sum[gg^t]: p x p
     cvp = sum[gg^t]v = sum[g(g^t)v]: p
     """
-    batch_gvp_dict = {k: v for k, v in _module_batch_gvp(model, vec)}
-    for module, batch_grads in _module_batch_grads(model):
+    if len(modules) == 0:
+        return
+    batch_gvp_dict = {k: v for k, v in _module_batch_gvp(modules, vec)}
+    for module, batch_grads in _module_batch_grads(modules):
         new_cvp = []
         # compute cvp = sum[g(g^t)v]
         batch_gvp = batch_gvp_dict[module]
         for b_g in batch_grads.values():
             new_cvp.append(torch.einsum('n...,n->...', b_g, batch_gvp))
-        cvp = getattr(module, _CVP_BLOCK_DIAG, None)
+        cvp = getattr(module, _CVP_LAYER_WISE, None)
         if cvp is not None:
             new_cvp = [v1 + v2 for v1, v2 in zip(new_cvp, cvp)]
-        setattr(module, _CVP_BLOCK_DIAG, new_cvp)
-
-
-def _construct_cov(model, fisher_shapes):
-    if SHAPE_FULL in fisher_shapes:
-        _full_covariance(model)
-    if SHAPE_BLOCK_DIAG in fisher_shapes:
-        _block_diag_covariance(model)
-
-
-def _construct_cvp(model, fisher_shapes, vec):
-    if SHAPE_FULL in fisher_shapes:
-        _full_cvp(model, vec)
-    if SHAPE_BLOCK_DIAG in fisher_shapes:
-        _block_diag_cvp(model, vec)
+        setattr(module, _CVP_LAYER_WISE, new_cvp)
 
 
 @contextmanager

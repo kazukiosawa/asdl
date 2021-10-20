@@ -39,6 +39,9 @@ _normalizations = (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d)
 
 
 def matrix_shapes_to_values(matrix_shapes, shape_to_value_mapping, modules=None):
+    """
+    Maps matrix shapes to some values.
+    """
     if isinstance(matrix_shapes, str):
         matrix_shapes = [matrix_shapes]
 
