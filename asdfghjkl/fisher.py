@@ -98,16 +98,27 @@ class _FisherBase(MatrixManager):
                          scale=1.):
         if isinstance(fisher_shapes, str):
             fisher_shapes = [fisher_shapes]
-        for fshape in fisher_shapes:
-            if fvp:
-                assert fshape in _supported_shapes_for_fvp
-            else:
-                assert fshape in _supported_shapes
 
-        # setup operations for extend
-        op_names = [_SHAPE_TO_OP[shape] for shape in fisher_shapes]
-        # remove duplicates
-        op_names = list(set(op_names))
+        def shapes_to_names(shapes):
+            for shape in shapes:
+                if fvp:
+                    assert shape in _supported_shapes_for_fvp, f'Invalid shape for fvp: {shape}.'
+                else:
+                    assert shape in _supported_shapes, f'Invalid shape for fisher: {shape}.'
+            names = [_SHAPE_TO_OP[shape] for shape in shapes]
+            # remove duplicates
+            names = list(set(names))
+            return names
+
+        # setup op_names for extend
+        if isinstance(fisher_shapes, list):
+            op_names = shapes_to_names(fisher_shapes)
+        elif isinstance(fisher_shapes, dict):
+            op_names = {}
+            for key, value in fisher_shapes.items():
+                op_names[key] = shapes_to_names(value)
+        else:
+            raise TypeError(f'Invalid type of fisher_shapes: {type(fisher_shapes)}.')
 
         if not accumulate:
             # set Fisher/FVP zero
