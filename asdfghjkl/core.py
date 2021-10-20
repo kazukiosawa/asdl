@@ -41,7 +41,7 @@ def extend(model, op_names):
             continue
         # register hooks and operations in modules
         handles.append(module.register_forward_hook(forward_hook))
-        _register_operations(model, module, op_names)
+        _register_operations(model, module, op_names[module])
 
     yield
 
