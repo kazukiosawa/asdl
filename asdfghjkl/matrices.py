@@ -30,7 +30,7 @@ __all__ = [
     'SHAPE_KRON',
     'SHAPE_DIAG',
     'matrix_shapes_to_values',
-    'matrix_shapes_to_corr_modules'
+    'modules_for_matrix_shapes'
 ]
 
 _supported_types = [HESSIAN, FISHER_EXACT, FISHER_MC, FISHER_EMP]
@@ -65,7 +65,7 @@ def matrix_shapes_to_values(matrix_shapes, shape_to_value_mapping):
     return values
 
 
-def matrix_shapes_to_corr_modules(matrix_shapes, modules):
+def modules_for_matrix_shapes(matrix_shapes, modules):
     """
     Maps matrix shapes to corresponding modules
     """
