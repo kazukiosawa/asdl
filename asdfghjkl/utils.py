@@ -10,7 +10,7 @@ _REQUIRES_GRAD_ATTR = '_original_requires_grad'
 
 __all__ = [
     'original_requires_grad', 'record_original_requires_grad',
-    'restore_original_requires_grad', 'disable_param_grad', 'im2col_2d',
+    'restore_original_requires_grad', 'skip_param_grad', 'im2col_2d',
     'im2col_2d_slow', 'add_value_to_diagonal', 'nvtx_range', 'cholesky_inv',
     'PseudoBatchLoaderGenerator'
 ]
@@ -31,15 +31,16 @@ def restore_original_requires_grad(param):
 
 
 @contextmanager
-def disable_param_grad(model):
-
-    for param in model.parameters():
-        record_original_requires_grad(param)
-        param.requires_grad = False
+def skip_param_grad(model, disable=False):
+    if not disable:
+        for param in model.parameters():
+            record_original_requires_grad(param)
+            param.requires_grad = False
 
     yield
-    for param in model.parameters():
-        restore_original_requires_grad(param)
+    if not disable:
+        for param in model.parameters():
+            restore_original_requires_grad(param)
 
 
 def im2col_2d(x: torch.Tensor, conv2d: nn.Module):
@@ -86,6 +87,11 @@ def add_value_to_diagonal(x: torch.Tensor, value):
     return x.add(eye, alpha=value)
 
 
+def cholesky_inv(X):
+    u = torch.linalg.cholesky(X)
+    return torch.cholesky_inverse(u)
+
+
 @contextmanager
 def nvtx_range(msg):
     try:
@@ -93,11 +99,6 @@ def nvtx_range(msg):
         yield
     finally:
         nvtx.range_pop()
-
-
-def cholesky_inv(X):
-    u = torch.linalg.cholesky(X)
-    return torch.cholesky_inverse(u)
 
 
 class PseudoBatchLoaderGenerator:
@@ -124,24 +125,26 @@ class PseudoBatchLoaderGenerator:
     [[tensor([8])], [tensor([5])], [tensor([4])], [tensor([2])], [tensor([9])]]
     ```
     """
-    def __init__(self, base_data_loader, pseudo_batch_size, batch_size=None):
+    def __init__(self, base_data_loader, pseudo_batch_size, batch_size=None, drop_last=None):
         if batch_size is None:
             batch_size = base_data_loader.batch_size
         assert pseudo_batch_size % batch_size == 0, f'pseudo_batch_size ({pseudo_batch_size}) ' \
                                                     f'needs to be divisible by batch_size ({batch_size})'
+        if drop_last is None:
+            drop_last = base_data_loader.drop_last
         base_dataset = base_data_loader.dataset
         sampler_cls = base_data_loader.sampler.__class__
-        batch_sampler = BatchSampler(sampler_cls(range(len(base_dataset))),
-                                     batch_size=pseudo_batch_size,
-                                     drop_last=True)
+        pseudo_batch_sampler = BatchSampler(sampler_cls(range(len(base_dataset))),
+                                            batch_size=pseudo_batch_size,
+                                            drop_last=drop_last)
         self.batch_size = batch_size
-        self.batch_sampler = batch_sampler
+        self.pseudo_batch_sampler = pseudo_batch_sampler
         self.base_dataset = base_dataset
         self.base_data_loader = base_data_loader
 
     def __iter__(self):
         loader = self.base_data_loader
-        for indices in self.batch_sampler:
+        for indices in self.pseudo_batch_sampler:
             subset_in_pseudo_batch = Subset(self.base_dataset, indices)
             data_loader = DataLoader(
                 subset_in_pseudo_batch,

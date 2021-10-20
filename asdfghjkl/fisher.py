@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from .core import extend
-from .utils import disable_param_grad
+from .utils import skip_param_grad
 from .operations import *
 from .symmatrix import SymMatrix, Kron, Diag, UnitWise
 from .matrices import *
@@ -23,10 +23,11 @@ _CVP_FULL = 'cvp_full'
 _COV_BLOCK_DIAG = 'cov_block_diag'
 _CVP_BLOCK_DIAG = 'cvp_block_diag'
 
-_LOSS_CROSS_ENTROPY = 'cross_entropy'
-_LOSS_MSE = 'mse'
+LOSS_CROSS_ENTROPY = 'cross_entropy'
+LOSS_MSE = 'mse'
 
 __all__ = [
+    'fisher',
     'fisher_for_cross_entropy',
     'fisher_for_mse',
     'fvp_for_cross_entropy',
@@ -35,7 +36,9 @@ __all__ = [
     'fisher_eig_for_mse',
     'fisher_free_for_cross_entropy',
     'fisher_free_for_mse',
-    'woodbury_ifvp'
+    'woodbury_ifvp',
+    'LOSS_CROSS_ENTROPY',
+    'LOSS_MSE'
 ]
 
 _supported_types = [FISHER_EXACT, FISHER_MC, FISHER_EMP]
@@ -49,6 +52,14 @@ class _FisherBase(MatrixManager):
 
     @property
     def fisher_type(self):
+        raise NotImplementedError
+
+    @property
+    def is_fisher_emp(self):
+        return self.fisher_type == FISHER_EMP
+
+    @property
+    def loss_fn(self):
         raise NotImplementedError
 
     @property
@@ -82,6 +93,7 @@ class _FisherBase(MatrixManager):
                          vec=None,
                          data_average=True,
                          accumulate=False,
+                         calc_emp_loss_grad=False,
                          seed=None,
                          scale=1.):
         if isinstance(fisher_shapes, str):
@@ -105,44 +117,69 @@ class _FisherBase(MatrixManager):
         op_names = list(set(op_names))
 
         model = self._model
+        total_loss = 0
 
-        def closure(loss_expr, grad_scale=None):
-            model.zero_grad(set_to_none=True)
-            self._zero_op_batch_grads(set_to_none=True)
-            loss = loss_expr()
-            with _grads_scale(model, grad_scale):
-                with disable_param_grad(model):
-                    loss.backward(retain_graph=True)
-            if fvp:
-                _construct_cvp(model, fisher_shapes, vec)
-            else:
-                _construct_cov(model, fisher_shapes)
+        calc_emp_loss_grad_with_fisher = calc_emp_loss_grad and self.is_fisher_emp
+        calc_emp_loss_grad_after_fisher = calc_emp_loss_grad and not self.is_fisher_emp
 
-        device = self._device
-        if data_loader is not None:
-            if data_average:
-                scale /= len(data_loader.dataset)
-            # calculate fisher/fvp for the data_loader
-            for inputs, targets in data_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
-                if seed:
-                    torch.random.manual_seed(seed)
-                with extend(model, op_names):
-                    self._fisher_core(closure, model(inputs), targets)
-                    self._register_fisher(scale)
-        else:
-            # calculate fisher/fvp for a single batch
-            assert inputs is not None
-            if data_average:
-                scale /= inputs.shape[0]
-            inputs = inputs.to(device)
-            if targets is not None:
-                targets = targets.to(device)
+        def fisher_for_one_batch(x, t=None):
+
+            def closure(loss_expr, grad_scale=None):
+                self._zero_op_batch_grads(set_to_none=True)
+                loss = loss_expr()
+                with _grads_scale(model, grad_scale):
+                    with skip_param_grad(model, disable=calc_emp_loss_grad_with_fisher):
+                        loss.backward(retain_graph=True)
+                if fvp:
+                    _construct_cvp(model, fisher_shapes, vec)
+                else:
+                    _construct_cov(model, fisher_shapes)
+                if not calc_emp_loss_grad_after_fisher:
+                    nonlocal total_loss
+                    total_loss += loss.item()
+
+            x = x.to(device)
+            if t is not None:
+                t = t.to(device)
             if seed:
                 torch.random.manual_seed(seed)
             with extend(model, op_names):
-                self._fisher_core(closure, model(inputs), targets)
+                y = model(x)
+                self._fisher_core(closure, y, t)
                 self._register_fisher(scale)
+            if calc_emp_loss_grad_after_fisher:
+                assert t is not None
+                emp_loss = self.loss_fn(y, t)
+                emp_loss.backward()
+                nonlocal total_loss
+                total_loss += emp_loss.item()
+
+        device = self._device
+        if data_loader is not None:
+            # calculate fisher/fvp for the data_loader
+            data_size = len(data_loader.dataset)
+            if data_average:
+                scale /= data_size
+            for inputs, targets in data_loader:
+                fisher_for_one_batch(inputs, targets)
+        else:
+            # calculate fisher/fvp for a single batch
+            assert inputs is not None
+            data_size = inputs.shape[0]
+            if data_average:
+                scale /= data_size
+            fisher_for_one_batch(inputs, targets)
+
+        if calc_emp_loss_grad and data_average:
+            # divide gradients by data size
+            # (every loss function returns the sum of loss, not the average)
+            for p in model.parameters():
+                if p.grad is not None:
+                    p.grad.div_(data_size)
+
+        if data_average:
+            total_loss /= data_size
+        return total_loss
 
     def _zero_op_batch_grads(self, set_to_none=False):
         for module in self._model.modules():
@@ -270,7 +307,13 @@ class _FisherBase(MatrixManager):
             return rst
 
 
-class FisherExactCrossEntropy(_FisherBase):
+class _FisherCrossEntropy(_FisherBase):
+    @property
+    def loss_fn(self):
+        return partial(F.cross_entropy, reduction='sum')
+
+
+class FisherExactCrossEntropy(_FisherCrossEntropy):
     @property
     def fisher_type(self):
         return FISHER_EXACT
@@ -286,7 +329,7 @@ class FisherExactCrossEntropy(_FisherBase):
                     grad_scale=sqrt_probs[:, i])
 
 
-class FisherMCCrossEntropy(_FisherBase):
+class FisherMCCrossEntropy(_FisherCrossEntropy):
     def __init__(self, model, n_mc_samples=1):
         super().__init__(model)
         self.n_mc_samples = n_mc_samples
@@ -306,7 +349,7 @@ class FisherMCCrossEntropy(_FisherBase):
                     grad_scale=1 / self.n_mc_samples)
 
 
-class FisherEmpCrossEntropy(_FisherBase):
+class FisherEmpCrossEntropy(_FisherCrossEntropy):
     @property
     def fisher_type(self):
         return FISHER_EMP
@@ -316,7 +359,13 @@ class FisherEmpCrossEntropy(_FisherBase):
         closure(lambda: F.nll_loss(log_probs, targets, reduction='sum'))
 
 
-class FisherExactMSE(_FisherBase):
+class _FisherMSE(_FisherBase):
+    @property
+    def loss_fn(self):
+        return lambda x, y: 0.5 * (x - y).norm(dim=1).sum()
+
+
+class FisherExactMSE(_FisherMSE):
     @property
     def fisher_type(self):
         return FISHER_EXACT
@@ -327,7 +376,7 @@ class FisherExactMSE(_FisherBase):
             closure(lambda: outputs[:, i].sum())
 
 
-class FisherMCMSE(_FisherBase):
+class FisherMCMSE(_FisherMSE):
     def __init__(self, model, n_mc_samples=1, var=0.5):
         super().__init__(model)
         self.n_mc_samples = n_mc_samples
@@ -346,7 +395,7 @@ class FisherMCMSE(_FisherBase):
                     grad_scale=1 / self.n_mc_samples)
 
 
-class FisherEmpMSE(_FisherBase):
+class FisherEmpMSE(_FisherMSE):
     @property
     def fisher_type(self):
         return FISHER_EMP
@@ -509,13 +558,15 @@ def fisher(
         is_master=True,
         accumulate=False,
         data_average=True,
+        calc_emp_loss_grad=False,
+        return_loss=False,
         seed=None,
         scale=1.,
         **kwargs
 ):
     assert fisher_type in _supported_types
-    assert loss_type in [_LOSS_CROSS_ENTROPY, _LOSS_MSE]
-    if loss_type == _LOSS_CROSS_ENTROPY:
+    assert loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]
+    if loss_type == LOSS_CROSS_ENTROPY:
         if fisher_type == FISHER_EXACT:
             fisher_cls = FisherExactCrossEntropy
         elif fisher_type == FISHER_MC:
@@ -531,29 +582,33 @@ def fisher(
             fisher_cls = FisherEmpMSE
 
     f = fisher_cls(model, **kwargs)
-    f.calculate_fisher(
-        fisher_shapes,
-        inputs=inputs,
-        targets=targets,
-        data_loader=data_loader,
-        fvp=fvp,
-        vec=vec,
-        accumulate=accumulate,
-        data_average=data_average,
-        seed=seed,
-        scale=scale)
+    loss = f.calculate_fisher(
+             fisher_shapes,
+             inputs=inputs,
+             targets=targets,
+             data_loader=data_loader,
+             fvp=fvp,
+             vec=vec,
+             accumulate=accumulate,
+             data_average=data_average,
+             calc_emp_loss_grad=calc_emp_loss_grad,
+             seed=seed,
+             scale=scale)
     if is_distributed:
         if fvp:
             f.reduce_fvp(is_master, all_reduce)
         else:
             f.reduce_fisher(is_master, all_reduce)
-    return f
+    if return_loss:
+        return f, loss
+    else:
+        return f
 
 
-fisher_for_cross_entropy = partial(fisher, loss_type=_LOSS_CROSS_ENTROPY, fvp=False)
-fisher_for_mse = partial(fisher, loss_type=_LOSS_MSE, fvp=False)
-fvp_for_cross_entropy = partial(fisher, loss_type=_LOSS_CROSS_ENTROPY, fvp=True)
-fvp_for_mse = partial(fisher, loss_type=_LOSS_MSE, fvp=True)
+fisher_for_cross_entropy = partial(fisher, loss_type=LOSS_CROSS_ENTROPY, fvp=False)
+fisher_for_mse = partial(fisher, loss_type=LOSS_MSE, fvp=False)
+fvp_for_cross_entropy = partial(fisher, loss_type=LOSS_CROSS_ENTROPY, fvp=True)
+fvp_for_mse = partial(fisher, loss_type=LOSS_MSE, fvp=True)
 
 
 def fisher_eig(
@@ -603,8 +658,8 @@ def fisher_eig(
     return eigvals, eigvecs
 
 
-fisher_eig_for_cross_entropy = partial(fisher_eig, loss_type=_LOSS_CROSS_ENTROPY)
-fisher_eig_for_mse = partial(fisher_eig, loss_type=_LOSS_MSE)
+fisher_eig_for_cross_entropy = partial(fisher_eig, loss_type=LOSS_CROSS_ENTROPY)
+fisher_eig_for_mse = partial(fisher_eig, loss_type=LOSS_MSE)
 
 
 def fisher_free(
@@ -659,8 +714,8 @@ def fisher_free(
                                      save_log=save_log)
 
 
-fisher_free_for_cross_entropy = partial(fisher_free, loss_type=_LOSS_CROSS_ENTROPY)
-fisher_free_for_mse = partial(fisher_free, loss_type=_LOSS_MSE)
+fisher_free_for_cross_entropy = partial(fisher_free, loss_type=LOSS_CROSS_ENTROPY)
+fisher_free_for_mse = partial(fisher_free, loss_type=LOSS_MSE)
 
 
 def woodbury_ifvp(
