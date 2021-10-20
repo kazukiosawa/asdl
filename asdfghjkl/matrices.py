@@ -29,7 +29,8 @@ __all__ = [
     'SHAPE_LAYER_WISE',
     'SHAPE_KRON',
     'SHAPE_DIAG',
-    'matrix_shapes_to_values'
+    'matrix_shapes_to_values',
+    'matrix_shapes_to_corr_modules'
 ]
 
 _supported_types = [HESSIAN, FISHER_EXACT, FISHER_MC, FISHER_EMP]
@@ -38,7 +39,7 @@ _supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG]
 _normalizations = (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d)
 
 
-def matrix_shapes_to_values(matrix_shapes, shape_to_value_mapping, modules=None):
+def matrix_shapes_to_values(matrix_shapes, shape_to_value_mapping):
     """
     Maps matrix shapes to some values.
     """
@@ -51,37 +52,50 @@ def matrix_shapes_to_values(matrix_shapes, shape_to_value_mapping, modules=None)
         _values = list(set(_values))
         return _values
 
-    modules_for = {shape: [] for shape in ALL_SHAPES}
     if isinstance(matrix_shapes, list):
         # common matrix_shapes for all modules
         values = map_to_values(matrix_shapes)
-        if modules is not None:
-            for shape in ALL_SHAPES:
-                if shape in matrix_shapes:
-                    modules_for[shape] = modules
     elif isinstance(matrix_shapes, dict):
         values = {}
         for key, shapes in matrix_shapes.items():
             values[key] = map_to_values(shapes)
-            if modules is not None:
-                if isinstance(key, Module):
-                    # module-wise matrix_shapes
-                    for shape in ALL_SHAPES:
-                        if shape in shapes:
-                            modules_for[shape].append(key)
-                elif inspect.isclass(key) and issubclass(key, Module):
-                    # class-wise matrix_shapes
-                    for shape in ALL_SHAPES:
-                        if shape in shapes:
-                            modules_for[shape].extend(m for m in modules if isinstance(m, key))
-                else:
-                    raise TypeError(f'Invalid type of key in matrix_shapes: {type(key)}.')
     else:
         raise TypeError(f'Invalid type of matrix_shapes: {type(matrix_shapes)}.')
 
-    if modules is not None:
-        return values, modules_for
     return values
+
+
+def matrix_shapes_to_corr_modules(matrix_shapes, modules):
+    """
+    Maps matrix shapes to corresponding modules
+    """
+    if isinstance(matrix_shapes, str):
+        matrix_shapes = [matrix_shapes]
+
+    modules_for = {shape: [] for shape in ALL_SHAPES}
+    if isinstance(matrix_shapes, list):
+        # common matrix_shapes for all modules
+        for shape in ALL_SHAPES:
+            if shape in matrix_shapes:
+                modules_for[shape] = modules
+    elif isinstance(matrix_shapes, dict):
+        for key, shapes in matrix_shapes.items():
+            if isinstance(key, Module):
+                # module-wise matrix_shapes
+                for shape in ALL_SHAPES:
+                    if shape in shapes:
+                        modules_for[shape].append(key)
+            elif inspect.isclass(key) and issubclass(key, Module):
+                # class-wise matrix_shapes
+                for shape in ALL_SHAPES:
+                    if shape in shapes:
+                        modules_for[shape].extend(m for m in modules if isinstance(m, key))
+            else:
+                raise TypeError(f'Invalid type of key in matrix_shapes: {type(key)}.')
+    else:
+        raise TypeError(f'Invalid type of matrix_shapes: {type(matrix_shapes)}.')
+
+    return modules_for
 
 
 def _requires_matrix(module: torch.nn.Module):

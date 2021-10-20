@@ -97,7 +97,8 @@ class _FisherBase(MatrixManager):
                          seed=None,
                          scale=1.):
         model = self._model
-        op_names, modules_for = matrix_shapes_to_values(fisher_shapes, _SHAPE_TO_OP, list(model.modules()))
+        op_names = matrix_shapes_to_values(fisher_shapes, _SHAPE_TO_OP)
+        modules_for = matrix_shapes_to_corr_modules(fisher_shapes, list(model.modules()))
 
         if not accumulate:
             # set Fisher/FVP zero
