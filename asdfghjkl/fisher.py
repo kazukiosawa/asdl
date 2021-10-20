@@ -27,7 +27,7 @@ LOSS_CROSS_ENTROPY = 'cross_entropy'
 LOSS_MSE = 'mse'
 
 __all__ = [
-    'fisher',
+    'calculate_fisher',
     'fisher_for_cross_entropy',
     'fisher_for_mse',
     'fvp_for_cross_entropy',
@@ -528,7 +528,7 @@ def _grads_scale(model, scale):
         operation.grads_scale = None
 
 
-def fisher(
+def calculate_fisher(
         model,
         loss_type,
         fisher_type,
@@ -590,10 +590,10 @@ def fisher(
         return f
 
 
-fisher_for_cross_entropy = partial(fisher, loss_type=LOSS_CROSS_ENTROPY, fvp=False)
-fisher_for_mse = partial(fisher, loss_type=LOSS_MSE, fvp=False)
-fvp_for_cross_entropy = partial(fisher, loss_type=LOSS_CROSS_ENTROPY, fvp=True)
-fvp_for_mse = partial(fisher, loss_type=LOSS_MSE, fvp=True)
+fisher_for_cross_entropy = partial(calculate_fisher, loss_type=LOSS_CROSS_ENTROPY, fvp=False)
+fisher_for_mse = partial(calculate_fisher, loss_type=LOSS_MSE, fvp=False)
+fvp_for_cross_entropy = partial(calculate_fisher, loss_type=LOSS_CROSS_ENTROPY, fvp=True)
+fvp_for_mse = partial(calculate_fisher, loss_type=LOSS_MSE, fvp=True)
 
 
 def fisher_eig(
@@ -613,18 +613,18 @@ def fisher_eig(
 ):
 
     def fvp_fn(vec):
-        f = fisher(model,
-                   loss_type,
-                   fisher_type,
-                   fisher_shape,
-                   inputs=inputs,
-                   targets=targets,
-                   data_loader=data_loader,
-                   fvp=True,
-                   vec=vec,
-                   is_distributed=is_distributed,
-                   all_reduce=True,
-                   **kwargs)
+        f = calculate_fisher(model,
+                             loss_type,
+                             fisher_type,
+                             fisher_shape,
+                             inputs=inputs,
+                             targets=targets,
+                             data_loader=data_loader,
+                             fvp=True,
+                             vec=vec,
+                             is_distributed=is_distributed,
+                             all_reduce=True,
+                             **kwargs)
         return f.load_fvp(fisher_shape)
 
     # for making MC samplings at each iteration deterministic
@@ -669,18 +669,18 @@ def fisher_free(
 ):
 
     def fvp_fn(vec):
-        f = fisher(model,
-                   loss_type,
-                   fisher_type,
-                   fisher_shape,
-                   inputs=inputs,
-                   targets=targets,
-                   data_loader=data_loader,
-                   fvp=True,
-                   vec=vec,
-                   is_distributed=is_distributed,
-                   all_reduce=True,
-                   **kwargs)
+        f = calculate_fisher(model,
+                             loss_type,
+                             fisher_type,
+                             fisher_shape,
+                             inputs=inputs,
+                             targets=targets,
+                             data_loader=data_loader,
+                             fvp=True,
+                             vec=vec,
+                             is_distributed=is_distributed,
+                             all_reduce=True,
+                             **kwargs)
         return f.load_fvp(fisher_shape)
 
     # for making MC samplings at each iteration deterministic

@@ -3,7 +3,7 @@ import torch
 from torch import nn
 
 from .matrices import FISHER_EXACT, SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG  # NOQA
-from .fisher import fisher, LOSS_CROSS_ENTROPY
+from .fisher import calculate_fisher, LOSS_CROSS_ENTROPY
 
 _supported_modules = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d)
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
@@ -72,20 +72,20 @@ class NaturalGradient:
             scale *= ema_decay
             self._scale_fisher(1 - ema_decay)
 
-        rst = fisher(self.model,
-                     loss_type=self.loss_type,
-                     fisher_type=self.fisher_type,
-                     fisher_shapes=self.fisher_shape,
-                     inputs=inputs,
-                     targets=targets,
-                     data_loader=data_loader,
-                     accumulate=accumulate,
-                     data_average=data_average,
-                     calc_emp_loss_grad=calc_emp_loss_grad,
-                     return_loss=True,
-                     seed=seed,
-                     scale=scale,
-                     n_mc_samples=self.n_mc_samples)
+        rst = calculate_fisher(self.model,
+                               loss_type=self.loss_type,
+                               fisher_type=self.fisher_type,
+                               fisher_shapes=self.fisher_shape,
+                               inputs=inputs,
+                               targets=targets,
+                               data_loader=data_loader,
+                               accumulate=accumulate,
+                               data_average=data_average,
+                               calc_emp_loss_grad=calc_emp_loss_grad,
+                               return_loss=True,
+                               seed=seed,
+                               scale=scale,
+                               n_mc_samples=self.n_mc_samples)
         self.fisher_manager = rst[0]
         return rst[1]  # loss value
 
