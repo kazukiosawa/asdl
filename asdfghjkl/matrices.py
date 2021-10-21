@@ -16,8 +16,9 @@ FISHER_EMP = 'fisher_emp'  # no-centered covariance a.k.a. empirical Fisher
 SHAPE_FULL = 'full'  # full
 SHAPE_LAYER_WISE = 'layer_wise'  # layer-wise block-diagonal
 SHAPE_KRON = 'kron'  # Kronecker-factored
+SHAPE_UNIT_WISE = 'unit_wise'  # unit-wise block-diagonal
 SHAPE_DIAG = 'diag'  # diagonal
-ALL_SHAPES = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG]
+ALL_SHAPES = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG]
 
 __all__ = [
     'MatrixManager',
@@ -28,6 +29,7 @@ __all__ = [
     'SHAPE_FULL',
     'SHAPE_LAYER_WISE',
     'SHAPE_KRON',
+    'SHAPE_UNIT_WISE',
     'SHAPE_DIAG',
     'matrix_shapes_to_values',
     'modules_for_matrix_shapes'

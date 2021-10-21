@@ -239,6 +239,43 @@ class SymMatrix:
         if self.has_unit:
             self.unit.update_inv(damping)
 
+    def mvp(self, vecs=None, vec_weight=None, vec_bias=None, use_inv=False, inplace=False):
+        mat = self.inv if use_inv else self.data
+
+        # full
+        if vecs is not None:
+            v = torch.cat([vec.flatten() for vec in vecs])
+            mat_v = torch.mv(mat, v)
+            pointer = 0
+            mat_vecs = []
+            for vec in vecs:
+                numel = vec.numel()
+                mat_vec = mat_v[pointer: pointer + numel]
+                mat_vecs.append(mat_vec)
+                if inplace:
+                    vec.copy_(mat_vec)
+                pointer += numel
+            return mat_vecs
+
+        # layer-wise
+        assert vec_weight is not None
+        vec1d = vec_weight.flatten()
+        if vec_bias is not None:
+            vec1d = torch.cat([vec1d, vec_bias.flatten()])
+        mvp1d = torch.mv(mat, vec1d)
+        if vec_bias is not None:
+            w_numel = vec_weight.numel()
+            mvp_w = mvp1d[:w_numel].view_as(vec_weight)
+            mvp_b = mvp1d[w_numel:]
+            if inplace:
+                vec_weight.copy_(mvp_w)
+                vec_bias.copy_(mvp_b)
+            return mvp_w, mvp_b
+        mvp_w = mvp1d.view_as(vec_weight)
+        if inplace:
+            vec_weight.copy_(mvp_w)
+        return mvp_w
+
 
 class Kron:
     def __init__(self, A, B):
@@ -246,6 +283,7 @@ class Kron:
         self.B = B
         self.A_inv = None
         self.B_inv = None
+        self._A_dim = self._B_dim = None
 
     def __add__(self, other):
         # NOTE: inv will not be preserved
@@ -277,6 +315,18 @@ class Kron:
     @property
     def has_data(self):
         return self.A is not None and self.B is not None
+
+    @property
+    def A_dim(self):
+        if self._A_dim is None and self.A is not None:
+            self._A_dim = self.A.shape[0]
+        return self._A_dim
+
+    @property
+    def B_dim(self):
+        if self._B_dim is None and self.B is not None:
+            self._B_dim = self.B.shape[0]
+        return self._B_dim
 
     def scaling(self, scale):
         self.A.mul_(scale)
@@ -338,6 +388,25 @@ class Kron:
 
         self.A_inv = cholesky_inv(add_value_to_diagonal(A, r * pi))
         self.B_inv = cholesky_inv(add_value_to_diagonal(B, r / pi))
+
+    def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
+        mat_A = self.A_inv if use_inv else self.A
+        mat_B = self.B_inv if use_inv else self.B
+        vec2d = vec_weight.view(self.B_dim, -1)
+        if vec_bias is not None:
+            vec2d = torch.cat([vec2d, vec_bias.unsqueeze(dim=1)], dim=1)
+        mvp2d = mat_B.mm(vec2d).mm(mat_A)
+        if vec_bias is not None:
+            mvp_w = mvp2d[:, :-1].view_as(vec_weight)
+            mvp_b = mvp2d[:, -1]
+            if inplace:
+                vec_weight.copy_(mvp_w)
+                vec_bias.copy_(mvp_b)
+            return mvp_w, mvp_b
+        mvp_w = mvp2d.view_as(vec_weight)
+        if inplace:
+            vec_weight.copy_(mvp_w)
+        return mvp_w
 
 
 class Diag:
@@ -454,6 +523,21 @@ class Diag:
         if self.has_bias:
             self.bias_inv = 1 / (self.bias + damping)
 
+    def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
+        mat_w = self.weight_inv if use_inv else self.weight
+        if inplace:
+            mvp_w = vec_weight.mul_(mat_w)
+        else:
+            mvp_w = vec_weight.mul(mat_w)
+        if vec_bias is not None:
+            mat_b = self.bias_inv if use_inv else self.bias
+            if inplace:
+                mvp_b = vec_bias.mul_(mat_b)
+            else:
+                mvp_b = vec_bias.mul(mat_b)
+            return mvp_w, mvp_b
+        return mvp_w
+
 
 class UnitWise:
     def __init__(self, data=None):
@@ -523,3 +607,16 @@ class UnitWise:
         f = data.shape[0]
         dmp = torch.eye(2, device=data.device, dtype=data.dtype).repeat(f, 1, 1) * damping
         self.inv = torch.inverse(data + dmp)
+
+    def mvp(self, vec_weight, vec_bias, use_inv=False, inplace=False):
+        # only for BatchNormNd
+        mat = self.inv if use_inv else self.data  # (f, 2, 2)
+        v = torch.stack([vec_weight, vec_bias], dim=1)  # (f, 2)
+        v = v.unsqueeze(2)  # (f, 2, 1)
+        mvp_wb = torch.matmul(mat, v).squeeze(2)  # (f, 2)
+        mvp_w = mvp_wb[:, 0]
+        mvp_b = mvp_wb[:, 1]
+        if inplace:
+            vec_weight.copy_(mvp_w)
+            vec_bias.copy_(mvp_b)
+        return mvp_w, mvp_b
