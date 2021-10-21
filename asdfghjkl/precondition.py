@@ -12,7 +12,7 @@ _module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIA
 
 __all__ = [
     'NaturalGradient', 'FullNaturalGradient', 'LayerWiseNaturalGradient', 'KFAC',
-    'DiagNaturalGradient'
+    'UnitWiseNaturalGradient', 'DiagNaturalGradient'
 ]
 
 
