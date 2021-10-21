@@ -250,7 +250,7 @@ class SymMatrix:
             mat_vecs = []
             for vec in vecs:
                 numel = vec.numel()
-                mat_vec = mat_v[pointer: pointer + numel]
+                mat_vec = mat_v[pointer: pointer + numel].view_as(vec)
                 mat_vecs.append(mat_vec)
                 if inplace:
                     vec.copy_(mat_vec)
