@@ -24,6 +24,7 @@ __all__ = [
     'OP_GRAM_DIRECT',
     'OP_GRAM_HADAMARD',
     'OP_BATCH_GRADS',
+    'ALL_OPS'
 ]
 
 
