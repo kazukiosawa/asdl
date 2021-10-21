@@ -191,7 +191,7 @@ class NaturalGradient:
                 if module in self.modules_for[s]:
                     shape = s
                     break
-        assert shape is not None
+        assert shape is not None, f'No shape is assigned to module: {module}.'
         matrix = self._get_module_symmatrix(module, shape)
         if vec_weight is None:
             vec_weight = module.weight.grad
