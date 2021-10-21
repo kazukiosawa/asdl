@@ -52,13 +52,23 @@ for ngd_cls, shape in zip(ngd_classes, shapes):
             else:
                 target = y
 
-            # class-wise shape selection
+            # class-wise shape selection Dict(str, str)
             fisher_shapes = {nn.Linear: shape, nn.Conv2d: shape}
             ngd1 = NaturalGradient(model1, fisher_type, fisher_shapes, loss_type)
             assert set(ngd1.modules_for[shape]) == set([model1.conv1, model1.conv2, model1.linear])
 
-            # module-wise shape selection
+            # class-wise shape selection Dict(str, list)
+            fisher_shapes = {nn.Linear: [shape], nn.Conv2d: [shape]}
+            ngd1 = NaturalGradient(model1, fisher_type, fisher_shapes, loss_type)
+            assert set(ngd1.modules_for[shape]) == set([model1.conv1, model1.conv2, model1.linear])
+
+            # module-wise shape selection Dict(Module, str)
             fisher_shapes = {model1.conv1: shape, model1.conv2: shape, model1.linear: shape}
+            ngd1 = NaturalGradient(model1, fisher_type, fisher_shapes, loss_type)
+            assert set(ngd1.modules_for[shape]) == set([model1.conv1, model1.conv2, model1.linear])
+
+            # module-wise shape selection Dict(Module, list)
+            fisher_shapes = {model1.conv1: [shape], model1.conv2: [shape], model1.linear: [shape]}
             ngd1 = NaturalGradient(model1, fisher_type, fisher_shapes, loss_type)
             assert set(ngd1.modules_for[shape]) == set([model1.conv1, model1.conv2, model1.linear])
 
