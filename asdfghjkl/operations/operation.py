@@ -21,6 +21,7 @@ class Operation:
         self._model_for_kernel = model_for_kernel
         if isinstance(op_names, str):
             op_names = [op_names]
+        assert isinstance(op_names, list)
         # remove duplicates
         op_names = set(op_names)
         for name in op_names:
