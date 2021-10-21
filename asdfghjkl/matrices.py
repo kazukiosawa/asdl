@@ -86,6 +86,8 @@ def modules_for_matrix_shapes(matrix_shapes, model):
                 modules_for[shape] = modules
     elif isinstance(matrix_shapes, dict):
         for key, shapes in matrix_shapes.items():
+            if isinstance(shapes, str):
+                shapes = [shapes]
             if isinstance(key, Module):
                 # module-wise matrix_shapes
                 for shape in ALL_SHAPES:
