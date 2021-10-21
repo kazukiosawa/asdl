@@ -1,12 +1,12 @@
 import os
 import copy
 import inspect
-from types import GeneratorType
 
 import torch
 from torch.nn import Module
 import torch.distributed as dist
 
+from .core import supported_modules
 from .symmatrix import SymMatrix
 
 HESSIAN = 'hessian'  # Hessian
@@ -70,14 +70,13 @@ def matrix_shapes_to_values(matrix_shapes, shape_to_value_mapping):
     return values
 
 
-def modules_for_matrix_shapes(matrix_shapes, modules):
+def modules_for_matrix_shapes(matrix_shapes, model):
     """
     Get the corresponding modules for each matrix shape
     """
     if isinstance(matrix_shapes, str):
         matrix_shapes = [matrix_shapes]
-    if isinstance(modules, GeneratorType):
-        modules = list(modules)
+    modules = list(supported_modules(model))
 
     modules_for = {shape: [] for shape in ALL_SHAPES}
     if isinstance(matrix_shapes, list):

@@ -1,7 +1,6 @@
 import warnings
 from torch import nn
 
-from .core import supported_modules
 from .matrices import *
 from .symmatrix import SymMatrix
 from .fisher import calculate_fisher, LOSS_CROSS_ENTROPY
@@ -43,7 +42,7 @@ class NaturalGradient:
         elif isinstance(fisher_shape, dict):
             assert all(isinstance(v, str) or len(v) == 1 for v in fisher_shape.values())
         self.fisher_shape = fisher_shape
-        self.modules_for = modules_for_matrix_shapes(fisher_shape, supported_modules(model))
+        self.modules_for = modules_for_matrix_shapes(fisher_shape, model)
 
     def parameters_for(self, shape):
         for module in self.modules_for[shape]:
