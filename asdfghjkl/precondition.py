@@ -175,22 +175,29 @@ class NaturalGradient:
         if fisher is not None:
             fisher.update_inv(damping)
 
-    def precondition(self, vecs=None, vec_weight=None, vec_bias=None):
+    def precondition(self, vecs=None):
         for shape in _module_level_shapes:
             for module in self.modules_for[shape]:
-                matrix = self._get_module_symmatrix(module, shape)
-                if matrix is None:
-                    continue
-                if vec_weight is None:
-                    vec_weight = module.weight.grad
-                    if vec_bias is None and _bias_requires_grad(module):
-                        vec_bias = module.bias.grad
-                matrix.mvp(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=True, inplace=True)
+                self.precondition_module(module, shape)
         fisher = self._get_full_fisher()
         if fisher is not None:
             if vecs is None:
                 vecs = [p.grad for p in self.parameters_for(SHAPE_FULL) if p.requires_grad]
             fisher.mvp(vecs=vecs, use_inv=True, inplace=True)
+
+    def precondition_module(self, module, shape=None, vec_weight=None, vec_bias=None):
+        if shape is None:
+            for s in _module_level_shapes:
+                if module in self.modules_for[s]:
+                    shape = s
+                    break
+        assert shape is not None
+        matrix = self._get_module_symmatrix(module, shape)
+        if vec_weight is None:
+            vec_weight = module.weight.grad
+            if vec_bias is None and _bias_requires_grad(module):
+                vec_bias = module.bias.grad
+        matrix.mvp(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=True, inplace=True)
 
 
 class FullNaturalGradient(NaturalGradient):
