@@ -41,7 +41,7 @@ class NaturalGradient:
         if isinstance(fisher_shape, list):
             assert len(fisher_shape) == 1
         elif isinstance(fisher_shape, dict):
-            assert all(len(v) == 1 for v in fisher_shape.values())
+            assert all(isinstance(v, str) or len(v) == 1 for v in fisher_shape.values())
         self.fisher_shape = fisher_shape
         self.modules_for = modules_for_matrix_shapes(fisher_shape, list(model.modules()))
 
