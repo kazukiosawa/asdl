@@ -7,6 +7,8 @@ from torch.nn import Module
 from .utils import im2col_2d, record_original_requires_grad
 from .operations import get_op_class
 
+_supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d)
+
 
 @contextmanager
 def extend(model, op_names):
@@ -30,7 +32,7 @@ def extend(model, op_names):
         if out_data.requires_grad:
             handles.append(out_data.register_hook(backward_hook))
 
-    for module in model.modules():
+    for module in supported_modules(model):
         requires_grad = False
         for attr in ['weight', 'bias']:
             param = getattr(module, attr, None)
@@ -48,21 +50,27 @@ def extend(model, op_names):
     # remove hooks and operations from modules
     for handle in handles:
         handle.remove()
-    for module in model.modules():
+    for module in supported_modules(model):
         _remove_operations(module)
+
+
+def supported_modules(model):
+    for module in model.modules():
+        if isinstance(module, _supported_module_classes):
+            yield module
 
 
 def _get_module_wise_op_names(model, op_names):
     if isinstance(op_names, dict):
         if all(isinstance(key, Module) for key in op_names):
-            for module in model.modules():
+            for module in supported_modules(model):
                 assert module in op_names, f'op_names for module {module} is not specified.'
             # already module-wise
             return op_names
         elif all(inspect.isclass(key) and issubclass(key, Module) for key in op_names):
             # convert class-wise op_names to module-wise op_names
             rst = {}
-            for module in model.modules():
+            for module in supported_modules(model):
                 try:
                     rst[module] = op_names[module.__class__]
                 except KeyError:
@@ -70,7 +78,7 @@ def _get_module_wise_op_names(model, op_names):
             return rst
     assert isinstance(op_names, list), f'Invalid type of op_names: {type(op_names)}'
     # apply common op_names to all modules
-    return {module: op_names for module in model.modules()}
+    return {module: op_names for module in supported_modules(model)}
 
 
 def _preprocess_in_data(module, in_data, out_data):

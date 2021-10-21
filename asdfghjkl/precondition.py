@@ -1,11 +1,11 @@
 import warnings
 from torch import nn
 
+from .core import supported_modules
 from .matrices import *
 from .symmatrix import SymMatrix
 from .fisher import calculate_fisher, LOSS_CROSS_ENTROPY
 
-_supported_modules = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d)
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 _invalid_ema_decay = -1
 _module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG]
@@ -43,7 +43,7 @@ class NaturalGradient:
         elif isinstance(fisher_shape, dict):
             assert all(isinstance(v, str) or len(v) == 1 for v in fisher_shape.values())
         self.fisher_shape = fisher_shape
-        self.modules_for = modules_for_matrix_shapes(fisher_shape, list(model.modules()))
+        self.modules_for = modules_for_matrix_shapes(fisher_shape, supported_modules(model))
 
     def parameters_for(self, shape):
         for module in self.modules_for[shape]:

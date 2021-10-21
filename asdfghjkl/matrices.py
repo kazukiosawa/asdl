@@ -1,6 +1,7 @@
 import os
 import copy
 import inspect
+from types import GeneratorType
 
 import torch
 from torch.nn import Module
@@ -75,6 +76,8 @@ def modules_for_matrix_shapes(matrix_shapes, modules):
     """
     if isinstance(matrix_shapes, str):
         matrix_shapes = [matrix_shapes]
+    if isinstance(modules, GeneratorType):
+        modules = list(modules)
 
     modules_for = {shape: [] for shape in ALL_SHAPES}
     if isinstance(matrix_shapes, list):
