@@ -60,6 +60,8 @@ def matrix_shapes_to_values(matrix_shapes, shape_to_value_mapping):
     elif isinstance(matrix_shapes, dict):
         values = {}
         for key, shapes in matrix_shapes.items():
+            if isinstance(shapes, str):
+                shapes = [shapes]
             values[key] = map_to_values(shapes)
     else:
         raise TypeError(f'Invalid type of matrix_shapes: {type(matrix_shapes)}.')
