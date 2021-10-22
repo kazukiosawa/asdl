@@ -420,7 +420,6 @@ def _module_batch_flatten_grads(modules):
 
 
 def _module_batch_gvp(modules, vec):
-    rst = []
     pointer = 0
     for module, batch_grads in _module_batch_grads(modules):
         batch_gvp = None
@@ -432,9 +431,8 @@ def _module_batch_gvp(modules, vec):
             else:
                 batch_gvp += b_gvp
             pointer += 1
-        rst.append((module, batch_gvp))
+        yield module, batch_gvp
     assert pointer == len(vec)
-    return rst
 
 
 def _full_covariance(model, modules):
@@ -447,15 +445,6 @@ def _full_covariance(model, modules):
     if cov_full is not None:
         new_cov_full += cov_full
     setattr(model, _COV_FULL, new_cov_full)
-
-
-def _layer_wise_covariance(modules):
-    for module, batch_g in _module_batch_flatten_grads(modules):
-        new_cov_block = torch.matmul(batch_g.T, batch_g)  # p_all x p_all
-        cov_block = getattr(module, _COV_LAYER_WISE, None)
-        if cov_block is not None:
-            new_cov_block += cov_block
-        setattr(module, _COV_LAYER_WISE, new_cov_block)
 
 
 def _full_cvp(model, modules, vec):
