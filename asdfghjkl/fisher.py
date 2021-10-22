@@ -396,7 +396,6 @@ class FisherEmpMSE(_FisherMSE):
 
 
 def _module_batch_grads(modules):
-    rst = []
     for module in modules:
         operation = getattr(module, 'operation', None)
         if operation is None:
@@ -405,19 +404,16 @@ def _module_batch_grads(modules):
         batch_grads = op_results.get(OP_BATCH_GRADS, None)
         if batch_grads is None:
             continue
-        rst.append((module, batch_grads))
-    return rst
+        yield module, batch_grads
 
 
 def _module_batch_flatten_grads(modules):
-    rst = []
     for module, batch_grads in _module_batch_grads(modules):
         batch_flatten_grads = torch.cat(
             [g.flatten(start_dim=1) for g in batch_grads.values()],
             dim=1
         )
-        rst.append((module, batch_flatten_grads))
-    return rst
+        yield module, batch_flatten_grads
 
 
 def _module_batch_gvp(modules, vec):
