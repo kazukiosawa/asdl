@@ -28,7 +28,6 @@ class Operation:
             assert name in ALL_OPS, f'Invalid operation name: {name}.'
         self._op_names = op_names
         self._op_results = {}
-        self._grads_scale = None
 
     def _set_result(self, value, *keys):
         """
@@ -54,14 +53,6 @@ class Operation:
 
     def clear_op_results(self):
         self._op_results = {}
-
-    @property
-    def grads_scale(self):
-        return self._grads_scale
-
-    @grads_scale.setter
-    def grads_scale(self, value):
-        self._grads_scale = value
 
     def forward_post_process(self, in_data: torch.Tensor):
         module = self._module
@@ -93,15 +84,6 @@ class Operation:
                 self._set_result(A, OP_GRAM_HADAMARD, 'A')
 
     def backward_pre_process(self, in_data, out_grads):
-        gs = self._grads_scale
-        if gs is not None:
-            if isinstance(gs, torch.Tensor):
-                assert gs.shape[0] == out_grads.shape[0]
-                shape = (-1, ) + (1, ) * (out_grads.ndim - 1)
-                out_grads.mul_(gs.reshape(shape))
-            else:
-                out_grads.mul_(gs)
-
         module = self._module
         for op_name in self._op_names:
             if op_name == OP_COV_KRON:

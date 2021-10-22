@@ -117,12 +117,11 @@ class _FisherBase(MatrixManager):
 
         def fisher_for_one_batch(x, t=None):
 
-            def closure(loss_expr, grad_scale=None):
+            def closure(loss_expr):
                 self._zero_op_batch_grads(set_to_none=True)
                 loss = loss_expr()
-                with _grads_scale(model, grad_scale):
-                    with skip_param_grad(model, disable=calc_emp_loss_grad_with_fisher):
-                        loss.backward(retain_graph=True)
+                with skip_param_grad(model, disable=calc_emp_loss_grad_with_fisher):
+                    loss.backward(retain_graph=True)
                 if fvp:
                     _full_cvp(model, modules_for(SHAPE_FULL), vec)
                     _layer_wise_cvp(modules_for(SHAPE_LAYER_WISE), vec)
@@ -319,8 +318,10 @@ class FisherExactCrossEntropy(_FisherCrossEntropy):
         probs, _targets = torch.sort(probs, dim=1, descending=True)
         sqrt_probs = torch.sqrt(probs)
         for i in range(n_classes):
-            closure(lambda: F.nll_loss(log_probs, _targets[:, i], reduction='sum'),
-                    grad_scale=sqrt_probs[:, i])
+            def loss_expr():
+                loss = F.nll_loss(log_probs, _targets[:, i], reduction='none')
+                return loss.mul(sqrt_probs[:, i]).sum()
+            closure(loss_expr)
 
 
 class FisherMCCrossEntropy(_FisherCrossEntropy):
@@ -339,8 +340,7 @@ class FisherMCCrossEntropy(_FisherCrossEntropy):
         for i in range(self.n_mc_samples):
             with torch.no_grad():
                 targets = dist.sample()
-            closure(lambda: F.nll_loss(log_probs, targets, reduction='sum'),
-                    grad_scale=1 / self.n_mc_samples)
+            closure(lambda: F.nll_loss(log_probs, targets, reduction='sum') / self.n_mc_samples)
 
 
 class FisherEmpCrossEntropy(_FisherCrossEntropy):
@@ -385,8 +385,7 @@ class FisherMCMSE(_FisherMSE):
         for i in range(self.n_mc_samples):
             with torch.no_grad():
                 targets = dist.sample()
-            closure(lambda: 0.5 * (outputs - targets).norm(dim=1).sum(),
-                    grad_scale=1 / self.n_mc_samples)
+            closure(lambda: 0.5 * F.mse_loss(outputs, targets, reduction='sum') / self.n_mc_samples)
 
 
 class FisherEmpMSE(_FisherMSE):
@@ -495,23 +494,6 @@ def _layer_wise_cvp(modules, vec):
         if cvp is not None:
             new_cvp = [v1 + v2 for v1, v2 in zip(new_cvp, cvp)]
         setattr(module, _CVP_LAYER_WISE, new_cvp)
-
-
-@contextmanager
-def _grads_scale(model, scale):
-    for module in model.modules():
-        operation = getattr(module, 'operation', None)
-        if operation is None:
-            continue
-        operation.grads_scale = scale
-
-    yield
-
-    for module in model.modules():
-        operation = getattr(module, 'operation', None)
-        if operation is None:
-            continue
-        operation.grads_scale = None
 
 
 def calculate_fisher(
