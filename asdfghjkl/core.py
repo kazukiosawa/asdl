@@ -12,39 +12,39 @@ _supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2
 def extend(model, *op_names, map_rule=None):
     handles = []
 
-    def forward_hook(module, in_data, out_data):
-        in_data = in_data[0].clone().detach()
-        in_data = _preprocess_in_data(module, in_data, out_data)
-        _call_operations_in_forward(module, in_data)
+    try:
+        def forward_hook(module, in_data, out_data):
+            in_data = in_data[0].clone().detach()
+            in_data = _preprocess_in_data(module, in_data, out_data)
+            _call_operations_in_forward(module, in_data)
 
-        def backward_hook(out_grads):
-            out_grads = out_grads.clone().detach()
-            out_grads = _preprocess_out_grads(module, out_grads)
-            _call_operations_in_backward(module, in_data, out_grads)
+            def backward_hook(out_grads):
+                out_grads = out_grads.clone().detach()
+                out_grads = _preprocess_out_grads(module, out_grads)
+                _call_operations_in_backward(module, in_data, out_grads)
 
-        if out_data.requires_grad:
-            handles.append(out_data.register_hook(backward_hook))
+            if out_data.requires_grad:
+                handles.append(out_data.register_hook(backward_hook))
 
-    for module, op_names in module_wise_assignments(model, *op_names, map_rule=map_rule):
-        requires_grad = False
-        for attr in ['weight', 'bias']:
-            param = getattr(module, attr, None)
-            if param is not None:
-                requires_grad = requires_grad or param.requires_grad
-                record_original_requires_grad(param)
-        if not requires_grad:
-            continue
-        # register hooks and operations in modules
-        handles.append(module.register_forward_hook(forward_hook))
-        _register_operations(model, module, op_names)
-
-    yield
-
-    # remove hooks and operations from modules
-    for handle in handles:
-        handle.remove()
-    for module in supported_modules(model):
-        _remove_operations(module)
+        for module, op_names in module_wise_assignments(model, *op_names, map_rule=map_rule):
+            requires_grad = False
+            for attr in ['weight', 'bias']:
+                param = getattr(module, attr, None)
+                if param is not None:
+                    requires_grad = requires_grad or param.requires_grad
+                    record_original_requires_grad(param)
+            if not requires_grad:
+                continue
+            # register hooks and operations in modules
+            handles.append(module.register_forward_hook(forward_hook))
+            _register_operations(model, module, op_names)
+        yield
+    finally:
+        # remove hooks and operations from modules
+        for handle in handles:
+            handle.remove()
+        for module in supported_modules(model):
+            _remove_operations(module)
 
 
 def supported_modules(model):
