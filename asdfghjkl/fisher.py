@@ -435,11 +435,9 @@ def _module_batch_gvp(modules, vec):
 
 
 def _full_covariance(model, modules):
-    if len(modules) == 0:
+    batch_all_g = [g for _, g in _module_batch_flatten_grads(modules)]
+    if len(batch_all_g) == 0:
         return
-    batch_all_g = []
-    for _, batch_g in _module_batch_flatten_grads(modules):
-        batch_all_g.append(batch_g)
     batch_all_g = torch.cat(batch_all_g, dim=1)  # n x p_all
     new_cov_full = torch.matmul(batch_all_g.T, batch_all_g)  # p_all x p_all
     cov_full = getattr(model, _COV_FULL, None)
@@ -449,8 +447,6 @@ def _full_covariance(model, modules):
 
 
 def _layer_wise_covariance(modules):
-    if len(modules) == 0:
-        return
     for module, batch_g in _module_batch_flatten_grads(modules):
         new_cov_block = torch.matmul(batch_g.T, batch_g)  # p_all x p_all
         cov_block = getattr(module, _COV_LAYER_WISE, None)
