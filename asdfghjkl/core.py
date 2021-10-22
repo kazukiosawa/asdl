@@ -1,9 +1,7 @@
 from typing import List
 from contextlib import contextmanager
-import inspect
 
 import torch.nn as nn
-from torch.nn import Module
 from .utils import im2col_2d, record_original_requires_grad
 from .operations import get_op_class
 
@@ -11,12 +9,7 @@ _supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2
 
 
 @contextmanager
-def extend(model, op_names):
-    if isinstance(op_names, (tuple, set)):
-        op_names = list(op_names)
-    elif isinstance(op_names, str):
-        op_names = [op_names]
-    op_names = _get_module_wise_op_names(model, op_names)
+def extend(model, *op_names, map_rule=None):
     handles = []
 
     def forward_hook(module, in_data, out_data):
@@ -32,7 +25,7 @@ def extend(model, op_names):
         if out_data.requires_grad:
             handles.append(out_data.register_hook(backward_hook))
 
-    for module in supported_modules(model):
+    for module, op_names in module_wise_assignments(model, *op_names, map_rule=map_rule):
         requires_grad = False
         for attr in ['weight', 'bias']:
             param = getattr(module, attr, None)
@@ -43,7 +36,7 @@ def extend(model, op_names):
             continue
         # register hooks and operations in modules
         handles.append(module.register_forward_hook(forward_hook))
-        _register_operations(model, module, op_names[module])
+        _register_operations(model, module, op_names)
 
     yield
 
@@ -60,25 +53,118 @@ def supported_modules(model):
             yield module
 
 
-def _get_module_wise_op_names(model, op_names):
-    if isinstance(op_names, dict):
-        if all(isinstance(key, Module) for key in op_names):
-            for module in supported_modules(model):
-                assert module in op_names, f'op_names for module {module} is not specified.'
-            # already module-wise
-            return op_names
-        elif all(inspect.isclass(key) and issubclass(key, Module) for key in op_names):
-            # convert class-wise op_names to module-wise op_names
-            rst = {}
-            for module in supported_modules(model):
-                try:
-                    rst[module] = op_names[module.__class__]
-                except KeyError:
-                    print(f'op_names for class {module.__class__} is not specified.')
-            return rst
-    assert isinstance(op_names, list), f'Invalid type of op_names: {type(op_names)}'
-    # apply common op_names to all modules
-    return {module: op_names for module in supported_modules(model)}
+def named_supported_modules(model):
+    for name, module in model.named_modules():
+        if isinstance(module, _supported_module_classes):
+            yield name, module
+
+
+def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
+    """
+    Assign certain values to each module based on assign_rules.
+
+    Args:
+        model: base module in which the underlying modules will be assigned values
+        assign_rules: assignment rules
+            - Corresponding module(s) to each rule will be assigned certain values:
+            - Each rule has to be one of the following format:
+                1. Tuple(key, value1, value2, ...)
+                    1-1. Tuple(<an instance of torch.nn.Module>, str, str, ...)
+                        - for the module which is equivalent to the key
+                    1-2. Tuple(str, str, str, ...)
+                        - for a module(s) which contains the key in its name
+                    1-3. Tuple(<a subclass of torch.nn.Module>, str, str, ...)
+                        - for a module(s) which is an instance of the key
+                2. str (represents a value)
+                    - for a module(s) which hasn't been assigned any value
+            - Tuple rules cannot have the same key to each others.
+            - If more than one rules are applicable to a module,
+                - the rules are prioritized by their formats in the above order
+                - only the first rule is applied
+            - Each assigned value is mapped to another by map_rule (if specified).
+        map_rule: callable str -> str
+        named: if True, yields module name along with module and assigned values
+
+    Example:
+    >>> model = nn.Sequential()
+    >>> model.add_module('conv1', nn.Conv2d(1, 1, (1, 1)))
+    >>> model.add_module('conv2', nn.Conv2d(1, 1, (1, 1)))
+    >>> model.add_module('fc1', nn.Linear(1, 1))
+    >>> model.add_module('fc2', nn.Linear(1, 1))
+    >>> model.add_module('bn1', nn.BatchNorm2d(1, 1))
+    >>> model.add_module('bn2', nn.BatchNorm2d(1, 1))
+    >>>
+    >>> def map_rule(x: str):
+    >>>     return x.replace('value', 'mapped')
+    >>>
+    >>> asgmts = module_wise_assignments(model,
+    >>>                                  'value1',
+    >>>                                  ('conv', 'value2'),
+    >>>                                  (nn.BatchNorm2d, 'value3'),
+    >>>                                  (model.bn1, 'value4'),
+    >>>                                  'value5',
+    >>>                                  map_rule=map_rule,
+    >>>                                  named=True):
+    >>> for name, module, values in asgmts:
+    >>>     print(name, values)
+
+    Outputs:
+        conv1 ['mapped2']
+        conv2 ['mapped2']
+        fc1 ['mapped1', 'mapped5']
+        fc2 ['mapped1', 'mapped5']
+        bn1 ['mapped4']
+        bn2 ['mapped3']
+    """
+    assert all(isinstance(rule, (str, tuple)) for rule in assign_rules), \
+        f'every assign rule has to be {str} or {tuple}.'
+
+    if map_rule is None:
+        def identical(x): return x
+        map_rule = identical
+
+    common_asgmts = []
+    specified_asgmts = {}
+    for rule in assign_rules:
+        if isinstance(rule, str):
+            value = rule
+            common_asgmts.append(map_rule(value))
+        else:
+            assert len(rule) >= 2, f'Tuple length has to be >= 2. Given: {rule}.'
+            key, values = rule[0], rule[1:]
+            assert all(isinstance(value, str) for value in values), \
+                f'All values have to be {str}. Given: {values}.'
+            assert key not in specified_asgmts, \
+                f'({key}, _) is already assigned.'
+            specified_asgmts[key] = [map_rule(value) for value in values]
+
+    for name, module in named_supported_modules(model):
+        module_info = (name, module) if named else (module,)
+        if module in specified_asgmts:
+            yield *module_info, specified_asgmts[module]
+        elif any(isinstance(key, str) and key in name for key in specified_asgmts):
+            key = next(isinstance(key, str) and key in name for key in specified_asgmts)
+            yield *module_info, specified_asgmts[key]
+        elif module.__class__ in specified_asgmts:
+            yield *module_info, specified_asgmts[module.__class__]
+        else:
+            yield *module_info, common_asgmts
+
+
+def modules_to_assign(model, value, *assign_rules, named=False):
+    for assign_info in module_wise_assignments(model, *assign_rules, named=named):
+        values = assign_info[-1]
+        if value in values:
+            if named:
+                name, module = assign_info[:2]
+                yield name, module
+            else:
+                module = assign_info[0]
+                yield module
+
+
+def named_modules_to_assign(value, *assign_rules):
+    return modules_to_assign(value, *assign_rules, named=True)
 
 
 def _preprocess_in_data(module, in_data, out_data):

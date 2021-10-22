@@ -4,7 +4,7 @@ import numpy as np
 
 import torch
 import torch.nn.functional as F
-from .core import extend
+from .core import extend, modules_to_assign
 from .utils import skip_param_grad
 from .operations import *
 from .symmatrix import SymMatrix, Kron, Diag, UnitWise
@@ -98,8 +98,11 @@ class _FisherBase(MatrixManager):
                          seed=None,
                          scale=1.):
         model = self._model
-        op_names = matrix_shapes_to_values(fisher_shapes, _SHAPE_TO_OP)
-        modules_for = modules_for_matrix_shapes(fisher_shapes, model)
+        if isinstance(fisher_shapes, str):
+            fisher_shapes = [fisher_shapes]
+
+        def modules_for(shape):
+            return modules_to_assign(model, shape, *fisher_shapes)
 
         if not accumulate:
             # set Fisher/FVP zero
@@ -121,11 +124,11 @@ class _FisherBase(MatrixManager):
                     with skip_param_grad(model, disable=calc_emp_loss_grad_with_fisher):
                         loss.backward(retain_graph=True)
                 if fvp:
-                    _full_cvp(model, modules_for[SHAPE_FULL], vec)
-                    _layer_wise_cvp(modules_for[SHAPE_LAYER_WISE], vec)
+                    _full_cvp(model, modules_for(SHAPE_FULL), vec)
+                    _layer_wise_cvp(modules_for(SHAPE_LAYER_WISE), vec)
                 else:
-                    _full_covariance(model, modules_for[SHAPE_FULL])
-                    _layer_wise_covariance(modules_for[SHAPE_LAYER_WISE])
+                    _full_covariance(model, modules_for(SHAPE_FULL))
+                    _layer_wise_covariance(modules_for(SHAPE_LAYER_WISE))
                 if not calc_emp_loss_grad_after_fisher:
                     nonlocal total_loss
                     total_loss += loss.item()
@@ -135,7 +138,7 @@ class _FisherBase(MatrixManager):
                 t = t.to(device)
             if seed:
                 torch.random.manual_seed(seed)
-            with extend(model, op_names):
+            with extend(model, *fisher_shapes, map_rule=lambda s: _SHAPE_TO_OP[s]):
                 y = model(x)
                 self._fisher_core(closure, y, t)
                 self._register_fisher(scale)

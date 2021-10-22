@@ -52,28 +52,18 @@ for ngd_cls, shape in zip(ngd_classes, shapes):
             else:
                 target = y
 
-            # class-wise shape selection Dict(str, str)
-            fisher_shapes = {nn.Linear: shape, nn.Conv2d: shape}
-            ngd1 = NaturalGradient(model1, fisher_type, fisher_shapes, loss_type)
-            assert set(ngd1.modules_for[shape]) == set([model1.conv1, model1.conv2, model1.linear])
+            # class-wise shape selection
+            fisher_shape = [(nn.Linear, shape), (nn.Conv2d, shape)]
+            ngd1 = NaturalGradient(model1, fisher_type, fisher_shape, loss_type)
+            assert set(ngd1.modules_for(shape)) == set([model1.conv1, model1.conv2, model1.linear])
 
-            # class-wise shape selection Dict(str, list)
-            fisher_shapes = {nn.Linear: [shape], nn.Conv2d: [shape]}
-            ngd1 = NaturalGradient(model1, fisher_type, fisher_shapes, loss_type)
-            assert set(ngd1.modules_for[shape]) == set([model1.conv1, model1.conv2, model1.linear])
-
-            # module-wise shape selection Dict(Module, str)
-            fisher_shapes = {model1.conv1: shape, model1.conv2: shape, model1.linear: shape}
-            ngd1 = NaturalGradient(model1, fisher_type, fisher_shapes, loss_type)
-            assert set(ngd1.modules_for[shape]) == set([model1.conv1, model1.conv2, model1.linear])
-
-            # module-wise shape selection Dict(Module, list)
-            fisher_shapes = {model1.conv1: [shape], model1.conv2: [shape], model1.linear: [shape]}
-            ngd1 = NaturalGradient(model1, fisher_type, fisher_shapes, loss_type)
-            assert set(ngd1.modules_for[shape]) == set([model1.conv1, model1.conv2, model1.linear])
+            # module-wise shape selection
+            fisher_shape = [(model1.conv1, shape), (model1.conv2, shape), (model1.linear, shape)]
+            ngd1 = NaturalGradient(model1, fisher_type, fisher_shape, loss_type)
+            assert set(ngd1.modules_for(shape)) == set([model1.conv1, model1.conv2, model1.linear])
 
             ngd2 = ngd_cls(model2, fisher_type, loss_type)
-            assert set(ngd2.modules_for[shape]) == set([model2.conv1, model2.conv2, model2.linear])
+            assert set(ngd2.modules_for(shape)) == set([model2.conv1, model2.conv2, model2.linear])
 
             ngd1.refresh_curvature(x, target,
                                    seed=1 if fisher_type == FISHER_MC else None,

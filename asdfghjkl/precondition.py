@@ -1,6 +1,7 @@
 import warnings
 from torch import nn
 
+from .core import module_wise_assignments, modules_to_assign
 from .matrices import *
 from .symmatrix import SymMatrix
 from .fisher import calculate_fisher, LOSS_CROSS_ENTROPY
@@ -16,6 +17,11 @@ __all__ = [
 
 
 class NaturalGradient:
+    """
+    Args:
+        model: base model that contains multiple modules
+        fisher_shape: shape of Fisher
+    """
     def __init__(
         self,
         model,
@@ -36,16 +42,18 @@ class NaturalGradient:
         self.damping = damping
         self.ema_decay = ema_decay
         self.fisher_manager = None
-        # check if only one fisher_shape is assigned to each module
-        if isinstance(fisher_shape, list):
-            assert len(fisher_shape) == 1
-        elif isinstance(fisher_shape, dict):
-            assert all(isinstance(v, str) or len(v) == 1 for v in fisher_shape.values())
+        if isinstance(fisher_shape, str):
+            fisher_shape = [fisher_shape]
+        for name, module, shapes in module_wise_assignments(model, *fisher_shape, named=True):
+            assert len(shapes) == 1, f'Each module has to be assigned one Fisher shape. ' \
+                                     f'{name} is assigned {len(shapes)} shapes.'
         self.fisher_shape = fisher_shape
-        self.modules_for = modules_for_matrix_shapes(fisher_shape, model)
+
+    def modules_for(self, shape):
+        return modules_to_assign(self.model, shape, *self.fisher_shape)
 
     def parameters_for(self, shape):
-        for module in self.modules_for[shape]:
+        for module in self.modules_for(shape):
             for p in module.parameters():
                 yield p
 
@@ -77,7 +85,7 @@ class NaturalGradient:
 
     def _scale_fisher(self, scale):
         for shape in _module_level_shapes:
-            for module in self.modules_for[shape]:
+            for module in self.modules_for(shape):
                 matrix = self._get_module_symmatrix(module, shape)
                 if matrix is not None:
                     matrix.scaling(scale)
@@ -165,7 +173,7 @@ class NaturalGradient:
         if damping is None:
             damping = self.damping
         for shape in _module_level_shapes:
-            for module in self.modules_for[shape]:
+            for module in self.modules_for(shape):
                 matrix = self._get_module_symmatrix(module, shape)
                 if matrix is None:
                     continue
@@ -176,7 +184,7 @@ class NaturalGradient:
 
     def precondition(self, vecs=None):
         for shape in _module_level_shapes:
-            for module in self.modules_for[shape]:
+            for module in self.modules_for(shape):
                 self.precondition_module(module, shape)
         fisher = self._get_full_fisher()
         if fisher is not None:
@@ -187,7 +195,7 @@ class NaturalGradient:
     def precondition_module(self, module, shape=None, vec_weight=None, vec_bias=None):
         if shape is None:
             for s in _module_level_shapes:
-                if module in self.modules_for[s]:
+                if module in self.modules_for(s):
                     shape = s
                     break
         assert shape is not None, f'No shape is assigned to module: {module}.'
