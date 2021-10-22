@@ -112,7 +112,7 @@ class Operation:
                 assert original_requires_grad(module, 'weight')
                 assert original_requires_grad(module, 'bias')
                 rst = self.cov_unit_wise(module, in_data, out_grads)
-                self._set_result(OP_COV_UNIT_WISE, rst)
+                self._set_result(rst, OP_COV_UNIT_WISE)
 
             elif op_name == OP_GRAM_HADAMARD:
                 assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
