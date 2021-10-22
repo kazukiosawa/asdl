@@ -15,6 +15,7 @@ _SHAPE_TO_OP = {
     SHAPE_FULL: OP_BATCH_GRADS,  # full
     SHAPE_LAYER_WISE: OP_BATCH_GRADS,  # layer-wise block-diagonal
     SHAPE_KRON: OP_COV_KRON,  # Kronecker-factored
+    SHAPE_UNIT_WISE: OP_COV_UNIT_WISE,  # unit-wise block-diagonal
     SHAPE_DIAG: OP_COV_DIAG,  # diagonal
 }
 
