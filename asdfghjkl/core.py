@@ -38,6 +38,7 @@ def extend(model, *op_names, map_rule=None):
             # register hooks and operations in modules
             handles.append(module.register_forward_hook(forward_hook))
             _register_operations(model, module, op_names)
+
         yield
     finally:
         # remove hooks and operations from modules
