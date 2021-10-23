@@ -5,21 +5,21 @@ from torch import nn
 import torch.nn.functional as F
 
 from asdfghjkl import FISHER_EXACT, FISHER_MC, FISHER_EMP, LOSS_MSE, LOSS_CROSS_ENTROPY
-from asdfghjkl import FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient
+from asdfghjkl import SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG
+from asdfghjkl import NaturalGradient, FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient
 
 
 def convnet(n_dim, n_channels, n_classes=10, kernel_size=3):
     n_features = int(n_dim / (2 ** 4)) ** 2 * n_channels
-    model = nn.Sequential(
-        nn.Conv2d(3, n_channels, kernel_size),
-        nn.MaxPool2d(kernel_size),
-        nn.ReLU(),
-        nn.Conv2d(n_channels, n_channels, kernel_size),
-        nn.MaxPool2d(kernel_size),
-        nn.ReLU(),
-        nn.Flatten(),
-        nn.Linear(n_features, n_classes),
-    )
+    model = nn.Sequential()
+    model.add_module('conv1', nn.Conv2d(3, n_channels, kernel_size))
+    model.add_module('pool1', nn.MaxPool2d(kernel_size))
+    model.add_module('relu1', nn.ReLU())
+    model.add_module('conv2', nn.Conv2d(n_channels, n_channels, kernel_size))
+    model.add_module('pool2', nn.MaxPool2d(kernel_size))
+    model.add_module('relu2', nn.ReLU())
+    model.add_module('flatten', nn.Flatten())
+    model.add_module('linear', nn.Linear(n_features, n_classes))
     return model
 
 
@@ -37,7 +37,10 @@ def assert_equal(tensor1, tensor2, msg=''):
     assert torch.equal(tensor1, tensor2), f'{msg} tensor1: {tensor1.norm().item()}, tensor2: {tensor2.norm().item()}, relative_diff: {relative_norm}'
 
 
-for ngd_cls in [FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient]:
+ngd_classes = [FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient]
+shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG]
+
+for ngd_cls, shape in zip(ngd_classes, shapes):
     for fisher_type in [FISHER_EMP, FISHER_MC, FISHER_EXACT]:
         for loss_type in [LOSS_MSE, LOSS_CROSS_ENTROPY]:
             print(ngd_cls.__name__, fisher_type, loss_type)
@@ -49,21 +52,30 @@ for ngd_cls in [FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNatural
             else:
                 target = y
 
-            ngd1 = ngd_cls(model1, fisher_type, loss_type, ema_decay=1)
-            # 1st set of accumulations
-            for i in range(3):
-                ngd1.accumulate_curvature(x, target,
-                                          seed=1 if fisher_type == FISHER_MC else None)
-            ngd1.update_inv()
-            # 2nd set of accumulations to make sure inv is preserved
-            for i in range(3):
-                ngd1.accumulate_curvature(x, target,
-                                          seed=1 if fisher_type == FISHER_MC else None)
+            # class-wise shape selection
+            fisher_shape = [(nn.Linear, shape), (nn.Conv2d, shape)]
+            ngd1 = NaturalGradient(model1, fisher_type, fisher_shape, loss_type)
+            assert set(ngd1.modules_for(shape)) == set([model1.conv1, model1.conv2, model1.linear])
+
+            # module-wise shape selection
+            fisher_shape = [(model1.conv1, shape), (model1.conv2, shape), (model1.linear, shape)]
+            ngd1 = NaturalGradient(model1, fisher_type, fisher_shape, loss_type)
+            assert set(ngd1.modules_for(shape)) == set([model1.conv1, model1.conv2, model1.linear])
 
             ngd2 = ngd_cls(model2, fisher_type, loss_type)
-            ngd2.accumulate_curvature(x, target,
-                                      seed=1 if fisher_type == FISHER_MC else None)
+            assert set(ngd2.modules_for(shape)) == set([model2.conv1, model2.conv2, model2.linear])
+
+            ngd1.refresh_curvature(x, target,
+                                   seed=1 if fisher_type == FISHER_MC else None,
+                                   calc_emp_loss_grad=True)
+            ngd1.update_inv()
+            ngd1.precondition()
+
+            ngd2.refresh_curvature(x, target,
+                                   seed=1 if fisher_type == FISHER_MC else None,
+                                   calc_emp_loss_grad=True)
             ngd2.update_inv()
+            ngd2.precondition()
 
             if ngd_cls == FullNaturalGradient:
                 f1 = getattr(model1, fisher_type)

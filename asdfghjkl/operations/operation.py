@@ -12,6 +12,8 @@ OP_GRAM_HADAMARD = 'gram_hada'  # Hadamard-factored
 
 OP_BATCH_GRADS = 'batch_grads'  # compute batched gradients (per-example gradients)
 
+ALL_OPS = [OP_COV_KRON, OP_COV_DIAG, OP_COV_UNIT_WISE, OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS]
+
 
 class Operation:
     def __init__(self, module, op_names, model_for_kernel=None):
@@ -19,8 +21,11 @@ class Operation:
         self._model_for_kernel = model_for_kernel
         if isinstance(op_names, str):
             op_names = [op_names]
+        assert isinstance(op_names, list)
         # remove duplicates
         op_names = set(op_names)
+        for name in op_names:
+            assert name in ALL_OPS, f'Invalid operation name: {name}.'
         self._op_names = op_names
         self._op_results = {}
         self._grads_scale = None

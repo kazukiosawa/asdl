@@ -5,7 +5,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from asdfghjkl import FISHER_EXACT, FISHER_MC, FISHER_EMP
-from asdfghjkl import SHAPE_FULL, SHAPE_BLOCK_DIAG
+from asdfghjkl import SHAPE_FULL, SHAPE_LAYER_WISE
 from asdfghjkl import fisher_free_for_cross_entropy
 from asdfghjkl import NaturalGradient, LayerWiseNaturalGradient
 
@@ -129,7 +129,7 @@ class TestCG(unittest.TestCase):
             if ng_fn == NaturalGradient:
                 fisher_shape = SHAPE_FULL
             elif ng_fn == LayerWiseNaturalGradient:
-                fisher_shape = SHAPE_BLOCK_DIAG
+                fisher_shape = SHAPE_LAYER_WISE
             else:
                 return
 

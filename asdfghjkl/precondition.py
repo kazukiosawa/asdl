@@ -1,25 +1,32 @@
 import warnings
-import torch
 from torch import nn
 
-from .matrices import FISHER_EXACT, SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG  # NOQA
-from .fisher import fisher, LOSS_CROSS_ENTROPY
+from .core import module_wise_assignments, modules_to_assign
+from .matrices import *
+from .symmatrix import SymMatrix
+from .fisher import calculate_fisher, LOSS_CROSS_ENTROPY
 
-_supported_modules = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d)
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 _invalid_ema_decay = -1
+_module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG]
 
 __all__ = [
-    'NaturalGradient', 'LayerWiseNaturalGradient', 'KFAC',
-    'DiagNaturalGradient'
+    'NaturalGradient', 'FullNaturalGradient', 'LayerWiseNaturalGradient', 'KFAC',
+    'UnitWiseNaturalGradient', 'DiagNaturalGradient'
 ]
 
 
 class NaturalGradient:
+    """
+    Args:
+        model: base model that contains multiple modules
+        fisher_shape: shape of Fisher
+    """
     def __init__(
         self,
         model,
         fisher_type=FISHER_EXACT,
+        fisher_shape=SHAPE_FULL,
         loss_type=LOSS_CROSS_ENTROPY,
         n_mc_samples=1,
         damping=1e-5,
@@ -29,31 +36,62 @@ class NaturalGradient:
         assert not isinstance(model, DDP), f'{DDP} is not supported.'
         del DDP
         self.model = model
-        self.modules = [model]
         self.fisher_type = fisher_type
         self.loss_type = loss_type
         self.n_mc_samples = n_mc_samples
         self.damping = damping
         self.ema_decay = ema_decay
-        self.fisher_shape = SHAPE_FULL
         self.fisher_manager = None
+        if isinstance(fisher_shape, str):
+            fisher_shape = [fisher_shape]
+        for name, module, shapes in module_wise_assignments(model, *fisher_shape, named=True):
+            assert len(shapes) == 1, f'Each module has to be assigned one Fisher shape. ' \
+                                     f'{name} is assigned {len(shapes)} shapes.'
+        self.fisher_shape = fisher_shape
 
-    def _get_fisher_attr(self, postfix=None):
+    def modules_for(self, shape):
+        return modules_to_assign(self.model, shape, *self.fisher_shape)
+
+    def parameters_for(self, shape):
+        for module in self.modules_for(shape):
+            for p in module.parameters():
+                yield p
+
+    def _get_module_fisher(self, module, postfix=None):
         if postfix is None:
-            return self.fisher_type
+            attr = self.fisher_type
         else:
-            return f'{self.fisher_type}_{postfix}'
-
-    def _get_fisher(self, module, postfix=None):
-        attr = self._get_fisher_attr(postfix)
+            attr = f'{self.fisher_type}_{postfix}'
         fisher = getattr(module, attr, None)
         return fisher
 
+    def _get_full_fisher(self):
+        return self._get_module_fisher(self.model)
+
+    def _get_module_symmatrix(self, module, shape, postfix=None) -> SymMatrix:
+        fisher = self._get_module_fisher(module, postfix)
+        if fisher is None:
+            return None
+        if shape in [SHAPE_FULL, SHAPE_LAYER_WISE]:
+            return fisher
+        elif shape == SHAPE_KRON:
+            return fisher.kron
+        elif shape == SHAPE_UNIT_WISE:
+            return fisher.unit
+        elif shape == SHAPE_DIAG:
+            return fisher.diag
+        else:
+            raise ValueError(f'Invalid shape: {shape}.')
+
     def _scale_fisher(self, scale):
-        for module in self.modules:
-            fisher = self._get_fisher(module)
-            if fisher is not None:
-                fisher.scaling(scale)
+        for shape in _module_level_shapes:
+            for module in self.modules_for(shape):
+                matrix = self._get_module_symmatrix(module, shape)
+                if matrix is not None:
+                    matrix.scaling(scale)
+        fisher = self._get_full_fisher()
+        if fisher is not None:
+            fisher.scaling(scale)
 
     def _update_curvature(self,
                           inputs=None,
@@ -72,20 +110,20 @@ class NaturalGradient:
             scale *= ema_decay
             self._scale_fisher(1 - ema_decay)
 
-        rst = fisher(self.model,
-                     loss_type=self.loss_type,
-                     fisher_type=self.fisher_type,
-                     fisher_shapes=self.fisher_shape,
-                     inputs=inputs,
-                     targets=targets,
-                     data_loader=data_loader,
-                     accumulate=accumulate,
-                     data_average=data_average,
-                     calc_emp_loss_grad=calc_emp_loss_grad,
-                     return_loss=True,
-                     seed=seed,
-                     scale=scale,
-                     n_mc_samples=self.n_mc_samples)
+        rst = calculate_fisher(self.model,
+                               loss_type=self.loss_type,
+                               fisher_type=self.fisher_type,
+                               fisher_shapes=self.fisher_shape,
+                               inputs=inputs,
+                               targets=targets,
+                               data_loader=data_loader,
+                               accumulate=accumulate,
+                               data_average=data_average,
+                               calc_emp_loss_grad=calc_emp_loss_grad,
+                               return_loss=True,
+                               seed=seed,
+                               scale=scale,
+                               n_mc_samples=self.n_mc_samples)
         self.fisher_manager = rst[0]
         return rst[1]  # loss value
 
@@ -134,30 +172,50 @@ class NaturalGradient:
     def update_inv(self, damping=None):
         if damping is None:
             damping = self.damping
-        for module in self.modules:
-            fisher = self._get_fisher(module)
-            if fisher is None:
-                continue
+        for shape in _module_level_shapes:
+            for module in self.modules_for(shape):
+                matrix = self._get_module_symmatrix(module, shape)
+                if matrix is None:
+                    continue
+                matrix.update_inv(damping)
+        fisher = self._get_full_fisher()
+        if fisher is not None:
             fisher.update_inv(damping)
 
-    def precondition(self):
-        grads = []
-        for p in self.model.parameters():
-            if p.requires_grad and p.grad is not None:
-                grads.append(p.grad.flatten())
-        g = torch.cat(grads)
-        fisher = self._get_fisher(self.model)
-        ng = torch.mv(fisher.inv, g)
+    def precondition(self, vecs=None):
+        for shape in _module_level_shapes:
+            for module in self.modules_for(shape):
+                self.precondition_module(module, shape)
+        fisher = self._get_full_fisher()
+        if fisher is not None:
+            if vecs is None:
+                vecs = [p.grad for p in self.parameters_for(SHAPE_FULL) if p.requires_grad]
+            fisher.mvp(vecs=vecs, use_inv=True, inplace=True)
 
-        pointer = 0
-        for p in self.model.parameters():
-            if p.requires_grad and p.grad is not None:
-                numel = p.grad.numel()
-                val = ng[pointer:pointer + numel]
-                p.grad.copy_(val.reshape_as(p.grad))
-                pointer += numel
+    def precondition_module(self, module, shape=None, vec_weight=None, vec_bias=None):
+        if shape is None:
+            for s in _module_level_shapes:
+                if module in self.modules_for(s):
+                    shape = s
+                    break
+        assert shape is not None, f'No shape is assigned to module: {module}.'
+        matrix = self._get_module_symmatrix(module, shape)
+        if vec_weight is None:
+            vec_weight = module.weight.grad
+            if vec_bias is None and _bias_requires_grad(module):
+                vec_bias = module.bias.grad
+        matrix.mvp(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=True, inplace=True)
 
-        assert pointer == ng.numel()
+
+class FullNaturalGradient(NaturalGradient):
+    def __init__(self,
+                 model,
+                 fisher_type=FISHER_EXACT,
+                 loss_type=LOSS_CROSS_ENTROPY,
+                 n_mc_samples=1,
+                 damping=1e-5,
+                 ema_decay=_invalid_ema_decay):
+        super().__init__(model, fisher_type, SHAPE_FULL, loss_type, n_mc_samples, damping, ema_decay)
 
 
 class LayerWiseNaturalGradient(NaturalGradient):
@@ -168,29 +226,7 @@ class LayerWiseNaturalGradient(NaturalGradient):
                  n_mc_samples=1,
                  damping=1e-5,
                  ema_decay=_invalid_ema_decay):
-        super().__init__(model, fisher_type, loss_type, n_mc_samples, damping, ema_decay)
-        self.fisher_shape = SHAPE_BLOCK_DIAG
-        self.modules = [
-            m for m in model.modules() if isinstance(m, _supported_modules)
-        ]
-
-    def precondition(self):
-        for module in self.modules:
-            fisher = self._get_fisher(module)
-            if fisher is None:
-                continue
-            g = module.weight.grad.flatten()
-            if _bias_requires_grad(module):
-                g = torch.cat([g, module.bias.grad.flatten()])
-            ng = torch.mv(fisher.inv, g)
-
-            if _bias_requires_grad(module):
-                w_numel = module.weight.numel()
-                grad_w = ng[:w_numel]
-                module.bias.grad.copy_(ng[w_numel:])
-            else:
-                grad_w = ng
-            module.weight.grad.copy_(grad_w.reshape_as(module.weight.grad))
+        super().__init__(model, fisher_type, SHAPE_LAYER_WISE, loss_type, n_mc_samples, damping, ema_decay)
 
 
 class KFAC(NaturalGradient):
@@ -201,78 +237,18 @@ class KFAC(NaturalGradient):
                  n_mc_samples=1,
                  damping=1e-5,
                  ema_decay=_invalid_ema_decay):
-        super().__init__(model, fisher_type, loss_type, n_mc_samples, damping, ema_decay)
-        self.fisher_shape = SHAPE_KRON
-        self.modules = [
-            m for m in model.modules() if isinstance(m, _supported_modules)
-        ]
+        super().__init__(model, fisher_type, SHAPE_KRON, loss_type, n_mc_samples, damping, ema_decay)
 
-    def precondition(self):
-        for module in self.modules:
-            fisher = self._get_fisher(module)
-            if fisher is None:
-                continue
-            if isinstance(module, _normalizations):
-                inv = fisher.unit.inv  # (f, 2, 2)
-                assert _bias_requires_grad(module)
-                grad_w = module.weight.grad  # (f,)
-                grad_b = module.bias.grad  # (f,)
-                g = torch.stack([grad_w, grad_b], dim=1)  # (f, 2)
-                g = g.unsqueeze(2)  # (f, 2, 1)
-                ng = torch.matmul(inv, g).squeeze(2)  # (f, 2)
-                module.weight.grad.copy_(ng[:, 0])
-                module.bias.grad.copy_(ng[:, 1])
-            else:
-                A_inv = fisher.kron.A_inv
-                B_inv = fisher.kron.B_inv
-                grad2d = module.weight.grad.view(B_inv.shape[0], -1)
-                if _bias_requires_grad(module):
-                    grad2d = torch.cat(
-                        [grad2d, module.bias.grad.unsqueeze(dim=1)], dim=1)
-                ng = B_inv.mm(grad2d).mm(A_inv)
-                if _bias_requires_grad(module):
-                    grad_w = ng[:, :-1]
-                    module.bias.grad.copy_(ng[:, -1])
-                else:
-                    grad_w = ng
-                module.weight.grad.copy_(grad_w.reshape_as(module.weight.grad))
 
-    def precondition_vector(self, vec):
-        idx = 0
-        for module in self.modules:
-            fisher = self._get_fisher(module)
-            if fisher is None:
-                continue
-            if isinstance(module, _normalizations):
-                inv = fisher.unit.inv  # (f, 2, 2)
-                assert _bias_requires_grad(module)
-                vec_w = vec[idx]  # (f,)
-                vec_b = vec[idx + 1]  # (f,)
-                v = torch.stack([vec_w, vec_b], dim=1)  # (f, 2)
-                v = v.unsqueeze(2)  # (f, 2, 1)
-                ng = torch.matmul(inv, v).squeeze(2)  # (f, 2)
-                vec[idx].copy_(ng[:, 0])
-                vec[idx + 1].copy_(ng[:, 1])
-                idx += 2
-            else:
-                A_inv = fisher.kron.A_inv
-                B_inv = fisher.kron.B_inv
-                w_idx = idx
-                vec2d = vec[w_idx].view(B_inv.shape[0], -1)
-                idx += 1
-                if _bias_requires_grad(module):
-                    vec2d = torch.cat([vec2d, vec[idx].unsqueeze(dim=1)],
-                                      dim=1)
-                ng = B_inv.mm(vec2d).mm(A_inv)
-                if _bias_requires_grad(module):
-                    vec_w = ng[:, :-1]
-                    vec[idx].copy_(ng[:, -1])
-                    idx += 1
-                else:
-                    vec_w = ng
-                vec[w_idx].copy_(vec_w.reshape_as(module.weight.data))
-
-        assert idx == len(vec)
+class UnitWiseNaturalGradient(NaturalGradient):
+    def __init__(self,
+                 model,
+                 fisher_type=FISHER_EXACT,
+                 loss_type=LOSS_CROSS_ENTROPY,
+                 n_mc_samples=1,
+                 damping=1e-5,
+                 ema_decay=_invalid_ema_decay):
+        super().__init__(model, fisher_type, SHAPE_UNIT_WISE, loss_type, n_mc_samples, damping, ema_decay)
 
 
 class DiagNaturalGradient(NaturalGradient):
@@ -283,45 +259,7 @@ class DiagNaturalGradient(NaturalGradient):
                  n_mc_samples=1,
                  damping=1e-5,
                  ema_decay=_invalid_ema_decay):
-        super().__init__(model, fisher_type, loss_type, n_mc_samples, damping, ema_decay)
-        self.fisher_shape = SHAPE_DIAG
-        self.modules = [
-            m for m in model.modules() if isinstance(m, _supported_modules)
-        ]
-
-    def precondition(self):
-        for module in self.modules:
-            fisher = self._get_fisher(module)
-            if fisher is None:
-                continue
-            w_inv = fisher.diag.weight_inv
-            module.weight.grad.mul_(w_inv)
-            if _bias_requires_grad(module):
-                b_inv = fisher.diag.bias_inv
-                module.bias.grad.mul_(b_inv)
-
-    def precondition_vector(self, vec):
-        idx = 0
-        for module in self.modules:
-            fisher = self._get_fisher(module)
-            if fisher is None:
-                continue
-            assert fisher.diag is not None, module
-            vec[idx].mul_(fisher.diag.weight_inv)
-            idx += 1
-            if _bias_requires_grad(module):
-                vec[idx].mul_(fisher.diag.bias_inv)
-                idx += 1
-
-        assert idx == len(vec)
-
-    def precondition_vector_module(self, vec, module):
-        fisher = self._get_fisher(module)
-        assert fisher is not None
-        assert fisher.diag is not None, module
-        vec[0].mul_(fisher.diag.weight_inv)
-        if _bias_requires_grad(module):
-            vec[1].mul_(fisher.diag.bias_inv)
+        super().__init__(model, fisher_type, SHAPE_DIAG, loss_type, n_mc_samples, damping, ema_decay)
 
 
 def _bias_requires_grad(module):

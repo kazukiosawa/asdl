@@ -6,7 +6,7 @@ from torch import nn
 from torch.nn.functional import cross_entropy
 
 from asdfghjkl import FISHER_EMP
-from asdfghjkl import NaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient
+from asdfghjkl import FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient
 
 
 def convnet(n_dim, n_channels, n_classes=10, kernel_size=3):
@@ -56,8 +56,8 @@ model1 = convnet(32, 16)
 model2 = copy.deepcopy(model1)
 
 model1.zero_grad(set_to_none=True)
-ngd1 = NaturalGradient(model1, FISHER_EMP)
-ngd1.refresh_curvature(x, y, no_param_grad=False)
+ngd1 = FullNaturalGradient(model1, FISHER_EMP)
+ngd1.refresh_curvature(x, y, calc_emp_loss_grad=True)
 
 model2.zero_grad(set_to_none=True)
 loss = cross_entropy(model2(x), y)
@@ -68,19 +68,19 @@ for p1, p2 in zip(model1.parameters(), model2.parameters()):
 
 
 # time fisher_emp w/ and w/o param.grad vs loss.backward()
-for ng_cls in [NaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient]:
+for ng_cls in [FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient]:
     print(ng_cls.__name__)
 
     def fisher_emp_and_param_grad():
         model1.zero_grad(set_to_none=True)
         ngd1 = ng_cls(model1, FISHER_EMP)
-        ngd1.refresh_curvature(x, y, no_param_grad=False)
+        ngd1.refresh_curvature(x, y, calc_emp_loss_grad=True)
         assert all(p.grad is not None for p in model1.parameters())
 
     def fisher_emp():
         model1.zero_grad(set_to_none=True)
         ngd1 = ng_cls(model1, FISHER_EMP)
-        ngd1.refresh_curvature(x, y, no_param_grad=True)
+        ngd1.refresh_curvature(x, y, calc_emp_loss_grad=False)
         assert all(p.grad is None for p in model1.parameters())
 
     def param_grad():
