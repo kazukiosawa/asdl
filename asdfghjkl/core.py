@@ -26,13 +26,8 @@ def extend(model, *op_names, map_rule=None):
             handles.append(out_data.register_hook(backward_hook))
 
     for module, op_names in module_wise_assignments(model, *op_names, map_rule=map_rule):
-        requires_grad = False
-        for attr in ['weight', 'bias']:
-            param = getattr(module, attr, None)
-            if param is not None:
-                requires_grad = requires_grad or param.requires_grad
-                record_original_requires_grad(param)
-        if not requires_grad:
+        if len(op_names) == 0:
+            # no operation is assigned
             continue
         # register hooks and operations in modules
         handles.append(module.register_forward_hook(forward_hook))
@@ -43,7 +38,7 @@ def extend(model, *op_names, map_rule=None):
     # remove hooks and operations from modules
     for handle in handles:
         handle.remove()
-    for module in supported_modules(model):
+    for module in _modules_with_operations(model):
         _remove_operations(module)
 
 
@@ -140,6 +135,17 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
 
     for name, module in named_supported_modules(model):
         module_info = (name, module) if named else (module,)
+
+        requires_grad = False
+        for attr in ['weight', 'bias']:
+            param = getattr(module, attr, None)
+            if param is not None:
+                requires_grad = requires_grad or param.requires_grad
+                record_original_requires_grad(param)
+        if not requires_grad:
+            # no assignment for a module which doesn't require grad
+            yield *module_info, []
+
         if module in specified_asgmts:
             yield *module_info, specified_asgmts[module]
         elif any(isinstance(key, str) and key in name for key in specified_asgmts):
@@ -220,3 +226,11 @@ def _call_operations_in_backward(module, in_data, out_grads):
 def _remove_operations(module):
     if hasattr(module, 'operation'):
         delattr(module, 'operation')
+
+
+def _modules_with_operations(model):
+    for module in supported_modules(model):
+        if hasattr(module, 'operation'):
+            yield module
+
+
