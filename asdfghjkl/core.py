@@ -72,8 +72,9 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
                         - for a module(s) which is an instance of the key
                 2. str (represents a value)
                     - for a module(s) which hasn't been assigned any value
-            - Tuple rules cannot have the same key to each others.
-            - If more than one rules are applicable to a module,
+            - Tuple rules (format 1) cannot have the same key to each others.
+            - All str rules (format 2) are considered together as one Tuple rule.
+            - If more than one Tuple rules are applicable to a module,
                 - the rules are prioritized by their formats in the above order
                 - only the first rule is applied
             - Each assigned value is mapped to another by map_rule (if specified).
