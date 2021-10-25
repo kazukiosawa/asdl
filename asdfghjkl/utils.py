@@ -12,9 +12,9 @@ __all__ = [
     'original_requires_grad', 'record_original_requires_grad',
     'restore_original_requires_grad', 'skip_param_grad', 'im2col_2d',
     'im2col_2d_slow', 'add_value_to_diagonal', 'nvtx_range', 'cholesky_inv',
-    'PseudoBatchLoaderGenerator', 'flatten_parameters', 'unflatten_like_parameters',
-    'normalization', 'orthnormal', 'group_add', 'group_add_', 'group_scale',
-    'group_scale_', 'group_product'
+    'PseudoBatchLoaderGenerator', 'flatten_parameters',
+    'unflatten_like_parameters', 'normalization', 'orthnormal', 'group_add',
+    'group_add_', 'group_scale', 'group_scale_', 'group_product'
 ]
 
 
@@ -127,7 +127,11 @@ class PseudoBatchLoaderGenerator:
     [[tensor([8])], [tensor([5])], [tensor([4])], [tensor([2])], [tensor([9])]]
     ```
     """
-    def __init__(self, base_data_loader, pseudo_batch_size, batch_size=None, drop_last=None):
+    def __init__(self,
+                 base_data_loader,
+                 pseudo_batch_size,
+                 batch_size=None,
+                 drop_last=None):
         if batch_size is None:
             batch_size = base_data_loader.batch_size
         assert pseudo_batch_size % batch_size == 0, f'pseudo_batch_size ({pseudo_batch_size}) ' \
@@ -136,7 +140,8 @@ class PseudoBatchLoaderGenerator:
             drop_last = base_data_loader.drop_last
         base_dataset = base_data_loader.dataset
         sampler_cls = base_data_loader.sampler.__class__
-        pseudo_batch_sampler = BatchSampler(sampler_cls(range(len(base_dataset))),
+        pseudo_batch_sampler = BatchSampler(sampler_cls(
+            range(len(base_dataset))),
                                             batch_size=pseudo_batch_size,
                                             drop_last=drop_last)
         self.batch_size = batch_size
