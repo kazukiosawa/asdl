@@ -13,7 +13,8 @@ __all__ = [
     'restore_original_requires_grad', 'skip_param_grad', 'im2col_2d',
     'im2col_2d_slow', 'add_value_to_diagonal', 'nvtx_range', 'cholesky_inv',
     'PseudoBatchLoaderGenerator', 'flatten_parameters', 'unflatten_like_parameters',
-    'normalization', 'orthnormal', 'group_add', 'group_product'
+    'normalization', 'orthnormal', 'group_add', 'group_add_', 'group_scale',
+    'group_scale_', 'group_product'
 ]
 
 
@@ -186,7 +187,23 @@ def group_product(xs, ys):
 
 
 def group_add(xs, ys, alpha=1.):
-    return [x.add(y.mul(alpha)) for x, y in zip(xs, ys)]
+    for x, y in zip(xs, ys):
+        yield x.add(y.mul(alpha))
+
+
+def group_add_(xs, ys, alpha=1.):
+    for x, y in zip(xs, ys):
+        yield x.add_(y.mul(alpha))
+
+
+def group_scale(xs, scale):
+    for x in xs:
+        yield x.mul(scale)
+
+
+def group_scale_(xs, scale):
+    for x in xs:
+        yield x.mul_(scale)
 
 
 def normalization(v):
