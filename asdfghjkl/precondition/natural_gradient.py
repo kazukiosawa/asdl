@@ -1,10 +1,10 @@
 import warnings
 from torch import nn
 
-from .core import module_wise_assignments, modules_to_assign
-from .matrices import *
-from .symmatrix import SymMatrix
-from .fisher import calculate_fisher, LOSS_CROSS_ENTROPY
+from ..core import module_wise_assignments, modules_to_assign
+from ..matrices import *
+from ..symmatrix import SymMatrix
+from ..fisher import calculate_fisher, LOSS_CROSS_ENTROPY
 
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 _invalid_ema_decay = -1
