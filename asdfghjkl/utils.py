@@ -14,7 +14,7 @@ __all__ = [
     'im2col_2d_slow', 'add_value_to_diagonal', 'nvtx_range', 'cholesky_inv',
     'PseudoBatchLoaderGenerator', 'flatten_parameters',
     'unflatten_like_parameters', 'normalization', 'orthnormal', 'group_add',
-    'group_add_', 'group_scale', 'group_scale_', 'group_product'
+    'group_add_', 'group_scale', 'group_scale_', 'group_product', 'group_square'
 ]
 
 
@@ -189,6 +189,10 @@ def unflatten_like_parameters(vec, params):
 
 def group_product(xs, ys):
     return sum([torch.sum(x * y) for (x, y) in zip(xs, ys)])
+
+
+def group_square(xs):
+    return group_product(xs, xs)
 
 
 def group_add(xs, ys, alpha=1.):
