@@ -109,9 +109,10 @@ class LBFGS:
             upd_g = group_add(g, last_g, alpha=-1)
             if upd_g_scale:
                 group_scale_(upd_g, upd_g_scale)
+            rho = group_product(upd_p, upd_g)
             if self.damping:
                 damping, tau_lb, tau_ub = self.damping, self.tau_lb, self.tau_ub
-                mu = group_product(upd_p, upd_g) / (group_square(upd_p) + self.eps)
+                mu = rho / (group_square(upd_p) + self.eps)
                 tau = 1
                 if mu <= tau_lb:
                     tau = (1 - tau_lb) / (1 - mu)
@@ -119,7 +120,7 @@ class LBFGS:
                     tau = (tau_ub - 1) / (mu - 1)
                 tau = min(tau, 1 - damping)
                 group_add_(group_scale_(upd_g, tau), upd_p, alpha=1 - tau)
-            rho = group_product(upd_p, upd_g)
+                rho = group_product(upd_p, upd_g)
             if rho >= self.rho_min:
                 self._update_history('params', upd_p)
                 self._update_history('grads', upd_g)
