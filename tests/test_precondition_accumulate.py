@@ -5,7 +5,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from asdfghjkl import FISHER_EXACT, FISHER_MC, FISHER_EMP, LOSS_MSE, LOSS_CROSS_ENTROPY
-from asdfghjkl import FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient
+from asdfghjkl import FullNaturalGradient, LayerWiseNaturalGradient, KFAC, UnitWiseNaturalGradient, DiagNaturalGradient
 
 
 def convnet(n_dim, n_channels, n_classes=10, kernel_size=3):
@@ -37,7 +37,7 @@ def assert_equal(tensor1, tensor2, msg=''):
     assert torch.equal(tensor1, tensor2), f'{msg} tensor1: {tensor1.norm().item()}, tensor2: {tensor2.norm().item()}, relative_diff: {relative_norm}'
 
 
-for ngd_cls in [FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient]:
+for ngd_cls in [FullNaturalGradient, LayerWiseNaturalGradient, KFAC, UnitWiseNaturalGradient, DiagNaturalGradient]:
     for fisher_type in [FISHER_EMP, FISHER_MC, FISHER_EXACT]:
         for loss_type in [LOSS_MSE, LOSS_CROSS_ENTROPY]:
             print(ngd_cls.__name__, fisher_type, loss_type)
@@ -83,6 +83,9 @@ for ngd_cls in [FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNatural
                             assert_equal(f1.kron.B, f2.kron.B, 'B')
                             assert_equal(f1.kron.A_inv, f2.kron.A_inv, 'A_inv')
                             assert_equal(f1.kron.B_inv, f2.kron.B_inv, 'B_inv')
+                        elif ngd_cls == UnitWiseNaturalGradient:
+                            assert_equal(f1.unit.data, f2.unit.data, 'uw_data')
+                            assert_equal(f1.unit.inv, f2.unit.inv, 'uw_inv')
                         else:
                             assert_equal(f1.diag.weight, f2.diag.weight, 'diag_w')
                             assert_equal(f1.diag.bias, f2.diag.bias, 'diag_b')

@@ -43,7 +43,7 @@ __all__ = [
 ]
 
 _supported_types = [FISHER_EXACT, FISHER_MC, FISHER_EMP]
-_supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_UNIT_WISE, SHAPE_KRON, SHAPE_DIAG]
+_supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG]
 _supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_LAYER_WISE]
 
 
@@ -148,7 +148,6 @@ class _FisherBase(MatrixManager):
                 emp_loss.backward()
                 nonlocal total_loss
                 total_loss += emp_loss.item()
-
 
         device = self._device
         if data_loader is not None:
@@ -507,6 +506,7 @@ def _layer_wise_cvp(modules, vec):
         if cvp is not None:
             new_cvp = [v1 + v2 for v1, v2 in zip(new_cvp, cvp)]
         setattr(module, _CVP_LAYER_WISE, new_cvp)
+
 
 @contextmanager
 def _grads_scale(model, scale):

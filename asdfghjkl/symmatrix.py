@@ -604,8 +604,8 @@ class UnitWise:
     def update_inv(self, damping=_default_damping):
         assert self.has_data
         data = self.data
-        f = data.shape[0]
-        dmp = torch.eye(2, device=data.device, dtype=data.dtype).repeat(f, 1, 1) * damping
+        f, w, h = data.shape[0], data.shape[1], data.shape[2]
+        dmp = torch.eye(w, h, device=data.device, dtype=data.dtype).repeat(f, 1, 1) * damping
         self.inv = torch.inverse(data + dmp)
 
     def mvp(self, vec_weight, vec_bias, use_inv=False, inplace=False):
