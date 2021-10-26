@@ -196,23 +196,19 @@ def group_square(xs):
 
 
 def group_add(xs, ys, alpha=1.):
-    for x, y in zip(xs, ys):
-        yield x.add(y.mul(alpha))
+    return [x.add(y.mul(alpha)) for x, y in zip(xs, ys)]
 
 
 def group_add_(xs, ys, alpha=1.):
-    for x, y in zip(xs, ys):
-        yield x.add_(y.mul(alpha))
+    return [x.add_(y.mul(alpha)) for x, y in zip(xs, ys)]
 
 
 def group_scale(xs, scale):
-    for x in xs:
-        yield x.mul(scale)
+    return [x.mul(scale) for x in xs]
 
 
 def group_scale_(xs, scale):
-    for x in xs:
-        yield x.mul_(scale)
+    return [x.mul_(scale) for x in xs]
 
 
 def normalization(v):
