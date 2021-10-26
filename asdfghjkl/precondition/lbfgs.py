@@ -101,12 +101,14 @@ class LBFGS:
         m = self.momentum
         return self.get_clone(key) if m[key] is None else m[key]
 
-    def update_history(self):
+    def update_history(self, upd_g_scale=None):
         p, g = self.get_momentum('params'), self.get_momentum('grads')
         last_p, last_g = self.last_value['params'], self.last_value['grads']
         if last_p is not None:
             upd_p = group_add(p, last_p, alpha=-1)
             upd_g = group_add(g, last_g, alpha=-1)
+            if upd_g_scale:
+                group_scale_(upd_g, upd_g_scale)
             if self.damping:
                 damping, tau_lb, tau_ub = self.damping, self.tau_lb, self.tau_ub
                 mu = group_product(upd_p, upd_g) / (group_square(upd_p) + self.eps)
