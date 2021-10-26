@@ -23,7 +23,7 @@ class LBFGS:
     >>>     optimizer.zero_grad()
     >>>     loss = F.cross_entropy(model(x), y)
     >>>     loss.backward()
-    >>>     lbfgs.update_momentum()
+    >>>     lbfgs.update_momentum()  # for SLIM-QN
     >>>     if (i + 1) % update_freq == 0:
     >>>         lbfgs.update_history()
     >>>     lbfgs.precondition()
