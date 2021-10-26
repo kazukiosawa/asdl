@@ -12,7 +12,9 @@ __all__ = [
     'original_requires_grad', 'record_original_requires_grad',
     'restore_original_requires_grad', 'skip_param_grad', 'im2col_2d',
     'im2col_2d_slow', 'add_value_to_diagonal', 'nvtx_range', 'cholesky_inv',
-    'PseudoBatchLoaderGenerator'
+    'PseudoBatchLoaderGenerator', 'flatten_parameters',
+    'unflatten_like_parameters', 'normalization', 'orthnormal', 'group_add',
+    'group_add_', 'group_scale', 'group_scale_', 'group_product', 'group_square'
 ]
 
 
@@ -125,7 +127,11 @@ class PseudoBatchLoaderGenerator:
     [[tensor([8])], [tensor([5])], [tensor([4])], [tensor([2])], [tensor([9])]]
     ```
     """
-    def __init__(self, base_data_loader, pseudo_batch_size, batch_size=None, drop_last=None):
+    def __init__(self,
+                 base_data_loader,
+                 pseudo_batch_size,
+                 batch_size=None,
+                 drop_last=None):
         if batch_size is None:
             batch_size = base_data_loader.batch_size
         assert pseudo_batch_size % batch_size == 0, f'pseudo_batch_size ({pseudo_batch_size}) ' \
@@ -134,7 +140,8 @@ class PseudoBatchLoaderGenerator:
             drop_last = base_data_loader.drop_last
         base_dataset = base_data_loader.dataset
         sampler_cls = base_data_loader.sampler.__class__
-        pseudo_batch_sampler = BatchSampler(sampler_cls(range(len(base_dataset))),
+        pseudo_batch_sampler = BatchSampler(sampler_cls(
+            range(len(base_dataset))),
                                             batch_size=pseudo_batch_size,
                                             drop_last=drop_last)
         self.batch_size = batch_size
@@ -161,3 +168,58 @@ class PseudoBatchLoaderGenerator:
                 prefetch_factor=loader.prefetch_factor,
                 persistent_workers=loader.persistent_workers)
             yield data_loader
+
+
+def flatten_parameters(params):
+    vec = []
+    for param in params:
+        vec.append(param.flatten())
+    return torch.cat(vec)
+
+
+def unflatten_like_parameters(vec, params):
+    pointer = 0
+    rst = []
+    for param in params:
+        numel = param.numel()
+        rst.append(vec[pointer:pointer + numel].view_as(param))
+        pointer += numel
+    return rst
+
+
+def group_product(xs, ys):
+    return sum([torch.sum(x * y) for (x, y) in zip(xs, ys)])
+
+
+def group_square(xs):
+    return group_product(xs, xs)
+
+
+def group_add(xs, ys, alpha=1.):
+    return [x.add(y.mul(alpha)) for x, y in zip(xs, ys)]
+
+
+def group_add_(xs, ys, alpha=1.):
+    return [x.add_(y.mul(alpha)) for x, y in zip(xs, ys)]
+
+
+def group_scale(xs, scale):
+    return [x.mul(scale) for x in xs]
+
+
+def group_scale_(xs, scale):
+    return [x.mul_(scale) for x in xs]
+
+
+def normalization(v):
+    s = group_product(v, v)
+    s = s**0.5
+    s = s.cpu().item()
+    v = [vi / (s + 1e-6) for vi in v]
+    return v
+
+
+def orthnormal(w, v_list):
+    for v in v_list:
+        w = group_add(w, v, alpha=-group_product(w, v))
+    return normalization(w)
