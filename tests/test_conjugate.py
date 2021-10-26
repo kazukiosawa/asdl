@@ -86,7 +86,7 @@ class TestCG(unittest.TestCase):
 
         def _get_ng_by_precondition(ng_fn, fisher_type):
             precond = ng_fn(model, fisher_type=fisher_type, damping=damping)
-            precond.update_curvature(inputs, targets)
+            precond.accumulate_curvature(inputs, targets)
 
             model.zero_grad()
             loss = F.cross_entropy(model(inputs), targets)
