@@ -60,12 +60,29 @@ def data_loader_gradient(
 
 
 def batch_gradient(model, loss_fn, inputs, targets):
+    n = len(inputs)
     with extend(model, OP_BATCH_GRADS):
         model.zero_grad()
         f = model(inputs)
         loss = loss_fn(f, targets)
         loss.backward()
-    return f
+        batch_grad_list = _get_batch_grad_list(model)
+        grads = torch.cat([g.view(n, -1) for g in batch_grad_list], dim=1)  # (n, p)
+    return grads, f
+
+    
+def _get_batch_grad_list(model):
+    batch_grad_list = list()
+    for module in model.modules():
+        if hasattr(module, 'operation'):
+            res = module.operation._op_results['batch_grads']
+            if 'weight' in res:
+                batch_grad_list.append(res['weight'])
+            if 'bias' in res:
+                batch_grad_list.append(res['bias'])
+            if len(set(res.keys()) - {'weight', 'bias'}) > 0:
+                raise ValueError(f'Invalid parameter keys {res.keys()}')
+    return batch_grad_list
 
 
 def jacobian(model, x):
