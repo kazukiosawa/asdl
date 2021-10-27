@@ -4,8 +4,9 @@ from contextlib import contextmanager
 import torch.nn as nn
 from .utils import im2col_2d, record_original_requires_grad
 from .operations import get_op_class
+from .operations import Bias, Scale
 
-_supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d)
+_supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d, Bias, Scale)
 
 
 @contextmanager
