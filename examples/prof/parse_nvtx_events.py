@@ -22,7 +22,6 @@ def get_event_start_end(event_text):
     WHERE text = '{event_text}';
     """
     df = pd.read_sql(sql, con)
-    assert len(df) > 0, f'There is no NVTX event of text "{event_text}".'
     return [(row['start'], row['end']) for _, row in df.iterrows()]
 
 
@@ -62,24 +61,29 @@ def get_sync_time_in_event(event_start, event_end):
 
 
 def main():
-    event_texts = args.event_texts
-    event_keywords = args.event_keywords
-    if event_texts is None:
+    if args.event_texts is None:
         event_texts = get_all_event_texts()
-        if event_keywords is not None:
+        if args.event_keywords is not None:
+            event_keywords = args.event_keywords.split(',')
             event_texts = [txt for txt in event_texts
                            if any([kwd in txt for kwd in event_keywords])]
-    elif event_keywords is not None:
-        warnings.warn('As event_texts is specified, event_keywords will be ignored.')
+    else:
+        event_texts = args.event_texts.split(',')
+        if args.event_keywords is not None:
+            warnings.warn('As event_texts is specified, event_keywords will be ignored.')
 
     times = {'ncalls': []}
     for key in ['runtime', 'kernel', 'memset', 'memcpy', 'sync']:
         times[key] = []
         times[f'{key}_stdev'] = []
+    index = []
     print(f'Collecting time for {event_texts}')
     for txt in event_texts:
         event_start_end = get_event_start_end(txt)
-        if len(event_start_end) > 1 and args.ignore_first_event:
+        if len(event_start_end) == 0:
+            continue
+        index.append(txt)
+        if args.ignore_first_event:
             # ignore first NVTX event
             event_start_end = event_start_end[1:]
         times['ncalls'].append(len(event_start_end))
@@ -92,7 +96,7 @@ def main():
             times[key].append(statistics.mean(_times))
             times[f'{key}_stdev'].append(statistics.stdev(_times))
 
-    df = pd.DataFrame(times, index=event_texts)
+    df = pd.DataFrame(times, index=index)
     print(df)
     pickle_path = args.pickle_path
     print(f'Writing results to "{pickle_path}"')
@@ -104,8 +108,8 @@ if __name__ == '__main__':
     parser.add_argument('sqlite_path', type=str)
     parser.add_argument('--pickle-path', type=str, default='nvtx_events.pickle')
     parser.add_argument('--ignore-first-event', action='store_true')
-    parser.add_argument('--event-texts', type=str, nargs='+')
-    parser.add_argument('--event-keywords', type=str, nargs='+')
+    parser.add_argument('--event-texts', type=str)
+    parser.add_argument('--event-keywords', type=str)
     args = parser.parse_args()
     con = sqlite3.connect(args.sqlite_path)
     main()
