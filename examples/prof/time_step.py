@@ -179,7 +179,13 @@ if __name__ == '__main__':
     x = torch.rand(args.batch_size, *input_size).to(device)
     t = torch.tensor([0] * x.size(0)).long().to(device)
 
-    if args.optim == 'kfac':
+    if args.optim == 'sgd':
+        time_sgd()
+    elif args.optim == 'adam':
+        time_adam()
+    elif args.optim == 'kfac':
         time_kfac()
-
-
+    elif args.optim == 'smw':
+        time_smw()
+    elif args.optim == 'lbfgs':
+        time_lbfgs()
