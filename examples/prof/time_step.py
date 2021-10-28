@@ -51,6 +51,7 @@ def time_sgd():
     profiling.time_funcs([fwd, bwd, upd_param],
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
+    del model, optimizer, loss
 
 
 def time_adam():
@@ -71,6 +72,7 @@ def time_adam():
     profiling.time_funcs([fwd, bwd, upd_param],
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
+    del model, optimizer, loss
 
 
 def time_kfac():
@@ -93,6 +95,7 @@ def time_kfac():
     profiling.time_funcs([fwd_bwd_upd_curv, upd_inv, precond, upd_param],
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
+    del model, optimizer, ng
 
 
 def time_smw():
@@ -108,6 +111,7 @@ def time_smw():
     profiling.time_funcs([fwd_bwd_precond, upd_param],
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
+    del model, optimizer
 
 
 def time_lbfgs():
@@ -142,6 +146,7 @@ def time_lbfgs():
     profiling.time_funcs([fwd, bwd, upd_hist, precondition, upd_param],
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
+    del model, optimizer, loss, lbfgs
 
 
 def init_model():
