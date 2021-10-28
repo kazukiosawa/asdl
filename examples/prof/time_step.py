@@ -40,7 +40,7 @@ def time_sgd():
 
     def fwd():
         nonlocal loss
-        loss = model(x)
+        loss = cross_entropy(model(x), t)
 
     def bwd():
         loss.backward()
@@ -61,7 +61,7 @@ def time_adam():
 
     def fwd():
         nonlocal loss
-        loss = model(x)
+        loss = cross_entropy(model(x), t)
 
     def bwd():
         loss.backward()
@@ -123,7 +123,7 @@ def time_lbfgs():
 
     def fwd():
         nonlocal loss
-        loss = model(x)
+        loss = cross_entropy(model(x), t)
 
     def bwd():
         loss.backward()
