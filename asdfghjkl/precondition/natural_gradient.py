@@ -237,7 +237,10 @@ class KFAC(NaturalGradient):
                  n_mc_samples=1,
                  damping=1e-5,
                  ema_decay=_invalid_ema_decay):
-        super().__init__(model, fisher_type, SHAPE_KRON, loss_type, n_mc_samples, damping, ema_decay)
+        fisher_shape = [SHAPE_KRON,
+                        (nn.BatchNorm1d, SHAPE_UNIT_WISE),
+                        (nn.BatchNorm2d, SHAPE_UNIT_WISE)]
+        super().__init__(model, fisher_type, fisher_shape, loss_type, n_mc_samples, damping, ema_decay)
 
 
 class UnitWiseNaturalGradient(NaturalGradient):
