@@ -78,7 +78,7 @@ def time_kfac():
     ng = KFAC(model, FISHER_EMP)
     optimizer = torch.optim.SGD(model.parameters(), lr=1)
 
-    def upd_curv():
+    def fwd_bwd_upd_curv():
         ng.refresh_curvature(x, t, calc_emp_loss_grad=True)
 
     def upd_inv():
@@ -90,7 +90,7 @@ def time_kfac():
     def upd_param():
         optimizer.step()
 
-    profiling.time_funcs([upd_curv, upd_inv, precond, upd_param],
+    profiling.time_funcs([fwd_bwd_upd_curv, upd_inv, precond, upd_param],
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
 
@@ -99,13 +99,13 @@ def time_smw():
     model = init_model()
     optimizer = torch.optim.SGD(model.parameters(), lr=1)
 
-    def precond():
+    def fwd_bwd_precond():
         empirical_natural_gradient(model, x, t, loss_fn=cross_entropy)
 
     def upd_param():
         optimizer.step()
 
-    profiling.time_funcs([precond, upd_param],
+    profiling.time_funcs([fwd_bwd_precond, upd_param],
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
 
