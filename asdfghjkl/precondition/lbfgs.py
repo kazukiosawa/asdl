@@ -1,5 +1,5 @@
 import math
-
+import torch
 from ..utils import *
 
 
@@ -82,6 +82,7 @@ class LBFGS:
     def get_clone(self, key):
         return self.get_value(key, clone=True)
 
+    @torch.no_grad()
     def update_momentum(self):
         self._update_momentum('params', self.beta1)
         self._update_momentum('grads', self.beta2)
@@ -101,6 +102,7 @@ class LBFGS:
         m = self.momentum
         return self.get_clone(key) if m[key] is None else m[key]
 
+    @torch.no_grad()
     def update_history(self, upd_g_scale=None):
         p, g = self.get_momentum('params'), self.get_momentum('grads')
         last_p, last_g = self.last_value['params'], self.last_value['grads']
@@ -140,6 +142,7 @@ class LBFGS:
         hist = self.history
         return hist['params'][index], hist['grads'][index], hist['rho'][index]
 
+    @torch.no_grad()
     def precondition(self):
         kl_clip = self.kl_clip
         if kl_clip:
@@ -159,7 +162,7 @@ class LBFGS:
         hist_alpha = [None] * hist_size
         for i in reversed(range(hist_size)):
             upd_p, upd_g, rho = self.get_history(i)
-            alpha = group_product(upd_p, g).div(rho + self.eps).detach()
+            alpha = group_product(upd_p, g).div(rho + self.eps)
             group_add_(g, upd_g, alpha=-alpha)
             hist_alpha[i] = alpha
         upd_p, upd_g, rho = self.get_history(-1)
@@ -168,7 +171,7 @@ class LBFGS:
         for i in range(hist_size):
             upd_p, upd_g, rho = self.get_history(i)
             alpha = hist_alpha[i]
-            beta = group_product(upd_g, g).div(rho + self.eps).detach()
+            beta = group_product(upd_g, g).div(rho + self.eps)
             group_add_(g, upd_p, alpha=alpha - beta)
 
         # KL clipping
