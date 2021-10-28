@@ -131,7 +131,7 @@ def time_lbfgs():
     def upd_hist():
         lbfgs.update_history()
 
-    def precondition():
+    def precond():
         lbfgs.precondition()
 
     def upd_param():
@@ -143,7 +143,7 @@ def time_lbfgs():
     for _ in range(hist_size):
         upd_hist()
 
-    profiling.time_funcs([fwd, bwd, upd_hist, precondition, upd_param],
+    profiling.time_funcs([fwd, bwd, upd_hist, precond, upd_param],
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
     del model, optimizer, loss, lbfgs
