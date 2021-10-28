@@ -7,6 +7,8 @@ from torch.nn.functional import cross_entropy
 import torchvision
 
 from asdfghjkl import KFAC, FISHER_EMP
+from asdfghjkl import empirical_natural_gradient
+from asdfghjkl import LBFGS
 import profiling
 import models
 
@@ -16,6 +18,8 @@ parser.add_argument('--batch-size', type=int, default=64,
                     help='input batch size')
 parser.add_argument('--input-size', type=str, default='32,32',
                     help='input size')
+parser.add_argument('--optim', type=str, default='kfac',
+                    help='name of the optimizer')
 parser.add_argument('--arch', type=str,
                     help='name of the architecture')
 parser.add_argument('--arch-args', type=json.loads, default={},
@@ -29,47 +33,121 @@ parser.add_argument('--config', default=None, nargs='+',
 # yapf: enable
 
 
-def time_kfac(x,
-              model,
-              fisher_type=FISHER_EMP,
-              name='KFAC',
-              num_iters=100,
-              num_warmups=5):
-    target = torch.tensor([0] * x.size(0)).long().to(device)
-    ng = KFAC(model, fisher_type)
-
+def time_sgd():
+    model = init_model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=1)
     loss = torch.Tensor().to(device)
 
     def fwd():
         nonlocal loss
-        loss = cross_entropy(model(x), target)
-
-    def upd_curv():
-        ng.update_curvature(x, target)
-
-    def acc_curv():
-        ng.accumulate_curvature()
-
-    def upd_inv():
-        ng.finalize_accumulation()
-        ng.update_inv()
+        loss = model(x)
 
     def bwd():
-        model.zero_grad(set_to_none=True)
         loss.backward()
 
-    def acc_grad():
-        for p in model.parameters():
-            _ = p.grad.data + p.grad.data
+    def upd_param():
+        optimizer.step()
+
+    profiling.time_funcs([fwd, bwd, upd_param],
+                         num_iters=args.num_iters,
+                         num_warmups=args.num_warmups)
+
+
+def time_adam():
+    model = init_model()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1)
+    loss = torch.Tensor().to(device)
+
+    def fwd():
+        nonlocal loss
+        loss = model(x)
+
+    def bwd():
+        loss.backward()
+
+    def upd_param():
+        optimizer.step()
+
+    profiling.time_funcs([fwd, bwd, upd_param],
+                         num_iters=args.num_iters,
+                         num_warmups=args.num_warmups)
+
+
+def time_kfac():
+    model = init_model()
+    ng = KFAC(model, FISHER_EMP)
+    optimizer = torch.optim.SGD(model.parameters(), lr=1)
+
+    def upd_curv():
+        ng.refresh_curvature(x, t, calc_emp_loss_grad=True)
+
+    def upd_inv():
+        ng.update_inv()
 
     def precond():
         ng.precondition()
 
-    profiling.time_funcs(
-        [fwd, upd_curv, acc_curv, upd_inv, bwd, acc_grad, precond],
-        name=name,
-        num_iters=num_iters,
-        num_warmups=num_warmups)
+    def upd_param():
+        optimizer.step()
+
+    profiling.time_funcs([upd_curv, upd_inv, precond, upd_param],
+                         num_iters=args.num_iters,
+                         num_warmups=args.num_warmups)
+
+
+def time_smw():
+    model = init_model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=1)
+
+    def precond():
+        empirical_natural_gradient(model, x, t, loss_fn=cross_entropy)
+
+    def upd_param():
+        optimizer.step()
+
+    profiling.time_funcs([precond, upd_param],
+                         num_iters=args.num_iters,
+                         num_warmups=args.num_warmups)
+
+
+def time_lbfgs():
+    model = init_model()
+    hist_size = 20
+    lbfgs = LBFGS(model.parameters(), max_hist_size=hist_size)
+    optimizer = torch.optim.SGD(model.parameters(), lr=1)
+    loss = torch.Tensor().to(device)
+
+    def fwd():
+        nonlocal loss
+        loss = model(x)
+
+    def bwd():
+        loss.backward()
+
+    def upd_hist():
+        lbfgs.update_history()
+
+    def precondition():
+        lbfgs.precondition()
+
+    def upd_param():
+        optimizer.step()
+
+    fwd()
+    bwd()
+    # record histories for measuring time for precondition() with hist_size
+    for _ in range(hist_size):
+        upd_hist()
+
+    profiling.time_funcs([fwd, bwd, upd_hist, precondition, upd_param],
+                         num_iters=args.num_iters,
+                         num_warmups=args.num_warmups)
+
+
+def init_model():
+    model = arch_cls(**args.arch_args)
+    model.to(device)
+    return model
 
 
 if __name__ == '__main__':
@@ -90,11 +168,13 @@ if __name__ == '__main__':
     arch_cls = getattr(models, args.arch, None)
     if arch_cls is None:
         arch_cls = getattr(torchvision.models, args.arch)
-    model = arch_cls(**args.arch_args)
-    model.to(device)
 
-    # prepare an input
+    # prepare data
     input_size = [int(s) for s in args.input_size.split(',')]
     x = torch.rand(args.batch_size, *input_size).to(device)
+    t = torch.tensor([0] * x.size(0)).long().to(device)
 
-    time_kfac(x, model, num_iters=args.num_iters, num_warmups=args.num_warmups)
+    if args.optim == 'kfac':
+        time_kfac()
+
+
