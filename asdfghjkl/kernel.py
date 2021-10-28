@@ -690,7 +690,7 @@ def _cholesky_solve(A, b, eps=1e-8):
     A = _add_value_to_diagonal(A, eps)
     if A.ndim > b.ndim:
         b = b.unsqueeze(dim=-1)
-    u = torch.cholesky(A)
+    u = torch.linalg.cholesky(A)
     return torch.cholesky_solve(b, u).squeeze(dim=-1)
 
 
