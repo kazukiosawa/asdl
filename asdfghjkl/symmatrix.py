@@ -377,7 +377,7 @@ class Kron:
         pointer = unflatten(self.B, pointer)
         return pointer
 
-    def update_inv(self, damping=_default_damping):
+    def update_inv(self, damping=_default_damping, eps=1e-7):
         assert self.has_data
         A = self.A
         B = self.B
@@ -386,8 +386,8 @@ class Kron:
         pi = torch.sqrt(A_eig_mean / B_eig_mean)
         r = damping**0.5
 
-        self.A_inv = cholesky_inv(add_value_to_diagonal(A, r * pi))
-        self.B_inv = cholesky_inv(add_value_to_diagonal(B, r / pi))
+        self.A_inv = cholesky_inv(add_value_to_diagonal(A, max(r * pi, eps)))
+        self.B_inv = cholesky_inv(add_value_to_diagonal(B, max(r / pi, eps)))
 
     def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
         mat_A = self.A_inv if use_inv else self.A
