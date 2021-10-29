@@ -1,12 +1,9 @@
 import os
 import copy
-import inspect
 
 import torch
-from torch.nn import Module
 import torch.distributed as dist
 
-from .core import supported_modules
 from .symmatrix import SymMatrix
 
 HESSIAN = 'hessian'  # Hessian
