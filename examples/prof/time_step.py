@@ -5,6 +5,7 @@ import yaml
 import torch
 from torch.nn.functional import cross_entropy
 import torchvision
+import wandb
 
 from asdfghjkl import KFAC, FISHER_EMP
 from asdfghjkl import empirical_natural_gradient
@@ -12,21 +13,24 @@ from asdfghjkl import LBFGS
 import profiling
 import models
 
+
 # yapf: disable
 parser = argparse.ArgumentParser()
-parser.add_argument('--batch-size', type=int, default=64,
+parser.add_argument('--batch_size', type=int, default=64,
                     help='input batch size')
-parser.add_argument('--input-size', type=str, default='32,32',
+parser.add_argument('--input_size', type=str, default='32,32',
                     help='input size')
 parser.add_argument('--optim', type=str, default='kfac',
                     help='name of the optimizer')
 parser.add_argument('--arch', type=str,
                     help='name of the architecture')
-parser.add_argument('--arch-args', type=json.loads, default={},
+parser.add_argument('--arch_args', type=json.loads, default={},
                     help='[JSON] arguments for the architecture')
-parser.add_argument('--num-iters', type=int, default=100,
+parser.add_argument('--num_blocks', type=int, default=None)
+parser.add_argument('--width_scale', type=int, default=None)
+parser.add_argument('--num_iters', type=int, default=2,
                     help='number of benchmark iterations')
-parser.add_argument('--num-warmups', type=int, default=5,
+parser.add_argument('--num_warmups', type=int, default=1,
                     help='number of warmup iterations')
 parser.add_argument('--config', default=None, nargs='+',
                     help='config YAML file path')
@@ -34,7 +38,6 @@ parser.add_argument('--config', default=None, nargs='+',
 
 
 def time_sgd():
-    model = init_model()
     optimizer = torch.optim.SGD(model.parameters(), lr=1)
     loss = torch.Tensor().to(device)
 
@@ -51,11 +54,9 @@ def time_sgd():
     profiling.time_funcs([fwd, bwd, upd_param],
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
-    del model, optimizer, loss
 
 
 def time_adam():
-    model = init_model()
     optimizer = torch.optim.Adam(model.parameters(), lr=1)
     loss = torch.Tensor().to(device)
 
@@ -72,12 +73,10 @@ def time_adam():
     profiling.time_funcs([fwd, bwd, upd_param],
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
-    del model, optimizer, loss
 
 
 def time_kfac():
-    model = init_model()
-    ng = KFAC(model, FISHER_EMP)
+    ng = KFAC(model, FISHER_EMP, damping=1.)
     optimizer = torch.optim.SGD(model.parameters(), lr=1)
 
     def fwd_bwd_upd_curv():
@@ -95,11 +94,9 @@ def time_kfac():
     profiling.time_funcs([fwd_bwd_upd_curv, upd_inv, precond, upd_param],
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
-    del model, optimizer, ng
 
 
 def time_smw():
-    model = init_model()
     optimizer = torch.optim.SGD(model.parameters(), lr=1)
 
     def fwd_bwd_precond():
@@ -111,13 +108,11 @@ def time_smw():
     profiling.time_funcs([fwd_bwd_precond, upd_param],
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
-    del model, optimizer
 
 
 def time_lbfgs():
-    model = init_model()
     hist_size = 20
-    lbfgs = LBFGS(model.parameters(), max_hist_size=hist_size)
+    lbfgs = LBFGS(model.parameters(), max_hist_size=hist_size, rho_min=0)
     optimizer = torch.optim.SGD(model.parameters(), lr=1)
     loss = torch.Tensor().to(device)
 
@@ -146,13 +141,6 @@ def time_lbfgs():
     profiling.time_funcs([fwd, bwd, upd_hist, precond, upd_param],
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
-    del model, optimizer, loss, lbfgs
-
-
-def init_model():
-    model = arch_cls(**args.arch_args)
-    model.to(device)
-    return model
 
 
 if __name__ == '__main__':
@@ -166,6 +154,10 @@ if __name__ == '__main__':
                 config = yaml.full_load(f)
             dict_args.update(config)
 
+    for key in ['num_blocks', 'width_scale']:
+        if dict_args[key] is not None:
+            args.arch_args[key] = dict_args.pop(key)
+
     assert torch.cuda.is_available()
     device = torch.device('cuda')
 
@@ -173,11 +165,15 @@ if __name__ == '__main__':
     arch_cls = getattr(models, args.arch, None)
     if arch_cls is None:
         arch_cls = getattr(torchvision.models, args.arch)
+    model = arch_cls(**args.arch_args)
+    model.to(device)
 
     # prepare data
     input_size = [int(s) for s in args.input_size.split(',')]
     x = torch.rand(args.batch_size, *input_size).to(device)
     t = torch.tensor([0] * x.size(0)).long().to(device)
+
+    torch.cuda.reset_peak_memory_stats()
 
     if args.optim == 'sgd':
         time_sgd()
@@ -189,3 +185,11 @@ if __name__ == '__main__':
         time_smw()
     elif args.optim == 'lbfgs':
         time_lbfgs()
+
+    max_memory = torch.cuda.max_memory_allocated()
+
+    wandb.init(config=dict_args)
+    summary = {'max_memory_allocated': max_memory,
+               'num_params': sum(p.numel() for p in model.parameters())}
+    wandb.summary.update(summary)
+

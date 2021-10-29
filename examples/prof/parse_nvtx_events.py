@@ -102,14 +102,23 @@ def main():
     print(f'Writing results to "{pickle_path}"')
     df.to_pickle(pickle_path)
 
+    if args.run_path is not None:
+        data = df.to_dict('index')
+        import wandb
+        run = wandb.Api().run(args.run_path)
+        run.summary['times'] = 0
+        run.summary['times'] = {key: 0 for key in data}
+        run.summary.update({'times': data})
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('sqlite_path', type=str)
-    parser.add_argument('--pickle-path', type=str, default='nvtx_events.pickle')
-    parser.add_argument('--ignore-first-event', action='store_true')
-    parser.add_argument('--event-texts', type=str)
-    parser.add_argument('--event-keywords', type=str)
+    parser.add_argument('--pickle_path', type=str, default='nvtx_events.pickle')
+    parser.add_argument('--ignore_first_event', action='store_true')
+    parser.add_argument('--event_texts', type=str)
+    parser.add_argument('--event_keywords', type=str)
+    parser.add_argument('--run_path', type=str, default=None)
     args = parser.parse_args()
     con = sqlite3.connect(args.sqlite_path)
     main()
