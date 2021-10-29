@@ -102,10 +102,10 @@ def main():
     print(f'Writing results to "{pickle_path}"')
     df.to_pickle(pickle_path)
 
-    if args.run_path is not None:
+    if args.wandb_run_path is not None:
         data = df.to_dict('index')
         import wandb
-        run = wandb.Api().run(args.run_path)
+        run = wandb.Api().run(args.wandb_run_path)
         run.summary['times'] = 0
         run.summary['times'] = {key: 0 for key in data}
         run.summary.update({'times': data})
@@ -118,7 +118,7 @@ if __name__ == '__main__':
     parser.add_argument('--ignore_first_event', action='store_true')
     parser.add_argument('--event_texts', type=str)
     parser.add_argument('--event_keywords', type=str)
-    parser.add_argument('--run_path', type=str, default=None)
+    parser.add_argument('--wandb_run_path', type=str, default=None)
     args = parser.parse_args()
     con = sqlite3.connect(args.sqlite_path)
     main()
