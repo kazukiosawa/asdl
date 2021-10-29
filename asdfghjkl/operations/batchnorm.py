@@ -5,7 +5,7 @@ from .operation import Operation, OP_COV_KRON, OP_COV_UNIT_WISE, OP_GRAM_HADAMAR
 
 
 class _BatchNormNd(Operation):
-    def __init__(self, module, model, op_names, save_attr='op_results'):
+    def __init__(self, module, op_names, model_for_kernel=None):
         if OP_COV_KRON in op_names:
             op_names = op_names.copy()
             # kron operation is not supported. unit_wise will be used instead.
@@ -18,7 +18,7 @@ class _BatchNormNd(Operation):
             op_names.remove(OP_GRAM_HADAMARD)
             op_names.append(OP_GRAM_DIRECT)
 
-        super().__init__(module, model, op_names, save_attr)
+        super().__init__(module, op_names, model_for_kernel)
 
     @staticmethod
     def _reduce(tensor: torch.Tensor):
