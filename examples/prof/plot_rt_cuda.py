@@ -45,4 +45,5 @@ if __name__ == '__main__':
     events = args.events.split(',')
     df = pd.read_pickle(args.pickle_path)
     times = df.to_dict()
+    events = [event for event in events if event in times['runtime']]
     main()

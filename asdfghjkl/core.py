@@ -4,8 +4,9 @@ from contextlib import contextmanager
 import torch.nn as nn
 from .utils import im2col_2d, record_original_requires_grad
 from .operations import get_op_class
+from .operations import Bias, Scale
 
-_supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d)
+_supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d, Bias, Scale)
 
 
 @contextmanager
@@ -27,24 +28,20 @@ def extend(model, *op_names, map_rule=None):
                 handles.append(out_data.register_hook(backward_hook))
 
         for module, op_names in module_wise_assignments(model, *op_names, map_rule=map_rule):
-            requires_grad = False
-            for attr in ['weight', 'bias']:
-                param = getattr(module, attr, None)
-                if param is not None:
-                    requires_grad = requires_grad or param.requires_grad
-                    record_original_requires_grad(param)
-            if not requires_grad:
+            if len(op_names) == 0:
+                # no operation is assigned
                 continue
             # register hooks and operations in modules
             handles.append(module.register_forward_hook(forward_hook))
             _register_operations(model, module, op_names)
 
         yield
+
     finally:
         # remove hooks and operations from modules
         for handle in handles:
             handle.remove()
-        for module in supported_modules(model):
+        for module in _modules_with_operations(model):
             _remove_operations(module)
 
 
@@ -78,8 +75,9 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
                         - for a module(s) which is an instance of the key
                 2. str (represents a value)
                     - for a module(s) which hasn't been assigned any value
-            - Tuple rules cannot have the same key to each others.
-            - If more than one rules are applicable to a module,
+            - Tuple rules (format 1) cannot have the same key to each others.
+            - All str rules (format 2) are considered together as one Tuple rule.
+            - If more than one Tuple rules are applicable to a module,
                 - the rules are prioritized by their formats in the above order
                 - only the first rule is applied
             - Each assigned value is mapped to another by map_rule (if specified).
@@ -141,6 +139,17 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
 
     for name, module in named_supported_modules(model):
         module_info = (name, module) if named else (module,)
+
+        requires_grad = False
+        for attr in ['weight', 'bias']:
+            param = getattr(module, attr, None)
+            if param is not None:
+                requires_grad = requires_grad or param.requires_grad
+                record_original_requires_grad(param)
+        if not requires_grad:
+            # no assignment for a module which doesn't require grad
+            yield *module_info, []
+
         if module in specified_asgmts:
             yield *module_info, specified_asgmts[module]
         elif any(isinstance(key, str) and key in name for key in specified_asgmts):
@@ -221,3 +230,11 @@ def _call_operations_in_backward(module, in_data, out_grads):
 def _remove_operations(module):
     if hasattr(module, 'operation'):
         delattr(module, 'operation')
+
+
+def _modules_with_operations(model):
+    for module in supported_modules(model):
+        if hasattr(module, 'operation'):
+            yield module
+
+

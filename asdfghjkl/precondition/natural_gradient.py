@@ -1,10 +1,10 @@
 import warnings
 from torch import nn
 
-from .core import module_wise_assignments, modules_to_assign
-from .matrices import *
-from .symmatrix import SymMatrix
-from .fisher import calculate_fisher, LOSS_CROSS_ENTROPY
+from ..core import module_wise_assignments, modules_to_assign
+from ..matrices import *
+from ..symmatrix import SymMatrix
+from ..fisher import calculate_fisher, LOSS_CROSS_ENTROPY
 
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 _invalid_ema_decay = -1
@@ -237,7 +237,10 @@ class KFAC(NaturalGradient):
                  n_mc_samples=1,
                  damping=1e-5,
                  ema_decay=_invalid_ema_decay):
-        super().__init__(model, fisher_type, SHAPE_KRON, loss_type, n_mc_samples, damping, ema_decay)
+        fisher_shape = [SHAPE_KRON,
+                        (nn.BatchNorm1d, SHAPE_UNIT_WISE),
+                        (nn.BatchNorm2d, SHAPE_UNIT_WISE)]
+        super().__init__(model, fisher_type, fisher_shape, loss_type, n_mc_samples, damping, ema_decay)
 
 
 class UnitWiseNaturalGradient(NaturalGradient):

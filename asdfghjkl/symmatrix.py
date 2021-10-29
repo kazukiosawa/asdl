@@ -377,7 +377,7 @@ class Kron:
         pointer = unflatten(self.B, pointer)
         return pointer
 
-    def update_inv(self, damping=_default_damping):
+    def update_inv(self, damping=_default_damping, eps=1e-7):
         assert self.has_data
         A = self.A
         B = self.B
@@ -386,8 +386,8 @@ class Kron:
         pi = torch.sqrt(A_eig_mean / B_eig_mean)
         r = damping**0.5
 
-        self.A_inv = cholesky_inv(add_value_to_diagonal(A, r * pi))
-        self.B_inv = cholesky_inv(add_value_to_diagonal(B, r / pi))
+        self.A_inv = cholesky_inv(add_value_to_diagonal(A, max(r * pi, eps)))
+        self.B_inv = cholesky_inv(add_value_to_diagonal(B, max(r / pi, eps)))
 
     def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
         mat_A = self.A_inv if use_inv else self.A
@@ -604,8 +604,8 @@ class UnitWise:
     def update_inv(self, damping=_default_damping):
         assert self.has_data
         data = self.data
-        f = data.shape[0]
-        dmp = torch.eye(2, device=data.device, dtype=data.dtype).repeat(f, 1, 1) * damping
+        f, w, h = data.shape[0], data.shape[1], data.shape[2]
+        dmp = torch.eye(w, h, device=data.device, dtype=data.dtype).repeat(f, 1, 1) * damping
         self.inv = torch.inverse(data + dmp)
 
     def mvp(self, vec_weight, vec_bias, use_inv=False, inplace=False):
