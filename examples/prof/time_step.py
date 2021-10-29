@@ -5,7 +5,6 @@ import yaml
 import torch
 from torch.nn.functional import cross_entropy
 import torchvision
-import wandb
 
 from asdfghjkl import KFAC, FISHER_EMP
 from asdfghjkl import empirical_natural_gradient
@@ -34,6 +33,8 @@ parser.add_argument('--num_warmups', type=int, default=1,
                     help='number of warmup iterations')
 parser.add_argument('--config', default=None, nargs='+',
                     help='config YAML file path')
+parser.add_argument('--wandb', action='store_true',
+                    help='If True, record summary to W&B')
 # yapf: enable
 
 
@@ -186,10 +187,11 @@ if __name__ == '__main__':
     elif args.optim == 'lbfgs':
         time_lbfgs()
 
-    max_memory = torch.cuda.max_memory_allocated()
-
-    wandb.init(config=dict_args)
-    summary = {'max_memory_allocated': max_memory,
-               'num_params': sum(p.numel() for p in model.parameters())}
-    wandb.summary.update(summary)
+    if args.wandb:
+        import wandb
+        max_memory = torch.cuda.max_memory_allocated()
+        wandb.init(config=dict_args)
+        summary = {'max_memory_allocated': max_memory,
+                   'num_params': sum(p.numel() for p in model.parameters())}
+        wandb.summary.update(summary)
 
