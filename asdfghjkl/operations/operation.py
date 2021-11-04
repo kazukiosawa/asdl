@@ -55,9 +55,9 @@ class Operation:
                 #      -> n x (f_in + 1)
                 # conv2d: n x (c_in)(kernel_size) x out_size
                 #      -> n x {(c_in)(kernel_size) + 1} x out_size
-                if type(module) is torch.nn.Linear:
+                if isinstance(module, torch.nn.Linear):
                     expected_dim = 2
-                elif type(module) is torch.nn.Conv2d:
+                elif isinstance(module, torch.nn.Conv2d):
                     expected_dim = 3
                 else:
                     raise ValueError('Fix handling bias for', type(module))
