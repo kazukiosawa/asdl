@@ -61,6 +61,12 @@ def im2col_2d(x: torch.Tensor, conv2d: nn.Module):
     return Mx
 
 
+def im2col_2d_aug(x, conv2d):
+    n, k_aug = x.shape[:2]
+    x = im2col_2d(x.flatten(start_dim=0, end_dim=1), conv2d)
+    return x.reshape(n, k_aug, *x.shape[1:])
+
+
 def add_value_to_diagonal(x: torch.Tensor, value):
     ndim = x.ndim
     assert ndim >= 2

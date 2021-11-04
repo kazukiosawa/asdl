@@ -1,8 +1,9 @@
 from typing import List
 from contextlib import contextmanager
+from asdfghjkl.operations.conv_aug import Conv2dAug
 
 import torch.nn as nn
-from .utils import im2col_2d, record_original_requires_grad
+from .utils import im2col_2d, im2col_2d_aug, record_original_requires_grad
 from .operations import OP_ACCUMULATE_GRADS, get_op_class
 
 
@@ -65,10 +66,13 @@ def extend(model, op_names):
 
 
 def _preprocess_in_data(module, in_data, out_data):
-    if isinstance(module, nn.Conv2d):
+    if isinstance(module, Conv2dAug):
+        in_data = im2col_2d_aug(in_data, module)
+
+    elif isinstance(module, nn.Conv2d):
         in_data = im2col_2d(in_data, module)
 
-    if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+    elif isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
         bnorm = module
         f = bnorm.num_features
         if isinstance(module, nn.BatchNorm1d):
@@ -82,7 +86,7 @@ def _preprocess_in_data(module, in_data, out_data):
                         bnorm.bias.view(shape)).div(bnorm.weight.view(shape))
         in_data = in_data_norm
 
-    if isinstance(module, nn.LayerNorm):
+    elif isinstance(module, nn.LayerNorm):
         layernorm = module
         # restore normalized input
         in_data_norm = (out_data - layernorm.bias).div(layernorm.weight)
@@ -92,7 +96,9 @@ def _preprocess_in_data(module, in_data, out_data):
 
 
 def _preprocess_out_grads(module, out_grads):
-    if isinstance(module, nn.Conv2d):
+    if isinstance(module, Conv2dAug):
+        out_grads = out_grads.flatten(start_dim=3)
+    elif isinstance(module, nn.Conv2d):
         out_grads = out_grads.flatten(start_dim=2)
 
     return out_grads
