@@ -1,6 +1,6 @@
 import torch
 from .symmatrix import SymMatrix, Diag
-from .matrices import SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_DIAG, HESSIAN, MatrixManager
+from .matrices import SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_DIAG, HESSIAN, MatrixManager
 from .mvp import power_method, conjugate_gradient_method, reduce_params
 
 __all__ = [
@@ -9,7 +9,7 @@ __all__ = [
     'hessian_eig',
     'hessian_free'
 ]
-_supported_shapes = [SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_DIAG]
+_supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_DIAG]
 
 
 class Hessian(MatrixManager):
@@ -186,11 +186,11 @@ def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
     # full
     if SHAPE_FULL in hessian_shapes:
         full_hess = _hessian(loss, params)
-        setattr(model, 'hessian', SymMatrix(data=full_hess, device=device))
+        setattr(model, 'hessian', SymMatrix(data=full_hess))
     else:
         full_hess = None
 
-    if SHAPE_BLOCK_DIAG not in hessian_shapes \
+    if SHAPE_LAYER_WISE not in hessian_shapes \
             and SHAPE_DIAG not in hessian_shapes:
         return
 
@@ -211,8 +211,8 @@ def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
             idx += m_numel
 
         # block-diagonal
-        if SHAPE_BLOCK_DIAG in hessian_shapes:
-            setattr(module, 'hessian', SymMatrix(data=m_hess, device=device))
+        if SHAPE_LAYER_WISE in hessian_shapes:
+            setattr(module, 'hessian', SymMatrix(data=m_hess))
 
         # diagonal
         if SHAPE_DIAG in hessian_shapes:
@@ -227,11 +227,11 @@ def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
                 b_numel = b.numel()
                 b_hess = m_hess[_idx:_idx + b_numel].view_as(b)
                 _idx += b_numel
-            diag = Diag(weight=w_hess, bias=b_hess, device=device)
+            diag = Diag(weight=w_hess, bias=b_hess)
             if hasattr(module, 'hessian'):
                 module._hessian.diag = diag
             else:
-                setattr(module, 'hessian', SymMatrix(diag=diag, device=device))
+                setattr(module, 'hessian', SymMatrix(diag=diag))
 
 
 # adopted from https://github.com/mariogeiger/hessian/blob/master/hessian/hessian.py

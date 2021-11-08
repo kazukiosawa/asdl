@@ -26,7 +26,8 @@ __all__ = [
     'parallel_efficient_natural_gradient_cross_entropy',
     'kernel_vector_product',
     'kernel_free_cross_entropy',
-    'kernel_eigenvalues'
+    'kernel_eigenvalues',
+    'empirical_natural_gradient'
 ]
 
 
@@ -493,6 +494,30 @@ def parallel_efficient_natural_gradient_cross_entropy(model, inputs, targets, lo
     assert pointer == packed_tensor.numel()
 
 
+def empirical_natural_gradient(model, inputs, targets, loss_fn=F.cross_entropy, damping=1e-5, data_average=True):
+    """
+    Calculate natural gradient with full empirical Fisher by using the Woodbury matrix identity
+    """
+    n = inputs.shape[0]
+
+    with extend(model, OP_GRAM_HADAMARD):
+        _zero_kernel(model, n, n)
+        outputs = model(inputs)
+        batch_loss = loss_fn(outputs, targets, reduction='none')
+        params = [p for p in model.parameters() if p.requires_grad]
+        torch.autograd.grad(batch_loss.sum(), params, retain_graph=True)
+    UtU = model.kernel  # n x n
+    Utg = UtU.sum(dim=1)  # n
+    if data_average:
+        UtU.div_(n)
+    b = _cholesky_solve(UtU, Utg, damping)
+    ones = torch.ones_like(b)
+    if data_average:
+        b /= n ** 2
+        ones /= n
+    batch_loss.backward(gradient=(ones - b) / damping)
+
+
 def kernel_free_cross_entropy(model,
                               inputs,
                               targets,
@@ -690,7 +715,7 @@ def _cholesky_solve(A, b, eps=1e-8):
     A = _add_value_to_diagonal(A, eps)
     if A.ndim > b.ndim:
         b = b.unsqueeze(dim=-1)
-    u = torch.cholesky(A)
+    u = torch.linalg.cholesky(A)
     return torch.cholesky_solve(b, u).squeeze(dim=-1)
 
 

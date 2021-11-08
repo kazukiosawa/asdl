@@ -1,9 +1,12 @@
 import os
 import copy
+import inspect
 
 import torch
+from torch.nn import Module
 import torch.distributed as dist
 
+from .core import supported_modules
 from .symmatrix import SymMatrix
 
 HESSIAN = 'hessian'  # Hessian
@@ -12,8 +15,9 @@ FISHER_MC = 'fisher_mc'  # Fisher estimation by Monte-Carlo sampling
 FISHER_EMP = 'fisher_emp'  # no-centered covariance a.k.a. empirical Fisher
 
 SHAPE_FULL = 'full'  # full
-SHAPE_BLOCK_DIAG = 'block_diag'  # layer-wise block-diagonal
+SHAPE_LAYER_WISE = 'layer_wise'  # layer-wise block-diagonal
 SHAPE_KRON = 'kron'  # Kronecker-factored
+SHAPE_UNIT_WISE = 'unit_wise' # unit-wise block-diagonal
 SHAPE_DIAG = 'diag'  # diagonal
 
 __all__ = [
@@ -23,13 +27,14 @@ __all__ = [
     'FISHER_EMP',
     'HESSIAN',
     'SHAPE_FULL',
-    'SHAPE_BLOCK_DIAG',
+    'SHAPE_LAYER_WISE',
     'SHAPE_KRON',
-    'SHAPE_DIAG'
+    'SHAPE_UNIT_WISE',
+    'SHAPE_DIAG',
 ]
 
 _supported_types = [HESSIAN, FISHER_EXACT, FISHER_MC, FISHER_EMP]
-_supported_shapes = [SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG]
+_supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG]
 
 _normalizations = (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d)
 
@@ -174,9 +179,9 @@ class MatrixManager:
                     continue
                 if not _requires_matrix(module):
                     continue
-                matrix = SymMatrix(device=self._device)
-                if SHAPE_BLOCK_DIAG in matrix_shapes:
-                    _load_path(SHAPE_BLOCK_DIAG, 'path', 'tril', mname)
+                matrix = SymMatrix()
+                if SHAPE_LAYER_WISE in matrix_shapes:
+                    _load_path(SHAPE_LAYER_WISE, 'path', 'tril', mname)
                 if SHAPE_KRON in matrix_shapes:
                     if isinstance(module, _normalizations):
                         _load_path(
@@ -190,7 +195,7 @@ class MatrixManager:
 
             # full matrix
             if SHAPE_FULL in matrix_shapes:
-                matrix = SymMatrix(device=self._device)
+                matrix = SymMatrix()
                 _load_path(SHAPE_FULL, 'path', 'tril')
                 setattr(self._model, mat_type, matrix)
 
@@ -303,7 +308,7 @@ class MatrixManager:
                 continue
             matrix = getattr(module, stats_attr, None)
             assert matrix is not None, f'{matrix_type} for {mname} does not exist.'
-            if matrix_shape == SHAPE_BLOCK_DIAG:
+            if matrix_shape == SHAPE_LAYER_WISE:
                 assert matrix.has_data, f'{matrix_type}.{matrix_shape} for {mname} does not exist.'
                 rst = reduce_fn(rst, getattr(matrix, metrics_fn)())
             elif matrix_shape == SHAPE_KRON:

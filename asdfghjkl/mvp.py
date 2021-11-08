@@ -3,6 +3,7 @@ import copy
 
 import torch
 import torch.distributed as dist
+from .utils import *
 
 __all__ = [
     'power_method',
@@ -38,17 +39,17 @@ def power_method(mvp_fn,
         _report(f'start power iteration for lambda({i+1}).')
         vec = [torch.randn_like(p) for p in params]
         if is_distributed:
-            vec = _flatten_parameters(vec)
+            vec = flatten_parameters(vec)
             dist.broadcast(vec, src=0)
-            vec = _unflatten_like_parameters(vec, params)
+            vec = unflatten_like_parameters(vec, params)
 
         eigval = None
         last_eigval = None
         # power iteration
         for j in range(max_iters):
-            vec = _orthnormal(vec, eigvecs)
+            vec = orthnormal(vec, eigvecs)
             Mv = _mvp(mvp_fn, vec, random_seed=random_seed)
-            eigval = _group_product(Mv, vec).item()
+            eigval = group_product(Mv, vec).item()
             if j > 0:
                 diff = abs(eigval - last_eigval) / (abs(last_eigval) + 1e-6)
                 _report(f'{j}/{max_iters} diff={diff}')
@@ -93,24 +94,24 @@ def conjugate_gradient_method(mvp_fn,
         r = copy.deepcopy(b)
     else:
         Ax = _call_mvp(x)
-        r = _group_add(b, Ax, -1)
+        r = group_add(b, Ax, -1)
 
     if preconditioner is None:
         p = copy.deepcopy(r)
-        last_rz = _group_product(r, r)
+        last_rz = group_product(r, r)
     else:
         p = preconditioner.precondition_vector(r)
-        last_rz = _group_product(r, p)
+        last_rz = group_product(r, p)
 
-    b_norm = math.sqrt(_group_product(b, b))
+    b_norm = math.sqrt(group_product(b, b))
 
     log = []
     for i in range(max_iters):
         Ap = _call_mvp(p)
-        alpha = last_rz / _group_product(p, Ap)
-        x = _group_add(x, p, alpha)
-        r = _group_add(r, Ap, -alpha)
-        rr = _group_product(r, r)
+        alpha = last_rz / group_product(p, Ap)
+        x = group_add(x, p, alpha)
+        r = group_add(r, Ap, -alpha)
+        rr = group_product(r, r)
         err = math.sqrt(rr) / b_norm
         log.append({'step': i + 1, 'error': err})
         if print_progress:
@@ -122,10 +123,10 @@ def conjugate_gradient_method(mvp_fn,
             rz = rr
         else:
             z = preconditioner.precondition_vector(r)
-            rz = _group_product(r, z)
+            rz = group_product(r, z)
 
         beta = rz / last_rz  # Fletcher-Reeves
-        p = _group_add(z, p, beta)
+        p = group_add(z, p, beta)
         last_rz = rz
 
     if save_log:
@@ -143,13 +144,13 @@ def _mvp(mvp_fn,
         torch.manual_seed(random_seed)
     Mv = mvp_fn(vec)
     if damping:
-        Mv = _group_add(Mv, vec, damping)
+        Mv = group_add(Mv, vec, damping)
     return Mv
 
 
 def reduce_params(params, is_master=True, all_reduce=False):
     # pack
-    packed_tensor = _flatten_parameters(params)
+    packed_tensor = flatten_parameters(params)
     if all_reduce:
         # all-reduce
         dist.all_reduce(packed_tensor)
@@ -157,7 +158,7 @@ def reduce_params(params, is_master=True, all_reduce=False):
         dist.reduce(packed_tensor, dst=0)
     if all_reduce or is_master:
         # unpack
-        rst = _unflatten_like_parameters(packed_tensor, params)
+        rst = unflatten_like_parameters(packed_tensor, params)
     else:
         rst = None
 
@@ -166,40 +167,3 @@ def reduce_params(params, is_master=True, all_reduce=False):
     return rst
 
 
-def _flatten_parameters(params):
-    vec = []
-    for param in params:
-        vec.append(param.flatten())
-    return torch.cat(vec)
-
-
-def _unflatten_like_parameters(vec, params):
-    pointer = 0
-    rst = []
-    for param in params:
-        numel = param.numel()
-        rst.append(vec[pointer:pointer + numel].view_as(param))
-        pointer += numel
-    return rst
-
-
-def _group_product(xs, ys):
-    return sum([torch.sum(x * y) for (x, y) in zip(xs, ys)])
-
-
-def _group_add(xs, ys, alpha=1.):
-    return [x.add(y.mul(alpha)) for x, y in zip(xs, ys)]
-
-
-def _normalization(v):
-    s = _group_product(v, v)
-    s = s**0.5
-    s = s.cpu().item()
-    v = [vi / (s + 1e-6) for vi in v]
-    return v
-
-
-def _orthnormal(w, v_list):
-    for v in v_list:
-        w = _group_add(w, v, alpha=-_group_product(w, v))
-    return _normalization(w)

@@ -11,31 +11,49 @@ OP_GRAM_DIRECT = 'gram_direct'  # direct
 OP_GRAM_HADAMARD = 'gram_hada'  # Hadamard-factored
 
 OP_BATCH_GRADS = 'batch_grads'  # compute batched gradients (per-example gradients)
-OP_ACCUMULATE_GRADS = 'acc_grad'  # accumulate gradients
+
+ALL_OPS = [OP_COV_KRON, OP_COV_DIAG, OP_COV_UNIT_WISE, OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS]
 
 
 class Operation:
-    def __init__(self, module, model, op_names, save_field='op_results'):
+    def __init__(self, module, op_names, model_for_kernel=None):
         self._module = module
-        self._model = model
+        self._model_for_kernel = model_for_kernel
         if isinstance(op_names, str):
             op_names = [op_names]
+        assert isinstance(op_names, list)
         # remove duplicates
         op_names = set(op_names)
+        for name in op_names:
+            assert name in ALL_OPS, f'Invalid operation name: {name}.'
         self._op_names = op_names
-        self._save_field = save_field
+        self._op_results = {}
         self._grads_scale = None
-        self._kron_A = None
+
+    def _set_result(self, value, *keys):
+        """
+        Examples:
+             set_result(data, OP_COV_UNIT_WISE)
+             set_result(data, OP_BATCH_GRADS, 'weight')
+             set_result(A, OP_COV_KRON, 'A')
+        """
+        results = self._op_results
+        if len(keys) > 1:
+            for key in keys[:-1]:
+                if results.get(key, None) is None:
+                    results[key] = {}
+                results = results[key]
+        key = keys[-1]
+        if results.get(key, None) is None:
+            results[key] = value
+        else:
+            results[key] += value
 
     def get_op_results(self):
-        return getattr(self._module, self._save_field, {})
-
-    def set_op_results(self, op_results):
-        setattr(self._module, self._save_field, op_results)
+        return self._op_results
 
     def clear_op_results(self):
-        if hasattr(self._module, self._save_field):
-            delattr(self._module, self._save_field)
+        self._op_results = {}
 
     @property
     def grads_scale(self):
@@ -45,73 +63,75 @@ class Operation:
     def grads_scale(self, value):
         self._grads_scale = value
 
+    def extend_input(self, in_data):
+        # Extend in_data with ones.
+        # linear: n x f_in
+        #      -> n x (f_in + 1)
+        # conv2d: n x (c_in)(kernel_size) x out_size
+        #      -> n x {(c_in)(kernel_size) + 1} x out_size
+        shape = list(in_data.shape)
+        shape[1] = 1
+        ones = in_data.new_ones(shape)
+        return torch.cat((in_data, ones), dim=1)
+
     def forward_post_process(self, in_data: torch.Tensor):
         module = self._module
 
         if OP_COV_KRON in self._op_names or OP_GRAM_HADAMARD in self._op_names:
             if original_requires_grad(module, 'bias'):
-                # Extend in_data with ones.
-                # linear: n x f_in
-                #      -> n x (f_in + 1)
-                # conv2d: n x (c_in)(kernel_size) x out_size
-                #      -> n x {(c_in)(kernel_size) + 1} x out_size
-                shape = list(in_data.shape)
-                shape[1] = 1
-                ones = in_data.new_ones(shape)
-                in_data = torch.cat((in_data, ones), dim=1)
-
-            op_results = self.get_op_results()
+                in_data = self.extend_input(in_data)
 
             if OP_COV_KRON in self._op_names:
                 A = self.cov_kron_A(module, in_data)
-                self._kron_A = A
-                op_results[OP_COV_KRON] = {'A': A.clone()}
+                self._set_result(A, OP_COV_KRON, 'A')
 
             if OP_GRAM_HADAMARD in self._op_names:
+                assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
                 n_data = in_data.shape[0]
-                n1 = self._model.kernel.shape[0]
+                n1 = self._model_for_kernel.kernel.shape[0]
                 if n_data == n1:
                     A = self.gram_A(module, in_data, in_data)
                 else:
                     A = self.gram_A(module, in_data[:n1], in_data[n1:])
-                op_results[OP_GRAM_HADAMARD] = {'A': A.clone()}
-
-            self.set_op_results(op_results)
+                self._set_result(A, OP_GRAM_HADAMARD, 'A')
 
     def backward_pre_process(self, in_data, out_grads):
-        if self._grads_scale is not None:
-            shape = (-1, ) + (1, ) * (out_grads.ndim - 1)
-            out_grads = torch.mul(out_grads, self._grads_scale.reshape(shape))
+        gs = self._grads_scale
+        if gs is not None:
+            if isinstance(gs, torch.Tensor):
+                assert gs.shape[0] == out_grads.shape[0]
+                shape = (-1, ) + (1, ) * (out_grads.ndim - 1)
+                out_grads.mul_(gs.reshape(shape))
+            else:
+                out_grads.mul_(gs)
 
         module = self._module
-        op_results = self.get_op_results()
         for op_name in self._op_names:
             if op_name == OP_COV_KRON:
-                rst = self.cov_kron_B(module, out_grads)
-                if op_name in op_results:
-                    op_results[op_name]['B'] = rst
-                else:
-                    assert self._kron_A is not None
-                    op_results[op_name] = {'A': self._kron_A.clone(), 'B': rst}
+                B = self.cov_kron_B(module, out_grads)
+                self._set_result(B, OP_COV_KRON, 'B')
 
             elif op_name == OP_COV_UNIT_WISE:
                 assert original_requires_grad(module, 'weight')
                 assert original_requires_grad(module, 'bias')
-                op_results[op_name] = self.cov_unit_wise(module, in_data, out_grads)
+                rst = self.cov_unit_wise(module, self.extend_input(in_data), out_grads)
+                self._set_result(rst, OP_COV_UNIT_WISE)
 
             elif op_name == OP_GRAM_HADAMARD:
+                assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
                 n_data = in_data.shape[0]
-                n1 = self._model.kernel.shape[0]
+                n1 = self._model_for_kernel.kernel.shape[0]
                 if n_data == n1:
                     B = self.gram_B(module, out_grads, out_grads)
                 else:
                     B = self.gram_B(module, out_grads[:n1], out_grads[n1:])
-                A = op_results[OP_GRAM_HADAMARD]['A']
-                self._model.kernel += B.mul(A)
+                A = self._op_results[OP_GRAM_HADAMARD]['A']
+                self._model_for_kernel.kernel += B.mul(A)
 
             elif op_name == OP_GRAM_DIRECT:
+                assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_DIRECT}.'
                 n_data = in_data.shape[0]
-                n1 = self._model.kernel.shape[0]
+                n1 = self._model_for_kernel.kernel.shape[0]
 
                 grads = self.batch_grads_weight(module, in_data, out_grads)
                 v = [grads]
@@ -128,18 +148,16 @@ class Operation:
                     g2 = g
 
                 if n_data == n1:
-                    self._model.kernel += torch.matmul(g, g2.T)
+                    self._model_for_kernel.kernel += torch.matmul(g, g2.T)
                 else:
-                    self._model.kernel += torch.matmul(g[:n1], g2[n1:].T)
+                    self._model_for_kernel.kernel += torch.matmul(g[:n1], g2[n1:].T)
             else:
                 rst = getattr(self,
                               f'{op_name}_weight')(module, in_data, out_grads)
-                op_results[op_name] = {'weight': rst}
+                self._set_result(rst, op_name, 'weight')
                 if original_requires_grad(module, 'bias'):
                     rst = getattr(self, f'{op_name}_bias')(module, out_grads)
-                    op_results[op_name]['bias'] = rst
-
-        self.set_op_results(op_results)
+                    self._set_result(rst, op_name, 'bias')
 
     @staticmethod
     def batch_grads_weight(module, in_data, out_grads):

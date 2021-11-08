@@ -4,8 +4,8 @@ import numpy as np
 
 import torch
 import torch.nn.functional as F
-from .core import extend
-from .utils import disable_param_grad
+from .core import extend, modules_to_assign
+from .utils import skip_param_grad
 from .operations import *
 from .symmatrix import SymMatrix, Kron, Diag, UnitWise
 from .matrices import *
@@ -13,20 +13,22 @@ from .mvp import power_method, conjugate_gradient_method, reduce_params
 
 _SHAPE_TO_OP = {
     SHAPE_FULL: OP_BATCH_GRADS,  # full
-    SHAPE_BLOCK_DIAG: OP_BATCH_GRADS,  # block-diagonal
+    SHAPE_LAYER_WISE: OP_BATCH_GRADS,  # layer-wise block-diagonal
     SHAPE_KRON: OP_COV_KRON,  # Kronecker-factored
+    SHAPE_UNIT_WISE: OP_COV_UNIT_WISE, # unit-wise block-diagonal
     SHAPE_DIAG: OP_COV_DIAG,  # diagonal
 }
 
 _COV_FULL = 'cov_full'
 _CVP_FULL = 'cvp_full'
-_COV_BLOCK_DIAG = 'cov_block_diag'
-_CVP_BLOCK_DIAG = 'cvp_block_diag'
+_COV_LAYER_WISE = 'cov_layer_wise'
+_CVP_LAYER_WISE = 'cvp_layer_wise'
 
-_LOSS_CROSS_ENTROPY = 'cross_entropy'
-_LOSS_MSE = 'mse'
+LOSS_CROSS_ENTROPY = 'cross_entropy'
+LOSS_MSE = 'mse'
 
 __all__ = [
+    'calculate_fisher',
     'fisher_for_cross_entropy',
     'fisher_for_mse',
     'fvp_for_cross_entropy',
@@ -35,16 +37,17 @@ __all__ = [
     'fisher_eig_for_mse',
     'fisher_free_for_cross_entropy',
     'fisher_free_for_mse',
-    'woodbury_ifvp'
+    'LOSS_CROSS_ENTROPY',
+    'LOSS_MSE'
 ]
 
 _supported_types = [FISHER_EXACT, FISHER_MC, FISHER_EMP]
-_supported_shapes = [SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG]
-_supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_BLOCK_DIAG]
+_supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG]
+_supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_LAYER_WISE]
 
 
 class _FisherBase(MatrixManager):
-    def __init__(self, model):
+    def __init__(self, model, **kwargs):
         super().__init__(model, self.fisher_type)
 
     @property
@@ -52,20 +55,34 @@ class _FisherBase(MatrixManager):
         raise NotImplementedError
 
     @property
+    def is_fisher_emp(self):
+        return self.fisher_type == FISHER_EMP
+
+    @property
+    def loss_fn(self):
+        raise NotImplementedError
+
+    @property
+    def fisher_attr(self):
+        return self.fisher_type
+
+    @property
     def fvp_attr(self):
-        return _get_fvp_attr(self.fisher_type)
+        return f'{self.fisher_type}_fvp'
 
     def zero_fisher(self):
-        ftype = self.fisher_type
+        attr = self.fisher_attr
         for module in self._model.modules():
-            if hasattr(module, ftype):
-                delattr(module, ftype)
+            f = getattr(module, attr, None)
+            if f is not None:
+                f.scaling(0)
 
     def zero_fvp(self):
         attr = self.fvp_attr
         for module in self._model.modules():
-            if hasattr(module, attr):
-                delattr(module, attr)
+            fvp = getattr(module, attr, None)
+            if fvp is not None:
+                setattr(module, attr, fvp * 0)
 
     def calculate_fisher(self,
                          fisher_shapes,
@@ -74,65 +91,185 @@ class _FisherBase(MatrixManager):
                          data_loader=None,
                          fvp=False,
                          vec=None,
-                         data_average=True):
+                         data_average=True,
+                         accumulate=False,
+                         calc_emp_loss_grad=False,
+                         seed=None,
+                         scale=1.):
+        model = self._model
         if isinstance(fisher_shapes, str):
             fisher_shapes = [fisher_shapes]
-        for fshape in fisher_shapes:
+
+        def modules_for(shape):
+            return modules_to_assign(model, shape, *fisher_shapes)
+
+        if not accumulate:
+            # set Fisher/FVP zero
             if fvp:
-                assert fshape in _supported_shapes_for_fvp
+                self.zero_fvp()
             else:
-                assert fshape in _supported_shapes
-        if fvp:
-            self.zero_fvp()
-        else:
-            self.zero_fisher()
+                self.zero_fisher()
 
-        # setup operations for extend
-        op_names = [_SHAPE_TO_OP[shape] for shape in fisher_shapes]
-        # remove duplicates
-        op_names = set(op_names)
+        total_loss = 0
+        calc_emp_loss_grad_with_fisher = calc_emp_loss_grad and self.is_fisher_emp
+        calc_emp_loss_grad_after_fisher = calc_emp_loss_grad and not self.is_fisher_emp
 
-        model = self._model
-        base_scale = 1.
+        def fisher_for_one_batch(x, t=None):
 
-        def closure(loss_expr, scale=1., grad_scale=None):
-            model.zero_grad(set_to_none=True)
-            loss = loss_expr()
-            with _grads_scale(model, grad_scale):
-                with disable_param_grad(model):
-                    loss.backward(retain_graph=True)
-            if SHAPE_FULL in fisher_shapes and not fvp:
-                _full_covariance(model)
-            if SHAPE_FULL in fisher_shapes and fvp:
-                _full_cvp(model, vec)
-            if SHAPE_BLOCK_DIAG in fisher_shapes and not fvp:
-                _block_diag_covariance(model)
-            if SHAPE_BLOCK_DIAG in fisher_shapes and fvp:
-                _block_diag_cvp(model, vec)
-            _register_fisher(model, self.fisher_type, scale * base_scale)
+            def closure(loss_expr, grad_scale=None):
+                self._zero_op_batch_grads(set_to_none=True)
+                loss = loss_expr()
+                with _grads_scale(model, grad_scale):
+                    with skip_param_grad(model, disable=calc_emp_loss_grad_with_fisher):
+                        loss.backward(retain_graph=True)
+                if fvp:
+                    _full_cvp(model, modules_for(SHAPE_FULL), vec)
+                    _layer_wise_cvp(modules_for(SHAPE_LAYER_WISE), vec)
+                else:
+                    _full_covariance(model, modules_for(SHAPE_FULL))
+                    _layer_wise_covariance(modules_for(SHAPE_LAYER_WISE))
+                if not calc_emp_loss_grad_after_fisher:
+                    nonlocal total_loss
+                    total_loss += loss.item()
+
+            x = x.to(device)
+            if t is not None:
+                t = t.to(device)
+            if seed:
+                torch.random.manual_seed(seed)
+            with extend(model, *fisher_shapes, map_rule=lambda s: _SHAPE_TO_OP[s]):
+                y = model(x)
+                self._fisher_core(closure, y, t)
+                self._register_fisher(scale)
+            if calc_emp_loss_grad_after_fisher:
+                assert t is not None
+                emp_loss = self.loss_fn(y, t)
+                emp_loss.backward()
+                nonlocal total_loss
+                total_loss += emp_loss.item()
 
         device = self._device
         if data_loader is not None:
-            if data_average:
-                base_scale = 1 / len(data_loader)
             # calculate fisher/fvp for the data_loader
+            data_size = len(data_loader.dataset)
+            if data_average:
+                scale /= data_size
             for inputs, targets in data_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
-                with extend(model, op_names):
-                    self._fisher_core(closure, model(inputs), targets)
+                fisher_for_one_batch(inputs, targets)
         else:
             # calculate fisher/fvp for a single batch
             assert inputs is not None
+            data_size = inputs.shape[0]
             if data_average:
-                base_scale = 1 / inputs.shape[0]
-            inputs = inputs.to(device)
-            if targets is not None:
-                targets = targets.to(device)
-            with extend(model, op_names):
-                self._fisher_core(closure, model(inputs), targets)
+                scale /= data_size
+            fisher_for_one_batch(inputs, targets)
+
+        if calc_emp_loss_grad and data_average:
+            # divide gradients by data size
+            # (every loss function returns the sum of loss, not the average)
+            for p in model.parameters():
+                if p.grad is not None:
+                    p.grad.div_(data_size)
+
+        if data_average:
+            total_loss /= data_size
+        return total_loss
+
+    def _zero_op_batch_grads(self, set_to_none=False):
+        for module in self._model.modules():
+            operation = getattr(module, 'operation', None)
+            if operation is None:
+                continue
+            op_results = operation.get_op_results()
+            if op_results.get(OP_BATCH_GRADS, None):
+                if set_to_none:
+                    op_results.pop(OP_BATCH_GRADS, None)
+                else:
+                    op_results[OP_BATCH_GRADS] *= 0
 
     def _fisher_core(self, closure, outputs, targets):
         raise NotImplementedError
+
+    def _register_fisher(self, scale=1.):
+        """
+        module.operation.get_op_results():
+        {
+            'diag': {'weight': torch.Tensor, 'bias': torch.Tensor},
+            'kron': {'A': torch.Tensor, 'B': torch.Tensor},
+            'unit_wise': torch.Tensor,
+        }
+        """
+        model = self._model
+        for module in model.modules():
+            operation = getattr(module, 'operation', None)
+            if operation is None:
+                continue
+            op_results = operation.get_op_results()
+            kron = diag = unit = None
+            if OP_COV_KRON in op_results:
+                rst = op_results[OP_COV_KRON]
+                kron = Kron(rst['A'], rst['B'])
+            if OP_COV_DIAG in op_results:
+                rst = op_results[OP_COV_DIAG]
+                diag = Diag(rst.get('weight', None), rst.get('bias', None))
+            if OP_COV_UNIT_WISE in op_results:
+                rst = op_results[OP_COV_UNIT_WISE]
+                unit = UnitWise(rst)
+            operation.clear_op_results()
+            # move layer-wise/kron/diag fisher
+            self._accumulate_fisher(
+                module,
+                _COV_LAYER_WISE,
+                kron=kron,
+                diag=diag,
+                unit=unit,
+                scale=scale
+            )
+            # move layer-wise fvp
+            self._accumulate_fvp(module, _CVP_LAYER_WISE, scale)
+
+        # move full fisher
+        self._accumulate_fisher(model, _COV_FULL, scale=scale)
+        # move full fvp
+        self._accumulate_fvp(model, _CVP_FULL, scale)
+
+    def _accumulate_fisher(
+            self,
+            module,
+            data_src_attr,
+            kron=None,
+            diag=None,
+            unit=None,
+            scale=1.
+    ):
+        dst_attr = self.fisher_attr
+        data = getattr(module, data_src_attr, None)
+        if all(v is None for v in [data, kron, diag, unit]):
+            return
+        new_fisher = SymMatrix(data, kron, diag, unit).scaling(scale)
+        dst_fisher = getattr(module, dst_attr, None)
+        if dst_fisher is None:
+            setattr(module, dst_attr, new_fisher)
+        else:
+            # this must be __iadd__ to preserve inv
+            dst_fisher += new_fisher
+        if data is not None:
+            delattr(module, data_src_attr)
+
+    def _accumulate_fvp(self, module, src_attr, scale=1.):
+        dst_attr = self.fvp_attr
+        cvp = getattr(module, src_attr, None)
+        if cvp is None:
+            return
+        cvp = [v * scale for v in cvp]
+        dst_fvp = getattr(module, dst_attr, None)
+        if dst_fvp is None:
+            setattr(module, dst_attr, cvp)
+        else:
+            dst_fvp = [u.add(v) for u, v in zip(dst_fvp, cvp)]
+            setattr(module, dst_attr, dst_fvp)
+
+        delattr(module, src_attr)
 
     def reduce_fisher(self, is_master=True, all_reduce=False):
         self.reduce_matrices(is_master=is_master, all_reduce=all_reduce)
@@ -163,7 +300,13 @@ class _FisherBase(MatrixManager):
             return rst
 
 
-class FisherExactCrossEntropy(_FisherBase):
+class _FisherCrossEntropy(_FisherBase):
+    @property
+    def loss_fn(self):
+        return partial(F.cross_entropy, reduction='sum')
+
+
+class FisherExactCrossEntropy(_FisherCrossEntropy):
     @property
     def fisher_type(self):
         return FISHER_EXACT
@@ -179,7 +322,7 @@ class FisherExactCrossEntropy(_FisherBase):
                     grad_scale=sqrt_probs[:, i])
 
 
-class FisherMCCrossEntropy(_FisherBase):
+class FisherMCCrossEntropy(_FisherCrossEntropy):
     def __init__(self, model, n_mc_samples=1):
         super().__init__(model)
         self.n_mc_samples = n_mc_samples
@@ -196,10 +339,10 @@ class FisherMCCrossEntropy(_FisherBase):
             with torch.no_grad():
                 targets = dist.sample()
             closure(lambda: F.nll_loss(log_probs, targets, reduction='sum'),
-                    scale=1/self.n_mc_samples)
+                    grad_scale=1 / self.n_mc_samples)
 
 
-class FisherEmpCrossEntropy(_FisherBase):
+class FisherEmpCrossEntropy(_FisherCrossEntropy):
     @property
     def fisher_type(self):
         return FISHER_EMP
@@ -209,7 +352,13 @@ class FisherEmpCrossEntropy(_FisherBase):
         closure(lambda: F.nll_loss(log_probs, targets, reduction='sum'))
 
 
-class FisherExactMSE(_FisherBase):
+class _FisherMSE(_FisherBase):
+    @property
+    def loss_fn(self):
+        return lambda x, y: 0.5 * (x - y).norm(dim=1).sum()
+
+
+class FisherExactMSE(_FisherMSE):
     @property
     def fisher_type(self):
         return FISHER_EXACT
@@ -220,7 +369,7 @@ class FisherExactMSE(_FisherBase):
             closure(lambda: outputs[:, i].sum())
 
 
-class FisherMCMSE(_FisherBase):
+class FisherMCMSE(_FisherMSE):
     def __init__(self, model, n_mc_samples=1, var=0.5):
         super().__init__(model)
         self.n_mc_samples = n_mc_samples
@@ -235,10 +384,11 @@ class FisherMCMSE(_FisherBase):
         for i in range(self.n_mc_samples):
             with torch.no_grad():
                 targets = dist.sample()
-            closure(lambda: 0.5 * (outputs - targets).norm(dim=1).sum())
+            closure(lambda: 0.5 * (outputs - targets).norm(dim=1).sum(),
+                    grad_scale=1 / self.n_mc_samples)
 
 
-class FisherEmpMSE(_FisherBase):
+class FisherEmpMSE(_FisherMSE):
     @property
     def fisher_type(self):
         return FISHER_EMP
@@ -247,32 +397,31 @@ class FisherEmpMSE(_FisherBase):
         closure(lambda: 0.5 * (outputs - targets).norm(dim=1).sum())
 
 
-def _module_batch_grads(model):
-    rst = []
-    for module in model.modules():
+def _module_batch_grads(modules):
+    for module in modules:
         operation = getattr(module, 'operation', None)
         if operation is None:
             continue
-        batch_grads = operation.get_op_results()[OP_BATCH_GRADS]
-        rst.append((module, batch_grads))
-    return rst
+        op_results = operation.get_op_results()
+        batch_grads = op_results.get(OP_BATCH_GRADS, None)
+        if batch_grads is None:
+            continue
+        yield module, batch_grads
 
 
-def _module_batch_flatten_grads(model):
-    rst = []
-    for module, batch_grads in _module_batch_grads(model):
+def _module_batch_flatten_grads(modules):
+    for module, batch_grads in _module_batch_grads(modules):
         batch_flatten_grads = torch.cat(
             [g.flatten(start_dim=1) for g in batch_grads.values()],
             dim=1
         )
-        rst.append((module, batch_flatten_grads))
-    return rst
+        yield module, batch_flatten_grads
 
 
-def _module_batch_gvp(model, vec):
+def _module_batch_gvp(modules, vec):
     rst = []
     pointer = 0
-    for module, batch_grads in _module_batch_grads(model):
+    for module, batch_grads in _module_batch_grads(modules):
         batch_gvp = None
         for b_g in batch_grads.values():
             v = vec[pointer]
@@ -287,61 +436,75 @@ def _module_batch_gvp(model, vec):
     return rst
 
 
-def _full_covariance(model):
-    batch_all_g = []
-    for _, batch_g in _module_batch_flatten_grads(model):
-        batch_all_g.append(batch_g)
+def _full_covariance(model, modules):
+    batch_all_g = [g for _, g in _module_batch_flatten_grads(modules)]
+    if len(batch_all_g) == 0:
+        return
     batch_all_g = torch.cat(batch_all_g, dim=1)  # n x p_all
-    cov_full = torch.matmul(batch_all_g.T, batch_all_g)  # p_all x p_all
-    setattr(model, _COV_FULL, cov_full)
+    new_cov_full = torch.matmul(batch_all_g.T, batch_all_g)  # p_all x p_all
+    cov_full = getattr(model, _COV_FULL, None)
+    if cov_full is not None:
+        new_cov_full += cov_full
+    setattr(model, _COV_FULL, new_cov_full)
 
 
-def _block_diag_covariance(model):
-    for module, batch_g in _module_batch_flatten_grads(model):
-        cov_block = torch.matmul(batch_g.T, batch_g)  # p_all x p_all
-        setattr(module, _COV_BLOCK_DIAG, cov_block)
+def _layer_wise_covariance(modules):
+    for module, batch_g in _module_batch_flatten_grads(modules):
+        new_cov_block = torch.matmul(batch_g.T, batch_g)  # p_all x p_all
+        cov_block = getattr(module, _COV_LAYER_WISE, None)
+        if cov_block is not None:
+            new_cov_block += cov_block
+        setattr(module, _COV_LAYER_WISE, new_cov_block)
 
 
-def _full_cvp(model, vec):
+def _full_cvp(model, modules, vec):
     """
     g: n x p
     v: p
     c = sum[gg^t]: p x p
     cvp = sum[gg^t]v = sum[g(g^t)v]: p
     """
+    if len(modules) == 0:
+        return
     # compute batched (g^t)v
     batch_all_gvp = None
-    for module, batch_gvp in _module_batch_gvp(model, vec):
+    for module, batch_gvp in _module_batch_gvp(modules, vec):
         if batch_all_gvp is None:
             batch_all_gvp = batch_gvp
         else:
             batch_all_gvp += batch_gvp
 
     # compute cvp = sum[g(g^t)v]
-    cvp = []
-    for module, batch_grads in _module_batch_grads(model):
+    new_cvp = []
+    for module, batch_grads in _module_batch_grads(modules):
         for b_g in batch_grads.values():
-            cvp.append(torch.einsum('n...,n->...', b_g, batch_all_gvp))
+            new_cvp.append(torch.einsum('n...,n->...', b_g, batch_all_gvp))
+    cvp = getattr(model, _CVP_FULL, None)
+    if cvp is not None:
+        new_cvp = [v1 + v2 for v1, v2 in zip(new_cvp, cvp)]
+    setattr(model, _CVP_FULL, new_cvp)
 
-    setattr(model, _CVP_FULL, cvp)
 
-
-def _block_diag_cvp(model, vec):
+def _layer_wise_cvp(modules, vec):
     """
     g: n x p
     v: p
     c = sum[gg^t]: p x p
     cvp = sum[gg^t]v = sum[g(g^t)v]: p
     """
-    batch_gvp_dict = {k: v for k, v in _module_batch_gvp(model, vec)}
-    for module, batch_grads in _module_batch_grads(model):
-        cvp = []
+    if len(modules) == 0:
+        return
+    batch_gvp_dict = {k: v for k, v in _module_batch_gvp(modules, vec)}
+    for module, batch_grads in _module_batch_grads(modules):
+        new_cvp = []
         # compute cvp = sum[g(g^t)v]
         batch_gvp = batch_gvp_dict[module]
         for b_g in batch_grads.values():
-            cvp.append(torch.einsum('n...,n->...', b_g, batch_gvp))
-
-        setattr(module, _CVP_BLOCK_DIAG, cvp)
+            new_cvp.append(torch.einsum('n...,n->...', b_g, batch_gvp))
+        cvp = getattr(module, _CVP_LAYER_WISE, None)
+        if cvp is not None:
+            new_cvp = [v1 + v2 for v1, v2 in zip(new_cvp, cvp)]
+        setattr(module, _CVP_LAYER_WISE, new_cvp)
 
 
 @contextmanager
@@ -361,105 +524,7 @@ def _grads_scale(model, scale):
         operation.grads_scale = None
 
 
-def _register_fisher(model, fisher_type, scale=1.):
-    """
-    module.{fisher_type} = op_results
-    op_results = {
-        'diag': {'weight': torch.Tensor, 'bias': torch.Tensor},
-        'kron': {'A': torch.Tensor, 'B': torch.Tensor},
-        'block_diag': torch.Tensor,
-        'unit_wise': torch.Tensor,
-    }
-    """
-    device = next(model.parameters()).device
-    for module in model.modules():
-        operation = getattr(module, 'operation', None)
-        if operation is None:
-            continue
-        op_results = operation.get_op_results()
-        kron = diag = unit = None
-        if OP_COV_KRON in op_results:
-            rst = op_results[OP_COV_KRON]
-            kron = Kron(rst['A'], rst['B'], device=device)
-        if OP_COV_DIAG in op_results:
-            rst = op_results[OP_COV_DIAG]
-            diag = Diag(
-                rst.get('weight', None), rst.get('bias', None), device=device
-            )
-        if OP_COV_UNIT_WISE in op_results:
-            rst = op_results[OP_COV_UNIT_WISE]
-            unit = UnitWise(rst, device=device)
-        operation.clear_op_results()
-        # move block_diag/kron/diag fisher
-        _accumulate_fisher(
-            module,
-            _COV_BLOCK_DIAG,
-            fisher_type,
-            kron=kron,
-            diag=diag,
-            unit=unit,
-            scale=scale
-        )
-        # move block_diag fvp
-        _accumulate_fvp(module, _CVP_BLOCK_DIAG, fisher_type, scale)
-
-    # move full fisher
-    _accumulate_fisher(module=model, data_src_attr=_COV_FULL, dst_attr=fisher_type, scale=scale)
-    # move full fvp
-    _accumulate_fvp(model, _CVP_FULL, fisher_type, scale)
-
-
-def _accumulate_fisher(
-    module,
-    data_src_attr,
-    dst_attr,
-    kron=None,
-    diag=None,
-    unit=None,
-    scale=1.
-):
-    data = getattr(module, data_src_attr, None)
-    if all(v is None for v in [data, kron, diag, unit]):
-        return
-    device = next(module.parameters()).device
-    new_fisher = SymMatrix(data, kron, diag, unit, device=device)
-    new_fisher.scaling(scale)
-    dst_fisher = getattr(module, dst_attr, None)
-    if dst_fisher is None:
-        setattr(module, dst_attr, new_fisher)
-    else:
-        # accumulate fisher
-        dst_fisher += new_fisher
-        if dst_fisher.has_kron:
-            # not accumulate kron.A
-            dst_fisher.kron.A = new_fisher.kron.A
-        setattr(module, dst_attr, dst_fisher)
-
-    if data is not None:
-        delattr(module, data_src_attr)
-
-
-def _accumulate_fvp(module, src_attr, fisher_type, scale=1.):
-    dst_attr = _get_fvp_attr(fisher_type)
-    cvp = getattr(module, src_attr, None)
-    if cvp is None:
-        return
-    cvp = [v * scale for v in cvp]
-    dst_fvp = getattr(module, dst_attr, None)
-    if dst_fvp is None:
-        setattr(module, dst_attr, cvp)
-    else:
-        dst_fvp = [u.add(v) for u, v in zip(dst_fvp, cvp)]
-        setattr(module, dst_attr, dst_fvp)
-
-    delattr(module, src_attr)
-
-
-def _get_fvp_attr(fisher_type):
-    return f'{fisher_type}_fvp'
-
-
-def fisher(
+def calculate_fisher(
         model,
         loss_type,
         fisher_type,
@@ -472,12 +537,17 @@ def fisher(
         is_distributed=False,
         all_reduce=False,
         is_master=True,
+        accumulate=False,
         data_average=True,
+        calc_emp_loss_grad=False,
+        return_loss=False,
+        seed=None,
+        scale=1.,
         **kwargs
 ):
     assert fisher_type in _supported_types
-    assert loss_type in [_LOSS_CROSS_ENTROPY, _LOSS_MSE]
-    if loss_type == _LOSS_CROSS_ENTROPY:
+    assert loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]
+    if loss_type == LOSS_CROSS_ENTROPY:
         if fisher_type == FISHER_EXACT:
             fisher_cls = FisherExactCrossEntropy
         elif fisher_type == FISHER_MC:
@@ -493,26 +563,33 @@ def fisher(
             fisher_cls = FisherEmpMSE
 
     f = fisher_cls(model, **kwargs)
-    f.calculate_fisher(
-        fisher_shapes,
-        inputs=inputs,
-        targets=targets,
-        data_loader=data_loader,
-        fvp=fvp,
-        vec=vec,
-        data_average=data_average)
+    loss = f.calculate_fisher(
+             fisher_shapes,
+             inputs=inputs,
+             targets=targets,
+             data_loader=data_loader,
+             fvp=fvp,
+             vec=vec,
+             accumulate=accumulate,
+             data_average=data_average,
+             calc_emp_loss_grad=calc_emp_loss_grad,
+             seed=seed,
+             scale=scale)
     if is_distributed:
         if fvp:
             f.reduce_fvp(is_master, all_reduce)
         else:
             f.reduce_fisher(is_master, all_reduce)
-    return f
+    if return_loss:
+        return f, loss
+    else:
+        return f
 
 
-fisher_for_cross_entropy = partial(fisher, loss_type=_LOSS_CROSS_ENTROPY, fvp=False)
-fisher_for_mse = partial(fisher, loss_type=_LOSS_MSE, fvp=False)
-fvp_for_cross_entropy = partial(fisher, loss_type=_LOSS_CROSS_ENTROPY, fvp=True)
-fvp_for_mse = partial(fisher, loss_type=_LOSS_MSE, fvp=True)
+fisher_for_cross_entropy = partial(calculate_fisher, loss_type=LOSS_CROSS_ENTROPY, fvp=False)
+fisher_for_mse = partial(calculate_fisher, loss_type=LOSS_MSE, fvp=False)
+fvp_for_cross_entropy = partial(calculate_fisher, loss_type=LOSS_CROSS_ENTROPY, fvp=True)
+fvp_for_mse = partial(calculate_fisher, loss_type=LOSS_MSE, fvp=True)
 
 
 def fisher_eig(
@@ -532,18 +609,18 @@ def fisher_eig(
 ):
 
     def fvp_fn(vec):
-        f = fisher(model,
-                   loss_type,
-                   fisher_type,
-                   fisher_shape,
-                   inputs=inputs,
-                   targets=targets,
-                   data_loader=data_loader,
-                   fvp=True,
-                   vec=vec,
-                   is_distributed=is_distributed,
-                   all_reduce=True,
-                   **kwargs)
+        f = calculate_fisher(model,
+                             loss_type,
+                             fisher_type,
+                             fisher_shape,
+                             inputs=inputs,
+                             targets=targets,
+                             data_loader=data_loader,
+                             fvp=True,
+                             vec=vec,
+                             is_distributed=is_distributed,
+                             all_reduce=True,
+                             **kwargs)
         return f.load_fvp(fisher_shape)
 
     # for making MC samplings at each iteration deterministic
@@ -562,8 +639,8 @@ def fisher_eig(
     return eigvals, eigvecs
 
 
-fisher_eig_for_cross_entropy = partial(fisher_eig, loss_type=_LOSS_CROSS_ENTROPY)
-fisher_eig_for_mse = partial(fisher_eig, loss_type=_LOSS_MSE)
+fisher_eig_for_cross_entropy = partial(fisher_eig, loss_type=LOSS_CROSS_ENTROPY)
+fisher_eig_for_mse = partial(fisher_eig, loss_type=LOSS_MSE)
 
 
 def fisher_free(
@@ -588,18 +665,18 @@ def fisher_free(
 ):
 
     def fvp_fn(vec):
-        f = fisher(model,
-                   loss_type,
-                   fisher_type,
-                   fisher_shape,
-                   inputs=inputs,
-                   targets=targets,
-                   data_loader=data_loader,
-                   fvp=True,
-                   vec=vec,
-                   is_distributed=is_distributed,
-                   all_reduce=True,
-                   **kwargs)
+        f = calculate_fisher(model,
+                             loss_type,
+                             fisher_type,
+                             fisher_shape,
+                             inputs=inputs,
+                             targets=targets,
+                             data_loader=data_loader,
+                             fvp=True,
+                             vec=vec,
+                             is_distributed=is_distributed,
+                             all_reduce=True,
+                             **kwargs)
         return f.load_fvp(fisher_shape)
 
     # for making MC samplings at each iteration deterministic
@@ -618,41 +695,5 @@ def fisher_free(
                                      save_log=save_log)
 
 
-fisher_free_for_cross_entropy = partial(fisher_free, loss_type=_LOSS_CROSS_ENTROPY)
-fisher_free_for_mse = partial(fisher_free, loss_type=_LOSS_MSE)
-
-
-def woodbury_ifvp(
-        vec,
-        model,
-        inputs,
-        targets,
-        loss_fn,
-        damping=1e-5,
-        data_average=True,
-):
-    """
-    Calculate inverse-empirical Fisher vector product by using the Woodbury matrix identity
-    """
-    assert damping > 0, 'Damping value has to be positive.'
-
-    with extend(model, OP_BATCH_GRADS):
-        model.zero_grad(set_to_none=True)
-        outputs = model(inputs)
-        loss = loss_fn(outputs, targets, reduction='sum')
-        loss.backward()
-
-        batch_g_all = []
-        for _, batch_g in _module_batch_flatten_grads(model):
-            batch_g_all.append(batch_g)
-        grads = torch.cat(batch_g_all, dim=1).T  # (p, n)
-
-    p, n = grads.shape
-    if data_average:
-        grads /= np.sqrt(n)
-    assert vec.shape == (p,)
-    gram = torch.matmul(grads.T, grads)  # (n, n)
-    inv = torch.inverse(gram + torch.eye(n) * damping)  # (n, n)
-    b = torch.matmul(inv, torch.matmul(grads.T, vec))
-
-    return (vec - torch.matmul(grads, b)) / damping  # (p,)
+fisher_free_for_cross_entropy = partial(fisher_free, loss_type=LOSS_CROSS_ENTROPY)
+fisher_free_for_mse = partial(fisher_free, loss_type=LOSS_MSE)

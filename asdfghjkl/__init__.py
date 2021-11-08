@@ -1,6 +1,6 @@
 from .utils import *
 from .operations import *
-from .core import extend
+from .core import extend, supported_modules
 from .symmatrix import *
 from .matrices import *
 from .gradient import *

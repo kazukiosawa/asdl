@@ -4,7 +4,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from asdfghjkl import FISHER_EMP, SHAPE_FULL, SHAPE_BLOCK_DIAG
+from asdfghjkl import FISHER_EMP, SHAPE_FULL, SHAPE_LAYER_WISE
 from asdfghjkl import NaturalGradient, LayerWiseNaturalGradient, woodbury_ifvp
 
 
@@ -83,7 +83,7 @@ class TestIFVP(unittest.TestCase):
 
         def _get_ng_by_precondition(ng_fn):
             precond = ng_fn(model, fisher_type=FISHER_EMP, damping=damping)
-            precond.update_curvature(inputs, targets)
+            precond.accumulate_curvature(inputs, targets)
 
             model.zero_grad()
             loss = F.cross_entropy(model(inputs), targets)
@@ -108,7 +108,7 @@ class TestIFVP(unittest.TestCase):
                     grads.append(p.grad.flatten())
             g = torch.cat(grads)
             return woodbury_ifvp(g, model, inputs, targets, F.cross_entropy,
-                                 fisher_shape=fisher_shape, damping=damping, data_average=False)
+                                 damping=damping, data_average=False)
 
         def _test(ng_fn, fisher_shape):
             ng = _get_ng_by_precondition(ng_fn)
