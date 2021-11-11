@@ -27,9 +27,9 @@ parser.add_argument('--arch_args', type=json.loads, default={},
                     help='[JSON] arguments for the architecture')
 parser.add_argument('--num_blocks', type=int, default=None)
 parser.add_argument('--width_scale', type=int, default=None)
-parser.add_argument('--num_iters', type=int, default=2,
+parser.add_argument('--num_iters', type=int, default=100,
                     help='number of benchmark iterations')
-parser.add_argument('--num_warmups', type=int, default=1,
+parser.add_argument('--num_warmups', type=int, default=5,
                     help='number of warmup iterations')
 parser.add_argument('--config', default=None, nargs='+',
                     help='config YAML file path')
@@ -44,13 +44,16 @@ def time_sgd():
 
     def fwd():
         nonlocal loss
-        loss = cross_entropy(model(x), t)
+        with torch.autograd.profiler.emit_nvtx():
+            loss = cross_entropy(model(x), t)
 
     def bwd():
-        loss.backward()
+        with torch.autograd.profiler.emit_nvtx():
+            loss.backward()
 
     def upd_param():
-        optimizer.step()
+        with torch.autograd.profiler.emit_nvtx():
+            optimizer.step()
 
     profiling.time_funcs([fwd, bwd, upd_param],
                          num_iters=args.num_iters,
@@ -63,13 +66,16 @@ def time_adam():
 
     def fwd():
         nonlocal loss
-        loss = cross_entropy(model(x), t)
+        with torch.autograd.profiler.emit_nvtx():
+            loss = cross_entropy(model(x), t)
 
     def bwd():
-        loss.backward()
+        with torch.autograd.profiler.emit_nvtx():
+            loss.backward()
 
     def upd_param():
-        optimizer.step()
+        with torch.autograd.profiler.emit_nvtx():
+            optimizer.step()
 
     profiling.time_funcs([fwd, bwd, upd_param],
                          num_iters=args.num_iters,
@@ -81,16 +87,20 @@ def time_kfac():
     optimizer = torch.optim.SGD(model.parameters(), lr=1)
 
     def fwd_bwd_upd_curv():
-        ng.refresh_curvature(x, t, calc_emp_loss_grad=True)
+        with torch.autograd.profiler.emit_nvtx():
+            ng.refresh_curvature(x, t, calc_emp_loss_grad=True)
 
     def upd_inv():
-        ng.update_inv()
+        with torch.autograd.profiler.emit_nvtx():
+            ng.update_inv()
 
     def precond():
-        ng.precondition()
+        with torch.autograd.profiler.emit_nvtx():
+            ng.precondition()
 
     def upd_param():
-        optimizer.step()
+        with torch.autograd.profiler.emit_nvtx():
+            optimizer.step()
 
     profiling.time_funcs([fwd_bwd_upd_curv, upd_inv, precond, upd_param],
                          num_iters=args.num_iters,
@@ -101,10 +111,12 @@ def time_smw():
     optimizer = torch.optim.SGD(model.parameters(), lr=1)
 
     def fwd_bwd_precond():
-        empirical_natural_gradient(model, x, t, loss_fn=cross_entropy)
+        with torch.autograd.profiler.emit_nvtx():
+            empirical_natural_gradient(model, x, t, loss_fn=cross_entropy)
 
     def upd_param():
-        optimizer.step()
+        with torch.autograd.profiler.emit_nvtx():
+            optimizer.step()
 
     profiling.time_funcs([fwd_bwd_precond, upd_param],
                          num_iters=args.num_iters,
@@ -119,19 +131,24 @@ def time_lbfgs():
 
     def fwd():
         nonlocal loss
-        loss = cross_entropy(model(x), t)
+        with torch.autograd.profiler.emit_nvtx():
+            loss = cross_entropy(model(x), t)
 
     def bwd():
-        loss.backward()
+        with torch.autograd.profiler.emit_nvtx():
+            loss.backward()
 
     def upd_hist():
-        lbfgs.update_history()
+        with torch.autograd.profiler.emit_nvtx():
+            lbfgs.update_history()
 
     def precond():
-        lbfgs.precondition()
+        with torch.autograd.profiler.emit_nvtx():
+            lbfgs.precondition()
 
     def upd_param():
-        optimizer.step()
+        with torch.autograd.profiler.emit_nvtx():
+            optimizer.step()
 
     fwd()
     bwd()
