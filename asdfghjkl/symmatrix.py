@@ -76,11 +76,21 @@ def _load_from_numpy(path, device='cpu'):
 
 
 class SymMatrix:
-    def __init__(self, data=None, kron=None, diag=None, unit=None):
+    def __init__(self, data=None, kron=None, diag=None, unit=None,
+                 kron_A=None, kron_B=None, diag_weight=None, diag_bias=None, unit_data=None):
         self.data = data
-        self.kron = kron
-        self.diag = diag
-        self.unit = unit
+        if kron_A is not None or kron_B is not None:
+            self.kron = Kron(kron_A, kron_B)
+        else:
+            self.kron = kron
+        if diag_weight is not None or diag_bias is not None:
+            self.diag = Diag(diag_weight, diag_bias)
+        else:
+            self.diag = diag
+        if unit_data is not None:
+            self.unit = UnitWise(unit_data)
+        else:
+            self.unit = unit
         self.inv = None
 
     @property
@@ -101,7 +111,7 @@ class SymMatrix:
 
     def __add__(self, other):
         # NOTE: inv will not be preserved
-        values = []
+        values = {}
         for attr in ['data', 'kron', 'diag', 'unit']:
             self_value = getattr(self, attr)
             other_value = getattr(other, attr)
@@ -112,9 +122,9 @@ class SymMatrix:
                     value = other_value
             else:
                 value = self_value
-            values.append(value)
+            values[attr] = value
 
-        return SymMatrix(*values)
+        return SymMatrix(**values)
 
     def __iadd__(self, other):
         for attr in ['data', 'kron', 'diag', 'unit']:

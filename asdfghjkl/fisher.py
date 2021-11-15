@@ -1,28 +1,15 @@
-from contextlib import contextmanager
 from functools import partial
 import numpy as np
 
 import torch
 import torch.nn.functional as F
-from .core import extend, modules_to_assign
+from .core import no_centered_cov
 from .utils import skip_param_grad
-from .operations import *
-from .symmatrix import SymMatrix, Kron, Diag, UnitWise
 from .matrices import *
 from .mvp import power_method, conjugate_gradient_method, reduce_params
 
-_SHAPE_TO_OP = {
-    SHAPE_FULL: OP_BATCH_GRADS,  # full
-    SHAPE_LAYER_WISE: OP_BATCH_GRADS,  # layer-wise block-diagonal
-    SHAPE_KRON: OP_COV_KRON,  # Kronecker-factored
-    SHAPE_UNIT_WISE: OP_COV_UNIT_WISE,  # unit-wise block-diagonal
-    SHAPE_DIAG: OP_COV_DIAG,  # diagonal
-}
-
 _COV_FULL = 'cov_full'
 _CVP_FULL = 'cvp_full'
-_COV_LAYER_WISE = 'cov_layer_wise'
-_CVP_LAYER_WISE = 'cvp_layer_wise'
 
 LOSS_CROSS_ENTROPY = 'cross_entropy'
 LOSS_MSE = 'mse'
@@ -100,9 +87,6 @@ class _FisherBase(MatrixManager):
         if isinstance(fisher_shapes, str):
             fisher_shapes = [fisher_shapes]
 
-        def modules_for(shape):
-            return modules_to_assign(model, shape, *fisher_shapes)
-
         if not accumulate:
             # set Fisher/FVP zero
             if fvp:
@@ -115,31 +99,36 @@ class _FisherBase(MatrixManager):
         calc_emp_loss_grad_after_fisher = calc_emp_loss_grad and not self.is_fisher_emp
 
         def fisher_for_one_batch(x, t=None):
-
-            def closure(loss_expr):
-                self._zero_op_batch_grads(set_to_none=True)
-                loss = loss_expr()
-                with skip_param_grad(model, disable=calc_emp_loss_grad_with_fisher):
-                    loss.backward(retain_graph=True)
-                if fvp:
-                    _full_cvp(model, modules_for(SHAPE_FULL), vec)
-                    _layer_wise_cvp(modules_for(SHAPE_LAYER_WISE), vec)
-                else:
-                    _full_covariance(model, modules_for(SHAPE_FULL))
-                    _layer_wise_covariance(modules_for(SHAPE_LAYER_WISE))
-                if not calc_emp_loss_grad_after_fisher:
-                    nonlocal total_loss
-                    total_loss += loss.item()
-
             x = x.to(device)
             if t is not None:
                 t = t.to(device)
             if seed:
                 torch.random.manual_seed(seed)
-            with extend(model, *fisher_shapes, map_rule=lambda s: _SHAPE_TO_OP[s]):
+
+            with no_centered_cov(model, fisher_shapes) as cxt:
+                def closure(loss_expr):
+                    cxt.clear_batch_grads()
+                    loss = loss_expr()
+                    with skip_param_grad(model, disable=calc_emp_loss_grad_with_fisher):
+                        loss.backward(retain_graph=True)
+                    if fvp:
+                        cxt.calc_full_cvp(model, vec)
+                    else:
+                        cxt.calc_full_cov(model)
+                    if not calc_emp_loss_grad_after_fisher:
+                        nonlocal total_loss
+                        total_loss += loss.item()
+
                 y = model(x)
                 self._fisher_core(closure, y, t)
-                self._register_fisher(scale)
+                for module in model.modules():
+                    # accumulate layer-wise fisher/fvp
+                    self._accumulate_fisher(module, cxt.cov_symmatrix(module), scale)
+                    self._accumulate_fvp(module, cxt.cvp_paramvector(module), scale)
+                # accumulate full fisher/fvp
+                self._accumulate_fisher(model, cxt.full_cov_symmatrix(model), scale)
+                self._accumulate_fvp(model, cxt.full_cvp_paramvector(model), scale)
+
             if calc_emp_loss_grad_after_fisher:
                 assert t is not None
                 emp_loss = self.loss_fn(y, t)
@@ -174,101 +163,31 @@ class _FisherBase(MatrixManager):
             total_loss /= data_size
         return total_loss
 
-    def _zero_op_batch_grads(self, set_to_none=False):
-        for module in self._model.modules():
-            operation = getattr(module, 'operation', None)
-            if operation is None:
-                continue
-            op_results = operation.get_op_results()
-            if op_results.get(OP_BATCH_GRADS, None):
-                if set_to_none:
-                    op_results.pop(OP_BATCH_GRADS, None)
-                else:
-                    op_results[OP_BATCH_GRADS] *= 0
-
     def _fisher_core(self, closure, outputs, targets):
         raise NotImplementedError
 
-    def _register_fisher(self, scale=1.):
-        """
-        module.operation.get_op_results():
-        {
-            'diag': {'weight': torch.Tensor, 'bias': torch.Tensor},
-            'kron': {'A': torch.Tensor, 'B': torch.Tensor},
-            'unit_wise': torch.Tensor,
-        }
-        """
-        model = self._model
-        for module in model.modules():
-            operation = getattr(module, 'operation', None)
-            if operation is None:
-                continue
-            op_results = operation.get_op_results()
-            kron = diag = unit = None
-            if OP_COV_KRON in op_results:
-                rst = op_results[OP_COV_KRON]
-                kron = Kron(rst['A'], rst['B'])
-            if OP_COV_DIAG in op_results:
-                rst = op_results[OP_COV_DIAG]
-                diag = Diag(rst.get('weight', None), rst.get('bias', None))
-            if OP_COV_UNIT_WISE in op_results:
-                rst = op_results[OP_COV_UNIT_WISE]
-                unit = UnitWise(rst)
-            operation.clear_op_results()
-            # move layer-wise/kron/diag fisher
-            self._accumulate_fisher(
-                module,
-                _COV_LAYER_WISE,
-                kron=kron,
-                diag=diag,
-                unit=unit,
-                scale=scale
-            )
-            # move layer-wise fvp
-            self._accumulate_fvp(module, _CVP_LAYER_WISE, scale)
-
-        # move full fisher
-        self._accumulate_fisher(model, _COV_FULL, scale=scale)
-        # move full fvp
-        self._accumulate_fvp(model, _CVP_FULL, scale)
-
-    def _accumulate_fisher(
-            self,
-            module,
-            data_src_attr,
-            kron=None,
-            diag=None,
-            unit=None,
-            scale=1.
-    ):
-        dst_attr = self.fisher_attr
-        data = getattr(module, data_src_attr, None)
-        if all(v is None for v in [data, kron, diag, unit]):
+    def _accumulate_fisher(self, module, new_fisher, scale=1.):
+        if new_fisher is None:
             return
-        new_fisher = SymMatrix(data, kron, diag, unit).scaling(scale)
+        new_fisher.scaling(scale)
+        dst_attr = self.fisher_attr
         dst_fisher = getattr(module, dst_attr, None)
         if dst_fisher is None:
             setattr(module, dst_attr, new_fisher)
         else:
             # this must be __iadd__ to preserve inv
             dst_fisher += new_fisher
-        if data is not None:
-            delattr(module, data_src_attr)
 
-    def _accumulate_fvp(self, module, src_attr, scale=1.):
-        dst_attr = self.fvp_attr
-        cvp = getattr(module, src_attr, None)
-        if cvp is None:
+    def _accumulate_fvp(self, module, new_fvp, scale=1.):
+        if new_fvp is None:
             return
-        cvp = [v * scale for v in cvp]
+        new_fvp.scale(scale)
+        dst_attr = self.fvp_attr
         dst_fvp = getattr(module, dst_attr, None)
         if dst_fvp is None:
-            setattr(module, dst_attr, cvp)
+            setattr(module, dst_attr, new_fvp)
         else:
-            dst_fvp = [u.add(v) for u, v in zip(dst_fvp, cvp)]
-            setattr(module, dst_attr, dst_fvp)
-
-        delattr(module, src_attr)
+            dst_fvp += new_fvp
 
     def reduce_fisher(self, is_master=True, all_reduce=False):
         self.reduce_matrices(is_master=is_master, all_reduce=all_reduce)
@@ -394,105 +313,6 @@ class FisherEmpMSE(_FisherMSE):
 
     def _fisher_core(self, closure, outputs, targets):
         closure(lambda: 0.5 * (outputs - targets).norm(dim=1).sum())
-
-
-def _module_batch_grads(modules):
-    for module in modules:
-        operation = getattr(module, 'operation', None)
-        if operation is None:
-            continue
-        op_results = operation.get_op_results()
-        batch_grads = op_results.get(OP_BATCH_GRADS, None)
-        if batch_grads is None:
-            continue
-        yield module, batch_grads
-
-
-def _module_batch_flatten_grads(modules):
-    for module, batch_grads in _module_batch_grads(modules):
-        batch_flatten_grads = torch.cat(
-            [g.flatten(start_dim=1) for g in batch_grads.values()],
-            dim=1
-        )
-        yield module, batch_flatten_grads
-
-
-def _module_batch_gvp(modules, vec):
-    pointer = 0
-    for module, batch_grads in _module_batch_grads(modules):
-        batch_gvp = None
-        for b_g in batch_grads.values():
-            v = vec[pointer]
-            b_gvp = b_g.mul(v.unsqueeze(0)).flatten(start_dim=1).sum(1)  # n
-            if batch_gvp is None:
-                batch_gvp = b_gvp
-            else:
-                batch_gvp += b_gvp
-            pointer += 1
-        yield module, batch_gvp
-    assert pointer == len(vec)
-
-
-def _full_covariance(model, modules):
-    batch_all_g = [g for _, g in _module_batch_flatten_grads(modules)]
-    if len(batch_all_g) == 0:
-        return
-    batch_all_g = torch.cat(batch_all_g, dim=1)  # n x p_all
-    new_cov_full = torch.matmul(batch_all_g.T, batch_all_g)  # p_all x p_all
-    cov_full = getattr(model, _COV_FULL, None)
-    if cov_full is not None:
-        new_cov_full += cov_full
-    setattr(model, _COV_FULL, new_cov_full)
-
-
-def _full_cvp(model, modules, vec):
-    """
-    g: n x p
-    v: p
-    c = sum[gg^t]: p x p
-    cvp = sum[gg^t]v = sum[g(g^t)v]: p
-    """
-    if len(modules) == 0:
-        return
-    # compute batched (g^t)v
-    batch_all_gvp = None
-    for module, batch_gvp in _module_batch_gvp(modules, vec):
-        if batch_all_gvp is None:
-            batch_all_gvp = batch_gvp
-        else:
-            batch_all_gvp += batch_gvp
-
-    # compute cvp = sum[g(g^t)v]
-    new_cvp = []
-    for module, batch_grads in _module_batch_grads(modules):
-        for b_g in batch_grads.values():
-            new_cvp.append(torch.einsum('n...,n->...', b_g, batch_all_gvp))
-    cvp = getattr(model, _CVP_FULL, None)
-    if cvp is not None:
-        new_cvp = [v1 + v2 for v1, v2 in zip(new_cvp, cvp)]
-    setattr(model, _CVP_FULL, new_cvp)
-
-
-def _layer_wise_cvp(modules, vec):
-    """
-    g: n x p
-    v: p
-    c = sum[gg^t]: p x p
-    cvp = sum[gg^t]v = sum[g(g^t)v]: p
-    """
-    if len(modules) == 0:
-        return
-    batch_gvp_dict = {k: v for k, v in _module_batch_gvp(modules, vec)}
-    for module, batch_grads in _module_batch_grads(modules):
-        new_cvp = []
-        # compute cvp = sum[g(g^t)v]
-        batch_gvp = batch_gvp_dict[module]
-        for b_g in batch_grads.values():
-            new_cvp.append(torch.einsum('n...,n->...', b_g, batch_gvp))
-        cvp = getattr(module, _CVP_LAYER_WISE, None)
-        if cvp is not None:
-            new_cvp = [v1 + v2 for v1, v2 in zip(new_cvp, cvp)]
-        setattr(module, _CVP_LAYER_WISE, new_cvp)
 
 
 def calculate_fisher(

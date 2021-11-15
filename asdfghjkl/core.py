@@ -1,10 +1,9 @@
-from typing import List
 from contextlib import contextmanager
 
 import torch.nn as nn
 from .utils import im2col_2d, record_original_requires_grad
-from .operations import get_op_class
-from .operations import Bias, Scale
+from .operations import *
+from .matrices import *
 
 _supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d, Bias, Scale)
 
@@ -12,17 +11,18 @@ _supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2
 @contextmanager
 def extend(model, *op_names, map_rule=None):
     handles = []
+    manager = OperationManager()
 
     try:
         def forward_hook(module, in_data, out_data):
             in_data = in_data[0].clone().detach()
             in_data = _preprocess_in_data(module, in_data, out_data)
-            _call_operations_in_forward(module, in_data)
+            manager.call_operations_in_forward(module, in_data)
 
             def backward_hook(out_grads):
                 out_grads = out_grads.clone().detach()
                 out_grads = _preprocess_out_grads(module, out_grads)
-                _call_operations_in_backward(module, in_data, out_grads)
+                manager.call_operations_in_backward(module, in_data, out_grads)
 
             if out_data.requires_grad:
                 handles.append(out_data.register_hook(backward_hook))
@@ -31,18 +31,33 @@ def extend(model, *op_names, map_rule=None):
             if len(op_names) == 0:
                 # no operation is assigned
                 continue
+            op_class = get_op_class(module)
+            if op_class is None:
+                continue
             # register hooks and operations in modules
             handles.append(module.register_forward_hook(forward_hook))
-            _register_operations(model, module, op_names)
+            manager.register_operation(module, op_class(module, op_names))
+        manager.register_operation(model, Operation(model, []))
 
-        yield
+        yield manager
 
     finally:
         # remove hooks and operations from modules
         for handle in handles:
             handle.remove()
-        for module in _modules_with_operations(model):
-            _remove_operations(module)
+        manager.clear_operations()
+        del manager
+
+
+def no_centered_cov(model: nn.Module, shapes):
+    shape_to_op = {
+        SHAPE_FULL: OP_BATCH_GRADS,  # full
+        SHAPE_LAYER_WISE: OP_COV,  # layer-wise block-diagonal
+        SHAPE_KRON: OP_COV_KRON,  # Kronecker-factored
+        SHAPE_UNIT_WISE: OP_COV_UNIT_WISE,  # unit-wise block-diagonal
+        SHAPE_DIAG: OP_COV_DIAG,  # diagonal
+    }
+    return extend(model, *shapes, map_rule=lambda s: shape_to_op[s])
 
 
 def supported_modules(model):
@@ -209,32 +224,3 @@ def _preprocess_out_grads(module, out_grads):
         out_grads = out_grads.flatten(start_dim=2)
 
     return out_grads
-
-
-def _register_operations(model: nn.Module, module: nn.Module, op_names: List):
-    op_class = get_op_class(module)
-    if op_class is not None:
-        setattr(module, 'operation', op_class(module, op_names, model))
-
-
-def _call_operations_in_forward(module, in_data):
-    if hasattr(module, 'operation'):
-        module.operation.forward_post_process(in_data)
-
-
-def _call_operations_in_backward(module, in_data, out_grads):
-    if hasattr(module, 'operation'):
-        module.operation.backward_pre_process(in_data, out_grads)
-
-
-def _remove_operations(module):
-    if hasattr(module, 'operation'):
-        delattr(module, 'operation')
-
-
-def _modules_with_operations(model):
-    for module in supported_modules(model):
-        if hasattr(module, 'operation'):
-            yield module
-
-

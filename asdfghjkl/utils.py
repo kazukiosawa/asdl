@@ -18,8 +18,10 @@ __all__ = [
 ]
 
 
-def original_requires_grad(module, param_name):
-    param = getattr(module, param_name, None)
+def original_requires_grad(module=None, param_name=None, param=None):
+    if param is None:
+        assert module is not None and param_name is not None
+        param = getattr(module, param_name, None)
     return param is not None and getattr(param, _REQUIRES_GRAD_ATTR)
 
 
