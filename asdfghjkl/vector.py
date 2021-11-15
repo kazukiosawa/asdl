@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import List, Dict
 
 import torch
 import torch.nn as nn
@@ -6,7 +6,7 @@ import torch.nn as nn
 
 class ParamVector:
     def __init__(self, params, vectors):
-        self.params = params
+        self.params: List[torch.Tensor] = params
         self.vectors: Dict[torch.Tensor, torch.Tensor] = {}
 
         if isinstance(vectors, torch.Tensor):
@@ -45,8 +45,9 @@ class ParamVector:
         return self
 
     def get_vectors_by_module(self, module: nn.Module):
-        vectors = {p: self.vectors.get(p, None) for p in module.parameters()}
-        return ParamVector(module, vectors)
+        params = [p for p in module.parameters()]
+        vectors = {p: self.vectors.get(p, None) for p in params}
+        return ParamVector(params, vectors)
 
     def get_flatten_vector(self):
         flat_vecs = [v.flatten() for v in self.vectors.values()]
