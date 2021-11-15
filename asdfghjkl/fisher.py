@@ -210,11 +210,14 @@ class _FisherBase(MatrixManager):
         if fisher_shape == SHAPE_FULL:
             return getattr(self._model, self.fvp_attr, None)
         else:
-            rst = []
+            rst = None
             for module in self._model.modules():
                 v = getattr(module, self.fvp_attr, None)
                 if v is not None:
-                    rst.extend(v)
+                    if rst is None:
+                        rst = v
+                    else:
+                        rst.extend(v)
             return rst
 
 

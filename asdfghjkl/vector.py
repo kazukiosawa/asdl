@@ -35,6 +35,10 @@ class ParamVector:
         for p in self.params:
             self.vectors[p] += other.vectors[p]
 
+    def extend(self, other):
+        self.params.extend(other.params)
+        self.vectors.update(other.vectors)
+
     def scaling(self, scale):
         for key in self.vectors:
             self.vectors[key].mul_(scale)
