@@ -50,10 +50,10 @@ def extend(model, *op_names, map_rule=None):
         del manager
 
 
-def no_centered_cov(model: nn.Module, shapes):
+def no_centered_cov(model: nn.Module, shapes, cvp=False):
     shape_to_op = {
         SHAPE_FULL: OP_BATCH_GRADS,  # full
-        SHAPE_LAYER_WISE: OP_COV,  # layer-wise block-diagonal
+        SHAPE_LAYER_WISE: OP_CVP if cvp else OP_COV,  # layer-wise block-diagonal
         SHAPE_KRON: OP_COV_KRON,  # Kronecker-factored
         SHAPE_UNIT_WISE: OP_COV_UNIT_WISE,  # unit-wise block-diagonal
         SHAPE_DIAG: OP_COV_DIAG,  # diagonal

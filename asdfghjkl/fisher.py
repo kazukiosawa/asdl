@@ -105,7 +105,7 @@ class _FisherBase(MatrixManager):
             if seed:
                 torch.random.manual_seed(seed)
 
-            with no_centered_cov(model, fisher_shapes) as cxt:
+            with no_centered_cov(model, fisher_shapes, cvp=fvp) as cxt:
                 def closure(loss_expr):
                     cxt.clear_batch_grads()
                     loss = loss_expr()
