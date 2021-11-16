@@ -29,8 +29,8 @@ class ParamVector:
             for p in params:
                 assert p.shape == vectors[p].shape
             self.vectors = vectors
-
-        raise TypeError(f'Invalid vectors type: {type(vectors)}')
+        else:
+            raise TypeError(f'Invalid vectors type: {type(vectors)}')
 
     def values(self):
         return self.vectors.values()
