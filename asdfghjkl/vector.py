@@ -2,10 +2,13 @@ from typing import List, Dict
 
 import torch
 import torch.nn as nn
+import torch.distributed as dist
+
+__all__ = ['ParamVector', 'reduce_vectors', 'normalization', 'orthnormal']
 
 
 class ParamVector:
-    def __init__(self, params, vectors):
+    def __init__(self, params: List[torch.Tensor], vectors):
         self.params: List[torch.Tensor] = params
         self.vectors: Dict[torch.Tensor, torch.Tensor] = {}
 
@@ -34,6 +37,14 @@ class ParamVector:
         vectors = {}
         for p in self.params:
             vectors[p] = self.vectors[p] + other.vectors[p]
+        return ParamVector(self.params, vectors)
+
+    def add(self, other, alpha=1):
+        assert self.params == other.params
+        vectors = {}
+        for p in self.params:
+            vectors[p] = self.vectors[p].add(other.vectors[p], alpha=alpha)
+        return ParamVector(self.params, vectors)
 
     def __iadd__(self, other):
         assert self.params == other.params
@@ -44,10 +55,20 @@ class ParamVector:
         self.params.extend(other.params)
         self.vectors.update(other.vectors)
 
-    def scaling(self, scale):
+    def mul(self, value):
+        return ParamVector(self.params, [v.mul(value) for v in self.vectors.values()])
+
+    def mul_(self, value):
         for key in self.vectors:
-            self.vectors[key].mul_(scale)
+            self.vectors[key].mul_(value)
         return self
+
+    def dot(self, other):
+        assert self.params == other.params
+        return torch.dot(self.get_flatten_vector(), other.get_flatten_vector())
+
+    def norm(self):
+        return torch.norm(self.get_flatten_vector())
 
     def get_vectors_by_module(self, module: nn.Module):
         params = [p for p in module.parameters()]
@@ -60,3 +81,36 @@ class ParamVector:
     def get_flatten_vector(self):
         flat_vecs = [v.flatten() for v in self.vectors.values()]
         return torch.cat(flat_vecs)
+
+
+def reduce_vectors(vectors: ParamVector, is_master=True, all_reduce=False) -> ParamVector:
+    # pack
+    packed_tensor = vectors.get_flatten_vector()
+    if all_reduce:
+        # all-reduce
+        dist.all_reduce(packed_tensor)
+    else:
+        dist.reduce(packed_tensor, dst=0)
+    if all_reduce or is_master:
+        # unpack
+        rst = ParamVector(vectors.params, packed_tensor)
+    else:
+        rst = None
+
+    dist.barrier()
+
+    return rst
+
+
+def normalization(v: ParamVector) -> ParamVector:
+    s = v.dot(v)
+    s = s**0.5
+    s = s.cpu().item()
+    v.mul_(1 / (s + 1e-6))
+    return v
+
+
+def orthnormal(w: ParamVector, v_list: List[ParamVector]) -> ParamVector:
+    for v in v_list:
+        w = w.add(v, alpha=-w.dot(v))
+    return normalization(w)
