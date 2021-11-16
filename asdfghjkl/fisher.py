@@ -105,14 +105,14 @@ class _FisherBase(MatrixManager):
             if seed:
                 torch.random.manual_seed(seed)
 
-            with no_centered_cov(model, fisher_shapes, cvp=fvp) as cxt:
+            with no_centered_cov(model, fisher_shapes, cvp=fvp, vectors=vec) as cxt:
                 def closure(loss_expr):
                     cxt.clear_batch_grads()
                     loss = loss_expr()
                     with skip_param_grad(model, disable=calc_emp_loss_grad_with_fisher):
                         loss.backward(retain_graph=True)
                     if fvp:
-                        cxt.calc_full_cvp(model, vec)
+                        cxt.calc_full_cvp(model)
                     else:
                         cxt.calc_full_cov(model)
                     if not calc_emp_loss_grad_after_fisher:

@@ -4,14 +4,15 @@ import torch.nn as nn
 from .utils import im2col_2d, record_original_requires_grad
 from .operations import *
 from .matrices import *
+from .vector import ParamVector
 
 _supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d, Bias, Scale)
 
 
 @contextmanager
-def extend(model, *op_names, map_rule=None):
+def extend(model, *op_names, map_rule=None, vectors: ParamVector = None):
     handles = []
-    manager = OperationManager()
+    manager = OperationManager(vectors=vectors)
 
     try:
         def forward_hook(module, in_data, out_data):
@@ -50,7 +51,7 @@ def extend(model, *op_names, map_rule=None):
         del manager
 
 
-def no_centered_cov(model: nn.Module, shapes, cvp=False):
+def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = None):
     shape_to_op = {
         SHAPE_FULL: OP_BATCH_GRADS,  # full
         SHAPE_LAYER_WISE: OP_CVP if cvp else OP_COV,  # layer-wise block-diagonal
@@ -58,7 +59,7 @@ def no_centered_cov(model: nn.Module, shapes, cvp=False):
         SHAPE_UNIT_WISE: OP_COV_UNIT_WISE,  # unit-wise block-diagonal
         SHAPE_DIAG: OP_COV_DIAG,  # diagonal
     }
-    return extend(model, *shapes, map_rule=lambda s: shape_to_op[s])
+    return extend(model, *shapes, map_rule=lambda s: shape_to_op[s], vectors=vectors)
 
 
 def supported_modules(model):

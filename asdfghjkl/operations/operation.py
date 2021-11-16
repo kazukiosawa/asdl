@@ -223,15 +223,20 @@ class Operation:
 
 
 class OperationManager:
-    def __init__(self):
+    def __init__(self, vectors: ParamVector = None):
         self._operations: Dict[nn.Module, Operation] = {}
-        self._vectors: Dict[nn.Module, torch.Tensor] = {}
+        self._vectors: ParamVector = vectors
 
     def register_operation(self, module: nn.Module, operation: Operation):
         self._operations[module] = operation
 
-    def register_vector(self, module: nn.Module, vector: torch.Tensor):
-        self._vectors[module] = vector
+    def get_vectors_by_module(self, module: nn.Module, flatten=False):
+        if self._vectors is None:
+            return None
+        vectors = self._vectors.get_vectors_by_module(module)
+        if flatten:
+            return vectors.get_flatten_vector()
+        return vectors
 
     def get_operation(self, module: nn.Module) -> Operation:
         try:
@@ -253,8 +258,8 @@ class OperationManager:
         self.get_operation(module).forward_post_process(in_data)
 
     def call_operations_in_backward(self, module, in_data, out_grads):
-        vectors = self._vectors.get(module, None)
-        self.get_operation(module).backward_pre_process(in_data, out_grads, vectors)
+        vector = self.get_vectors_by_module(module, flatten=True)
+        self.get_operation(module).backward_pre_process(in_data, out_grads, vector)
 
     def get_result(self, module, *keys):
         return self.get_operation(module).get_result(*keys)
@@ -301,17 +306,17 @@ class OperationManager:
     def full_cvp(self, module):
         return self.get_result(module, OP_FULL_CVP)
 
-    def calc_full_cvp(self, module, vector: torch.Tensor):
+    def calc_full_cvp(self, module):
         """
         g: (p,)
         c = sum[gg^t]: (p, p)
         v: (p,)
         cvp = sum[gg^t]v = sum[g(g^t)v]: (p,)
         """
+        vector = self.get_vectors_by_module(module, flatten=True)
         bg = self.full_batch_grads(module)
         if bg is None:
             return
-        assert vector.ndim == 1
         assert bg.shape[1] == vector.shape[0]
         bgtv = bg.mul(vector.unsqueeze(0)).sum(dim=1)
         cvp = torch.einsum('ni,n->i', bg, bgtv)
