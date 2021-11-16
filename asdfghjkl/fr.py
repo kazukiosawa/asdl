@@ -11,7 +11,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from .precondition import KFAC, DiagNaturalGradient
 from .fisher import FISHER_EXACT, FISHER_MC
 from .kernel import batch, empirical_implicit_ntk, empirical_class_wise_direct_ntk, get_preconditioned_kernel_fn
-from .utils import add_value_to_diagonal, nvtx_range
+from .utils import add_value_to_diagonal
 
 
 __all__ = [
