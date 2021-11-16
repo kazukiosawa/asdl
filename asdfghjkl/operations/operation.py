@@ -354,7 +354,7 @@ class OperationManager:
         cov_unit_wise = self.cov_unit_wise(module)
         cov_diag = self.cov_diag(module)
         diag_weight = None if cov_diag is None else cov_diag['weight']
-        diag_bias = None if cov_diag is None else cov_diag['bias']
+        diag_bias = None if cov_diag is None else cov_diag.get('bias', None)
         if all(v is None for v in [cov, cov_kron, cov_unit_wise, cov_diag]):
             return None
         return SymMatrix(data=cov,
