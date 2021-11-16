@@ -65,7 +65,7 @@ class _FisherBase(MatrixManager):
         for module in self._model.modules():
             f = getattr(module, attr, None)
             if f is not None:
-                f.scaling(0)
+                f.mul_(0)
 
     def zero_fvp(self):
         attr = self.fvp_attr
