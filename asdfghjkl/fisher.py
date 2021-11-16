@@ -169,7 +169,7 @@ class _FisherBase(MatrixManager):
     def _accumulate_fisher(self, module, new_fisher, scale=1.):
         if new_fisher is None:
             return
-        new_fisher.scaling(scale)
+        new_fisher.mul_(scale)
         dst_attr = self.fisher_attr
         dst_fisher = getattr(module, dst_attr, None)
         if dst_fisher is None:

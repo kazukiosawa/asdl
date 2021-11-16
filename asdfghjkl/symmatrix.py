@@ -137,15 +137,15 @@ class SymMatrix:
                     setattr(self, attr, other_value)
         return self
 
-    def scaling(self, scale):
+    def mul_(self, value):
         if self.has_data:
-            self.data.mul_(scale)
+            self.data.mul_(value)
         if self.has_kron:
-            self.kron.scaling(scale)
+            self.kron.mul_(value)
         if self.has_diag:
-            self.diag.scaling(scale)
+            self.diag.mul_(value)
         if self.has_unit:
-            self.unit.scaling(scale)
+            self.unit.mul_(value)
         return self
 
     def eigenvalues(self):
@@ -338,9 +338,9 @@ class Kron:
             self._B_dim = self.B.shape[0]
         return self._B_dim
 
-    def scaling(self, scale):
-        self.A.mul_(scale)
-        self.B.mul_(scale)
+    def mul_(self, value):
+        self.A.mul_(value)
+        self.B.mul_(value)
         return self
 
     def eigenvalues(self):
@@ -469,11 +469,11 @@ class Diag:
     def has_bias(self):
         return self.bias is not None
 
-    def scaling(self, scale):
+    def mul_(self, value):
         if self.has_weight:
-            self.weight.mul_(scale)
+            self.weight.mul_(value)
         if self.has_bias:
-            self.bias.mul_(scale)
+            self.bias.mul_(value)
         return self
 
     def eigenvalues(self):
@@ -577,9 +577,9 @@ class UnitWise:
     def has_data(self):
         return self.data is not None
 
-    def scaling(self, scale):
+    def mul_(self, value):
         if self.has_data:
-            self.data.mul_(scale)
+            self.data.mul_(value)
         return self
 
     def eigenvalues(self):
