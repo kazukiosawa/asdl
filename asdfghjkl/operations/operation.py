@@ -347,20 +347,19 @@ class OperationManager:
         return self.get_result(module, OP_COV_DIAG)
 
     def cov_symmatrix(self, module):
-        cov = self.cov(module)
+        kwargs = dict(data=self.cov(module), unit_data=self.cov_unit_wise(module))
         cov_kron = self.cov_kron(module)
-        kron_A = None if cov_kron is None else cov_kron['A']
-        kron_B = None if cov_kron is None else cov_kron['B']
-        cov_unit_wise = self.cov_unit_wise(module)
+        if cov_kron is not None:
+            kwargs['kron_A'] = cov_kron['A']
+            kwargs['kron_B'] = cov_kron['B']
         cov_diag = self.cov_diag(module)
-        diag_weight = None if cov_diag is None else cov_diag['weight']
-        diag_bias = None if cov_diag is None else cov_diag.get('bias', None)
-        if all(v is None for v in [cov, cov_kron, cov_unit_wise, cov_diag]):
+        if cov_diag is not None:
+            kwargs['diag_weight'] = cov_diag['weight']
+            if original_requires_grad(module, 'bias'):
+                kwargs['diag_bias'] = cov_diag['bias']
+        if all(v is None for v in kwargs.values()):
             return None
-        return SymMatrix(data=cov,
-                         kron_A=kron_A, kron_B=kron_B,
-                         diag_weight=diag_weight, diag_bias=diag_bias,
-                         unit_data=cov_unit_wise)
+        return SymMatrix(**kwargs)
 
     def full_cov_symmatrix(self, module):
         cov = self.full_cov(module)
@@ -372,8 +371,12 @@ class OperationManager:
         cvp = self.cvp(module)
         if cvp is None:
             return None
-        params = [p for p in module.parameters() if original_requires_grad(param=p)]
-        return ParamVector(params, cvp)
+        params = [module.weight]
+        vectors = [cvp['weight']]
+        if original_requires_grad(module, 'bias'):
+            params.append(module.bias)
+            vectors.append(cvp['bias'])
+        return ParamVector(params, vectors)
 
     def full_cvp_paramvector(self, module):
         cvp = self.full_cvp(module)
