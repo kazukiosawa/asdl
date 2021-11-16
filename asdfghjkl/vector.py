@@ -36,23 +36,16 @@ class ParamVector:
         return self.vectors.values()
 
     def __add__(self, other):
-        assert self.params == other.params
-        vectors = {}
-        for p in self.params:
-            vectors[p] = self.vectors[p] + other.vectors[p]
+        vectors = [v1 + v2 for v1, v2 in zip(self.values(), other.values())]
         return ParamVector(self.params, vectors)
 
     def add(self, other, alpha=1):
-        assert self.params == other.params
-        vectors = {}
-        for p in self.params:
-            vectors[p] = self.vectors[p].add(other.vectors[p], alpha=alpha)
+        vectors = [v1.add(v2, alpha=alpha) for v1, v2 in zip(self.values(), other.values())]
         return ParamVector(self.params, vectors)
 
     def __iadd__(self, other):
-        assert self.params == other.params
-        for p in self.params:
-            self.vectors[p] += other.vectors[p]
+        for v1, v2 in zip(self.values(), other.values()):
+            v1 += v2
 
     def extend(self, other):
         self.params.extend(other.params)
