@@ -94,7 +94,7 @@ class NaturalGradient:
                     matrix.mul_(scale)
         fisher = self._get_full_fisher()
         if fisher is not None:
-            fisher.scaling(scale)
+            fisher.mul_(scale)
 
     def _update_curvature(self,
                           inputs=None,
