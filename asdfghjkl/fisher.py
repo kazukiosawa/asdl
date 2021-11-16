@@ -406,9 +406,9 @@ def fisher_eig(
 
     def fvp_fn(vec: ParamVector) -> ParamVector:
         f = calculate_fisher(model,
-                             loss_type,
                              fisher_type,
                              fisher_shape,
+                             loss_type,
                              inputs=inputs,
                              targets=targets,
                              data_loader=data_loader,
@@ -462,9 +462,9 @@ def fisher_free(
 
     def fvp_fn(vec: ParamVector) -> ParamVector:
         f = calculate_fisher(model,
-                             loss_type,
                              fisher_type,
                              fisher_shape,
+                             loss_type,
                              inputs=inputs,
                              targets=targets,
                              data_loader=data_loader,

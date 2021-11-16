@@ -114,9 +114,9 @@ class NaturalGradient:
             self._scale_fisher(1 - ema_decay)
 
         rst = calculate_fisher(self.model,
-                               loss_type=self.loss_type,
                                fisher_type=self.fisher_type,
                                fisher_shapes=self.fisher_shape,
+                               loss_type=self.loss_type,
                                inputs=inputs,
                                targets=targets,
                                data_loader=data_loader,
