@@ -114,7 +114,6 @@ class Operation:
                 else:
                     assert vector is not None
                     assert vector.ndim == 1
-                    assert batch_g.shape[1] == vector.shape[0]
                     batch_gtv = batch_g.mul(vector.unsqueeze(0)).sum(dim=1)
                     cvp = torch.einsum('ni,n->i', batch_g, batch_gtv)
                     if original_requires_grad(module, 'bias'):
