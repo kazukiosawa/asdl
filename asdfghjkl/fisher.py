@@ -23,8 +23,10 @@ __all__ = [
     'fisher_for_mse',
     'fvp_for_cross_entropy',
     'fvp_for_mse',
+    'fisher_eig',
     'fisher_eig_for_cross_entropy',
     'fisher_eig_for_mse',
+    'fisher_free',
     'fisher_free_for_cross_entropy',
     'fisher_free_for_mse',
     'LOSS_CROSS_ENTROPY',
@@ -87,6 +89,7 @@ class _FisherBase(MatrixManager):
                          seed=None,
                          scale=1.):
         model = self._model
+        device = self._device
         if isinstance(fisher_shapes, str):
             fisher_shapes = [fisher_shapes]
 
@@ -139,7 +142,6 @@ class _FisherBase(MatrixManager):
                 nonlocal total_loss
                 total_loss += emp_loss.item()
 
-        device = self._device
         if data_loader is not None:
             # calculate fisher/fvp for the data_loader
             data_size = len(data_loader.dataset)
