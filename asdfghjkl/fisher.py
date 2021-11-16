@@ -322,9 +322,9 @@ class FisherEmpMSE(_FisherMSE):
 
 def calculate_fisher(
         model: nn.Module,
-        loss_type: str,
         fisher_type: str,
         fisher_shapes,
+        loss_type: str,
         inputs: torch.Tensor = None,
         targets: torch.Tensor = None,
         data_loader: torch.utils.data.DataLoader = None,
@@ -390,9 +390,9 @@ fvp_for_mse = partial(calculate_fisher, loss_type=LOSS_MSE, fvp=True)
 
 def fisher_eig(
         model,
-        loss_type,
-        fisher_type,
+        fisher_type: str,
         fisher_shape,
+        loss_type: str,
         inputs=None,
         targets=None,
         data_loader=None,
@@ -442,9 +442,9 @@ fisher_eig_for_mse = partial(fisher_eig, loss_type=LOSS_MSE)
 def fisher_free(
         model,
         b,
-        loss_type,
-        fisher_type,
+        fisher_type: str,
         fisher_shape,
+        loss_type: str,
         data_loader=None,
         inputs=None,
         targets=None,
