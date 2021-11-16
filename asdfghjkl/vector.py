@@ -67,7 +67,6 @@ class ParamVector:
         return self
 
     def dot(self, other):
-        assert self.params == other.params
         return torch.dot(self.get_flatten_vector(), other.get_flatten_vector())
 
     def norm(self):
