@@ -251,7 +251,8 @@ class OperationManager:
             print(f'No operation is registered to {module}.')
 
     def clear_operations(self):
-        for key in self._operations.keys():
+        keys = list(self._operations.keys())
+        for key in keys:
             del self._operations[key]
 
     def call_operations_in_forward(self, module, in_data):
