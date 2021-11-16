@@ -3,6 +3,7 @@ from operator import iadd
 import numpy as np
 import torch
 from .utils import add_value_to_diagonal, cholesky_inv
+from .vector import ParamVector
 
 __all__ = [
     'matrix_to_tril',
@@ -249,23 +250,20 @@ class SymMatrix:
         if self.has_unit:
             self.unit.update_inv(damping)
 
-    def mvp(self, vecs=None, vec_weight=None, vec_bias=None, use_inv=False, inplace=False):
+    def mvp(self, vectors: ParamVector = None,
+            vec_weight: torch.Tensor = None, vec_bias: torch.Tensor = None,
+            use_inv=False, inplace=False):
         mat = self.inv if use_inv else self.data
 
         # full
-        if vecs is not None:
-            v = torch.cat([vec.flatten() for vec in vecs])
+        if vectors is not None:
+            v = vectors.get_flatten_vector()
             mat_v = torch.mv(mat, v)
-            pointer = 0
-            mat_vecs = []
-            for vec in vecs:
-                numel = vec.numel()
-                mat_vec = mat_v[pointer: pointer + numel].view_as(vec)
-                mat_vecs.append(mat_vec)
-                if inplace:
-                    vec.copy_(mat_vec)
-                pointer += numel
-            return mat_vecs
+            rst = ParamVector(vectors.params, mat_v)
+            if inplace:
+                for v1, v2 in zip(vectors.values(), rst.values()):
+                    v1.copy_(v2)
+            return rst
 
         # layer-wise
         assert vec_weight is not None

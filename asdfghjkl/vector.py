@@ -78,6 +78,9 @@ class ParamVector:
         vectors = {p: self.vectors[p] for p in params if p in self.vectors}
         return ParamVector(params, vectors)
 
+    def get_vector_by_param(self, param: torch.Tensor, default=None) -> torch.Tensor:
+        return self.vectors.get(param, default)
+
     def get_flatten_vector(self):
         flat_vecs = [v.flatten() for v in self.vectors.values()]
         return torch.cat(flat_vecs)
