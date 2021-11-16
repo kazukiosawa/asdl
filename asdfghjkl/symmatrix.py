@@ -64,6 +64,10 @@ def get_n_cols_by_tril(tril: torch.Tensor):
     return int(np.sqrt(2 * numel + 0.25) - 0.5)
 
 
+def symeig(A: torch.Tensor, upper=True):
+    return torch.linalg.eigvalsh(A, UPLO='U' if upper else 'L')
+
+
 def _save_as_numpy(path, tensor):
     dirname = os.path.dirname(path)
     if not os.path.isdir(dirname):
@@ -151,12 +155,12 @@ class SymMatrix:
 
     def eigenvalues(self):
         assert self.has_data
-        eig, _ = torch.symeig(self.data)
+        eig = symeig(self.data)
         return torch.sort(eig, descending=True)[0]
 
     def top_eigenvalue(self):
         assert self.has_data
-        eig, _ = torch.symeig(self.data)
+        eig = symeig(self.data)
         return eig.max().item()
 
     def trace(self):
@@ -342,14 +346,14 @@ class Kron:
         return self
 
     def eigenvalues(self):
-        eig_A, _ = torch.symeig(self.A)
-        eig_B, _ = torch.symeig(self.B)
+        eig_A = symeig(self.A)
+        eig_B = symeig(self.B)
         eig = torch.ger(eig_A, eig_B).flatten()
         return torch.sort(eig, descending=True)[0]
 
     def top_eigenvalue(self):
-        eig_A, _ = torch.symeig(self.A)
-        eig_B, _ = torch.symeig(self.B)
+        eig_A = symeig(self.A)
+        eig_B = symeig(self.B)
         return (eig_A.max() * eig_B.max()).item()
 
     def trace(self):
@@ -582,12 +586,12 @@ class UnitWise:
 
     def eigenvalues(self):
         assert self.has_data
-        eig = [torch.symeig(block)[0] for block in self.data]
+        eig = [symeig(block) for block in self.data]
         eig = torch.cat(eig)
         return torch.sort(eig, descending=True)[0]
 
     def top_eigenvalue(self):
-        top = max([torch.symeig(block)[0].max().item() for block in self.data])
+        top = max([symeig(block).max().item() for block in self.data])
         return top
 
     def trace(self):
