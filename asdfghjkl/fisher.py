@@ -62,19 +62,12 @@ class _FisherBase(MatrixManager):
     def fvp_attr(self):
         return f'{self.fisher_type}_fvp'
 
-    def zero_fisher(self):
-        attr = self.fisher_attr
+    def zero_fisher(self, fvp=False):
+        attr = self.fvp_attr if fvp else self.fisher_attr
         for module in self._model.modules():
             f = getattr(module, attr, None)
             if f is not None:
                 f.mul_(0)
-
-    def zero_fvp(self):
-        attr = self.fvp_attr
-        for module in self._model.modules():
-            fvp = getattr(module, attr, None)
-            if fvp is not None:
-                setattr(module, attr, fvp * 0)
 
     def calculate_fisher(self,
                          fisher_shapes,
@@ -95,10 +88,7 @@ class _FisherBase(MatrixManager):
 
         if not accumulate:
             # set Fisher/FVP zero
-            if fvp:
-                self.zero_fvp()
-            else:
-                self.zero_fisher()
+            self.zero_fisher(fvp=fvp)
 
         total_loss = 0
         calc_emp_loss_grad_with_fisher = calc_emp_loss_grad and self.is_fisher_emp
@@ -171,11 +161,11 @@ class _FisherBase(MatrixManager):
     def _fisher_core(self, closure, outputs, targets):
         raise NotImplementedError
 
-    def _accumulate_fisher(self, module: nn.Module, new_fisher: SymMatrix, scale=1.):
+    def _accumulate_fisher(self, module: nn.Module, new_fisher, scale=1., fvp=False):
         if new_fisher is None:
             return
         new_fisher.mul_(scale)
-        dst_attr = self.fisher_attr
+        dst_attr = self.fvp_attr if fvp else self.fisher_attr
         dst_fisher = getattr(module, dst_attr, None)
         if dst_fisher is None:
             setattr(module, dst_attr, new_fisher)
@@ -183,16 +173,8 @@ class _FisherBase(MatrixManager):
             # this must be __iadd__ to preserve inv
             dst_fisher += new_fisher
 
-    def _accumulate_fvp(self, module: nn.Module, new_fvp: ParamVector, scale=1.):
-        if new_fvp is None:
-            return
-        new_fvp.mul_(scale)
-        dst_attr = self.fvp_attr
-        dst_fvp = getattr(module, dst_attr, None)
-        if dst_fvp is None:
-            setattr(module, dst_attr, new_fvp)
-        else:
-            dst_fvp += new_fvp
+    def _accumulate_fvp(self, module: nn.Module, new_fisher, scale=1.):
+        self._accumulate_fisher(module, new_fisher, scale, fvp=True)
 
     def reduce_fisher(self, is_master=True, all_reduce=False):
         self.reduce_matrices(is_master=is_master, all_reduce=all_reduce)
