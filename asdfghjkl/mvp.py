@@ -86,8 +86,7 @@ def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
     Return x when x is close enough to inv(A) * b.
     """
     if max_iters is None:
-        n_dim = sum([_b.numel() for _b in b])
-        max_iters = n_dim
+        max_iters = b.numel()
 
     def _call_mvp(v: ParamVector) -> ParamVector:
         return _mvp(mvp_fn, v, random_seed, damping)
