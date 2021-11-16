@@ -32,6 +32,9 @@ class ParamVector:
 
         raise TypeError(f'Invalid vectors type: {type(vectors)}')
 
+    def values(self):
+        return self.vectors.values()
+
     def __add__(self, other):
         assert self.params == other.params
         vectors = {}
@@ -56,7 +59,7 @@ class ParamVector:
         self.vectors.update(other.vectors)
 
     def mul(self, value):
-        return ParamVector(self.params, [v.mul(value) for v in self.vectors.values()])
+        return ParamVector(self.params, [v.mul(value) for v in self.values()])
 
     def mul_(self, value):
         for key in self.vectors:
@@ -82,7 +85,7 @@ class ParamVector:
         return self.vectors.get(param, default)
 
     def get_flatten_vector(self):
-        flat_vecs = [v.flatten() for v in self.vectors.values()]
+        flat_vecs = [v.flatten() for v in self.values()]
         return torch.cat(flat_vecs)
 
 
