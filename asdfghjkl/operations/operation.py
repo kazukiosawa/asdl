@@ -59,13 +59,16 @@ class Operation:
         else:
             results[key] += value
 
-    def get_result(self, *keys):
+    def get_result(self, *keys, default=None):
         results = self._op_results
         if len(keys) > 1:
             for key in keys[:-1]:
-                results = results[key]
+                try:
+                    results = results[key]
+                except KeyError:
+                    return None
         key = keys[-1]
-        return results.get(key, None)
+        return results.get(key, default)
 
     def clear_result(self, *keys):
         results = self._op_results
@@ -242,13 +245,13 @@ class OperationManager:
         try:
             return self._operations[module]
         except KeyError:
-            print(f'No operation is registered to {module}.')
+            raise KeyError(f'No operation is registered to {module}.')
 
     def clear_operation(self, module: nn.Module):
         try:
             self._operations.pop(module)
         except KeyError:
-            print(f'No operation is registered to {module}.')
+            raise KeyError(f'No operation is registered to {module}.')
 
     def clear_operations(self):
         keys = list(self._operations.keys())
@@ -262,8 +265,11 @@ class OperationManager:
         vector = self.get_vectors_by_module(module, flatten=True)
         self.get_operation(module).backward_pre_process(in_data, out_grads, vector)
 
-    def get_result(self, module, *keys):
-        return self.get_operation(module).get_result(*keys)
+    def get_result(self, module, *keys, default=None):
+        try:
+            return self.get_operation(module).get_result(*keys, default=default)
+        except KeyError:
+            return default
 
     def accumulate_result(self, module, value, *keys):
         return self.get_operation(module).accumulate_result(value, *keys)
@@ -280,7 +286,7 @@ class OperationManager:
 
     def clear_batch_grads(self):
         for operation in self._operations.values():
-            if operation.get_result(OP_BATCH_GRADS) is not None:
+            if operation.get_result(OP_BATCH_GRADS, default=None) is not None:
                 operation.clear_result(OP_BATCH_GRADS)
 
     def full_batch_grads(self, module):
