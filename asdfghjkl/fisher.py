@@ -2,11 +2,14 @@ from functools import partial
 import numpy as np
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from .core import no_centered_cov
 from .utils import skip_param_grad
 from .matrices import *
-from .mvp import power_method, conjugate_gradient_method, reduce_params
+from .symmatrix import SymMatrix
+from .vector import ParamVector, reduce_vectors
+from .mvp import power_method, conjugate_gradient_method
 
 _COV_FULL = 'cov_full'
 _CVP_FULL = 'cvp_full'
@@ -73,11 +76,11 @@ class _FisherBase(MatrixManager):
 
     def calculate_fisher(self,
                          fisher_shapes,
-                         inputs=None,
-                         targets=None,
-                         data_loader=None,
+                         inputs: torch.Tensor = None,
+                         targets: torch.Tensor = None,
+                         data_loader: torch.utils.data.DataLoader = None,
                          fvp=False,
-                         vec=None,
+                         vec: ParamVector = None,
                          data_average=True,
                          accumulate=False,
                          calc_emp_loss_grad=False,
@@ -166,7 +169,7 @@ class _FisherBase(MatrixManager):
     def _fisher_core(self, closure, outputs, targets):
         raise NotImplementedError
 
-    def _accumulate_fisher(self, module, new_fisher, scale=1.):
+    def _accumulate_fisher(self, module: nn.Module, new_fisher: SymMatrix, scale=1.):
         if new_fisher is None:
             return
         new_fisher.mul_(scale)
@@ -178,7 +181,7 @@ class _FisherBase(MatrixManager):
             # this must be __iadd__ to preserve inv
             dst_fisher += new_fisher
 
-    def _accumulate_fvp(self, module, new_fvp, scale=1.):
+    def _accumulate_fvp(self, module: nn.Module, new_fvp: ParamVector, scale=1.):
         if new_fvp is None:
             return
         new_fvp.mul_(scale)
@@ -203,7 +206,7 @@ class _FisherBase(MatrixManager):
                 if hasattr(module, attr):
                     setattr(module, attr, v.get_vectors_by_module(module))
 
-    def load_fvp(self, fisher_shape):
+    def load_fvp(self, fisher_shape: str) -> ParamVector:
         if fisher_shape == SHAPE_FULL:
             return getattr(self._model, self.fvp_attr, None)
         else:
@@ -316,15 +319,15 @@ class FisherEmpMSE(_FisherMSE):
 
 
 def calculate_fisher(
-        model,
-        loss_type,
-        fisher_type,
+        model: nn.Module,
+        loss_type: str,
+        fisher_type: str,
         fisher_shapes,
-        inputs=None,
-        targets=None,
-        data_loader=None,
+        inputs: torch.Tensor = None,
+        targets: torch.Tensor = None,
+        data_loader: torch.utils.data.DataLoader = None,
         fvp=False,
-        vec=None,
+        vec: ParamVector = None,
         is_distributed=False,
         all_reduce=False,
         is_master=True,
@@ -399,7 +402,7 @@ def fisher_eig(
         **kwargs
 ):
 
-    def fvp_fn(vec):
+    def fvp_fn(vec: ParamVector) -> ParamVector:
         f = calculate_fisher(model,
                              loss_type,
                              fisher_type,
@@ -455,7 +458,7 @@ def fisher_free(
         **kwargs
 ):
 
-    def fvp_fn(vec):
+    def fvp_fn(vec: ParamVector) -> ParamVector:
         f = calculate_fisher(model,
                              loss_type,
                              fisher_type,
