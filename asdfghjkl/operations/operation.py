@@ -121,7 +121,7 @@ class Operation:
                         self.accumulate_result(cvp[:w_numel].view_as(module.weight), OP_CVP, 'weight')
                         self.accumulate_result(cvp[w_numel:].view_as(module.bias), OP_CVP, 'bias')
                     else:
-                        self.accumulate_result(cvp, OP_CVP, 'weight')
+                        self.accumulate_result(cvp.view_as(module.weight), OP_CVP, 'weight')
 
             elif op_name == OP_COV_KRON:
                 B = self.cov_kron_B(module, out_grads)
