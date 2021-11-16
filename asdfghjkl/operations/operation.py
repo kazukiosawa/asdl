@@ -347,13 +347,17 @@ class OperationManager:
     def cov_symmatrix(self, module):
         cov = self.cov(module)
         cov_kron = self.cov_kron(module)
+        kron_A = None if cov_kron is None else cov_kron['A']
+        kron_B = None if cov_kron is None else cov_kron['B']
         cov_unit_wise = self.cov_unit_wise(module)
         cov_diag = self.cov_diag(module)
+        diag_weight = None if cov_diag is None else cov_diag['weight']
+        diag_bias = None if cov_diag is None else cov_diag['bias']
         if all(v is None for v in [cov, cov_kron, cov_unit_wise, cov_diag]):
             return None
         return SymMatrix(data=cov,
-                         kron_A=cov_kron['A'], kron_B=cov_kron['B'],
-                         diag_weight=cov_diag['weight'], diag_bias=cov_diag['bias'],
+                         kron_A=kron_A, kron_B=kron_B,
+                         diag_weight=diag_weight, diag_bias=diag_bias,
                          unit_data=cov_unit_wise)
 
     def full_cov_symmatrix(self, module):
