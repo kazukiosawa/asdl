@@ -181,7 +181,7 @@ class _FisherBase(MatrixManager):
     def _accumulate_fvp(self, module, new_fvp, scale=1.):
         if new_fvp is None:
             return
-        new_fvp.scale(scale)
+        new_fvp.mul_(scale)
         dst_attr = self.fvp_attr
         dst_fvp = getattr(module, dst_attr, None)
         if dst_fvp is None:
@@ -194,17 +194,14 @@ class _FisherBase(MatrixManager):
 
     def reduce_fvp(self, fisher_shape, is_master=True, all_reduce=False):
         v = self.load_fvp(fisher_shape)
-        v = reduce_params(v, is_master, all_reduce)
+        v = reduce_vectors(v, is_master, all_reduce)
         attr = self.fvp_attr
         if fisher_shape == SHAPE_FULL:
             setattr(self._model, attr, v)
         else:
-            idx = 0
             for module in self._model.modules():
                 if hasattr(module, attr):
-                    setattr(module, attr, v[idx])
-                    idx += 1
-            assert idx == len(v)
+                    setattr(module, attr, v.get_vectors_by_module(module))
 
     def load_fvp(self, fisher_shape):
         if fisher_shape == SHAPE_FULL:
