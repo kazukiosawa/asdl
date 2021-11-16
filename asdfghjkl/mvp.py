@@ -2,6 +2,7 @@ import math
 import copy
 from typing import List, Callable
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.distributed as dist
@@ -62,7 +63,9 @@ def power_method(mvp_fn: Callable[[ParamVector], ParamVector],
         eigvecs.append(vec)
 
     # sort both in descending order
-    eigvals, eigvecs = (list(t) for t in zip(*sorted(zip(eigvals, eigvecs))[::-1]))
+    indices = np.argsort(eigvals)[::-1]
+    eigvals = [eigvals[idx] for idx in indices]
+    eigvecs = [eigvecs[idx] for idx in indices]
 
     return eigvals, eigvecs
 
