@@ -230,6 +230,9 @@ class OperationManager:
         self._operations: Dict[nn.Module, Operation] = {}
         self._vectors: ParamVector = vectors
 
+    def is_operation_registered(self, module: nn.Module):
+        return module in self._operations
+
     def register_operation(self, module: nn.Module, operation: Operation):
         self._operations[module] = operation
 

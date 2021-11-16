@@ -38,8 +38,9 @@ def extend(model, *op_names, map_rule=None, vectors: ParamVector = None):
             # register hooks and operations for child modules
             handles.append(module.register_forward_hook(forward_hook))
             manager.register_operation(module, op_class(module, op_names))
-        # register empty operation for parent model
-        manager.register_operation(model, Operation(model, []))
+        if not manager.is_operation_registered(model):
+            # register empty operation for parent model
+            manager.register_operation(model, Operation(model, []))
 
         yield manager
 
