@@ -101,7 +101,7 @@ def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
         p = r.copy()
         last_rz = r.dot(r)
     else:
-        p = preconditioner.precondition_vector(r)
+        p = preconditioner.precondition(r)
         last_rz = r.dot(p)
 
     b_norm = b.norm()
@@ -121,7 +121,7 @@ def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
             z = r
             rz = rr
         else:
-            z = preconditioner.precondition_vector(r)
+            z = preconditioner.precondition(r)
             rz = r.dot(z)
 
         beta = rz / last_rz  # Fletcher-Reeves
