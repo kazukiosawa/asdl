@@ -62,5 +62,8 @@ if __name__ == '__main__':
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=32,
                                               shuffle=True, num_workers=4)
     model = Net()
+    for i, p in enumerate(model.parameters()):
+        if i % 2 == 0:
+            p.requires_grad_(False)
     model.to(device)
     main()
