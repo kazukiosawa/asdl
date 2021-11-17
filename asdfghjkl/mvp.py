@@ -1,5 +1,4 @@
 import math
-import copy
 from typing import List, Callable
 
 import numpy as np
@@ -93,13 +92,13 @@ def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
     x = init_x
     if x is None:
         x = ParamVector(b.params, [torch.zeros_like(p) for p in b.params])
-        r = copy.deepcopy(b)
+        r = b.copy()
     else:
         Ax = _call_mvp(x)
         r = b.add(Ax, alpha=-1)
 
     if preconditioner is None:
-        p = copy.deepcopy(r)
+        p = r.copy()
         last_rz = r.dot(r)
     else:
         p = preconditioner.precondition_vector(r)
@@ -110,8 +109,8 @@ def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
     for i in range(max_iters):
         Ap = _call_mvp(p)
         alpha = last_rz / p.dot(Ap)
-        x = x.add(p, alpha)
-        r = r.add(Ap, -alpha)
+        x.add_(p, alpha)
+        r.add_(Ap, -alpha)
         rr = r.dot(r)
         err = math.sqrt(rr) / b_norm
         if print_progress:
