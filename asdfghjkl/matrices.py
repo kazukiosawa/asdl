@@ -41,7 +41,7 @@ def _requires_matrix(module: torch.nn.Module):
         return False
     if module.weight.requires_grad:
         return True
-    return hasattr(module, 'bias') and module.bias.requires_grad
+    return hasattr(module, 'bias') and module.bias is not None and module.bias.requires_grad
 
 
 class MatrixManager:

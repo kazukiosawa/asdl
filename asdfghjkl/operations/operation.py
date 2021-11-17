@@ -30,7 +30,7 @@ class Operation:
     def __init__(self, module, op_names, model_for_kernel=None):
         if hasattr(module, 'weight'):
             requires_grad = module.weight.requires_grad
-            if hasattr(module, 'bias'):
+            if hasattr(module, 'bias') and module.bias is not None:
                 requires_grad = requires_grad or module.bias.requires_grad
             assert requires_grad, f'One of weight or bias has to require grad (module: {module}).'
         self._module = module
