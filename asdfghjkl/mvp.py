@@ -75,6 +75,7 @@ def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
                               damping=1e-3,
                               max_iters=None,
                               tol=1e-8,
+                              preconditioner=None,
                               print_progress=False,
                               random_seed=None) -> ParamVector:
     """
