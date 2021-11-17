@@ -1,3 +1,4 @@
+import copy
 from typing import List, Dict
 
 import torch
@@ -39,13 +40,18 @@ class ParamVector:
         vectors = [v1 + v2 for v1, v2 in zip(self.values(), other.values())]
         return ParamVector(self.params, vectors)
 
+    def __iadd__(self, other):
+        for v1, v2 in zip(self.values(), other.values()):
+            v1 += v2
+
     def add(self, other, alpha=1):
         vectors = [v1.add(v2, alpha=alpha) for v1, v2 in zip(self.values(), other.values())]
         return ParamVector(self.params, vectors)
 
-    def __iadd__(self, other):
+    def add_(self, other, alpha=1):
         for v1, v2 in zip(self.values(), other.values()):
-            v1 += v2
+            v1.add_(v2, alpha=alpha)
+        return self
 
     def extend(self, other):
         self.params.extend(other.params)
