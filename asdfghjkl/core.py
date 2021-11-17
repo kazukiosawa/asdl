@@ -165,8 +165,8 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
                 requires_grad = requires_grad or param.requires_grad
                 record_original_requires_grad(param)
         if not requires_grad:
-            # no assignment for a module which doesn't require grad
-            yield *module_info, []
+            # no assignment for a module that do not have params that require grad
+            continue
 
         if module in specified_asgmts:
             yield *module_info, specified_asgmts[module]
