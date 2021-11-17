@@ -58,7 +58,8 @@ class NaturalGradient:
     def parameters_for(self, shape):
         for module in self.modules_for(shape):
             for p in module.parameters():
-                yield p
+                if p.requires_grad:
+                    yield p
 
     def _get_module_fisher(self, module, postfix=None):
         if postfix is None:
@@ -189,10 +190,11 @@ class NaturalGradient:
         for shape in _module_level_shapes:
             for module in self.modules_for(shape):
                 self.precondition_module(module, shape, vectors)
-        fisher = self._get_full_fisher()
-        if fisher is not None:
+        params = [p for p in self.parameters_for(SHAPE_FULL)]
+        if len(params) > 0:
+            fisher = self._get_full_fisher()
+            assert fisher is not None, f'Fisher of shape {SHAPE_FULL} has not been calculated.'
             if vectors is None:
-                params = [p for p in self.parameters_for(SHAPE_FULL) if p.requires_grad]
                 vectors = ParamVector(params, [p.grad for p in params])
             fisher.mvp(vectors=vectors, use_inv=True, inplace=True)
 
@@ -208,6 +210,7 @@ class NaturalGradient:
             vec_bias = vectors.get_vector_by_param(module.bias, None)
         assert shape is not None, f'No shape is assigned to module: {module}.'
         matrix = self._get_module_symmatrix(module, shape)
+        assert matrix is not None, f'Matrix of shape {shape} for module {module} has not been calculated.'
         if vec_weight is None:
             vec_weight = module.weight.grad
             if vec_bias is None and _bias_requires_grad(module):
