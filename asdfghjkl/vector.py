@@ -92,6 +92,9 @@ class ParamVector:
     def numel(self):
         return sum(v.numel() for v in self.values())
 
+    def copy(self):
+        return ParamVector(self.params, copy.deepcopy(list(self.values())))
+
 
 def reduce_vectors(vectors: ParamVector, is_master=True, all_reduce=False) -> ParamVector:
     # pack
