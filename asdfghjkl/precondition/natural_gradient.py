@@ -211,10 +211,10 @@ class NaturalGradient:
         assert shape is not None, f'No shape is assigned to module: {module}.'
         matrix = self._get_module_symmatrix(module, shape)
         assert matrix is not None, f'Matrix of shape {shape} for module {module} has not been calculated.'
-        if vec_weight is None:
+        if vec_weight is None and module.weight.requires_grad:
             vec_weight = module.weight.grad
-            if vec_bias is None and _bias_requires_grad(module):
-                vec_bias = module.bias.grad
+        if vec_bias is None and _bias_requires_grad(module):
+            vec_bias = module.bias.grad
         matrix.mvp(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=True, inplace=True)
 
 

@@ -270,23 +270,32 @@ class SymMatrix:
             return rst
 
         # layer-wise
-        assert vec_weight is not None
-        vec1d = vec_weight.flatten()
+        assert vec_weight is not None or vec_bias is not None
+        vecs = []
+        if vec_weight is not None:
+            vecs.append(vec_weight.flatten())
         if vec_bias is not None:
-            vec1d = torch.cat([vec1d, vec_bias.flatten()])
+            vecs.append(vec_bias.flatten())
+        vec1d = torch.cat(vecs)
         mvp1d = torch.mv(mat, vec1d)
-        if vec_bias is not None:
-            w_numel = vec_weight.numel()
-            mvp_w = mvp1d[:w_numel].view_as(vec_weight)
-            mvp_b = mvp1d[w_numel:]
+        if vec_weight is not None:
+            if vec_bias is not None:
+                w_numel = vec_weight.numel()
+                mvp_w = mvp1d[:w_numel].view_as(vec_weight)
+                mvp_b = mvp1d[w_numel:]
+                if inplace:
+                    vec_weight.copy_(mvp_w)
+                    vec_bias.copy_(mvp_b)
+                return mvp_w, mvp_b
+            mvp_w = mvp1d.view_as(vec_weight)
             if inplace:
                 vec_weight.copy_(mvp_w)
+            return [mvp_w]
+        else:
+            mvp_b = mvp1d.view_as(vec_bias)
+            if inplace:
                 vec_bias.copy_(mvp_b)
-            return mvp_w, mvp_b
-        mvp_w = mvp1d.view_as(vec_weight)
-        if inplace:
-            vec_weight.copy_(mvp_w)
-        return mvp_w
+            return [mvp_b]
 
 
 class Kron:
@@ -535,20 +544,24 @@ class Diag:
         if self.has_bias:
             self.bias_inv = 1 / (self.bias + damping)
 
-    def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
-        mat_w = self.weight_inv if use_inv else self.weight
-        if inplace:
-            mvp_w = vec_weight.mul_(mat_w)
-        else:
-            mvp_w = vec_weight.mul(mat_w)
+    def mvp(self, vec_weight=None, vec_bias=None, use_inv=False, inplace=False):
+        assert vec_weight is not None or vec_bias is not None
+        rst = []
+        if vec_weight is not None:
+            mat_w = self.weight_inv if use_inv else self.weight
+            if inplace:
+                mvp_w = vec_weight.mul_(mat_w)
+            else:
+                mvp_w = vec_weight.mul(mat_w)
+            rst.append(mvp_w)
         if vec_bias is not None:
             mat_b = self.bias_inv if use_inv else self.bias
             if inplace:
                 mvp_b = vec_bias.mul_(mat_b)
             else:
                 mvp_b = vec_bias.mul(mat_b)
-            return mvp_w, mvp_b
-        return mvp_w
+            rst.append(mvp_b)
+        return rst
 
 
 class UnitWise:

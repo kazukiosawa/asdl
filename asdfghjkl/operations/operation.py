@@ -85,6 +85,8 @@ class Operation:
         module = self._module
 
         if OP_COV_KRON in self._op_names or OP_GRAM_HADAMARD in self._op_names:
+            assert original_requires_grad(module, 'weight'), f'weight.requires_grad has to be True ' \
+                                                             f'for {OP_COV_KRON} and {OP_GRAM_HADAMARD} (module: {module}).'
             if original_requires_grad(module, 'bias'):
                 in_data = self.extend_in_data(in_data)
 
@@ -106,9 +108,7 @@ class Operation:
         module = self._module
         for op_name in self._op_names:
             if op_name in [OP_COV, OP_CVP]:
-                batch_g = self.batch_grads_weight(module, in_data, out_grads).flatten(start_dim=1)
-                if original_requires_grad(module, 'bias'):
-                    batch_g = torch.cat([batch_g, self.batch_grads_bias(module, out_grads)], dim=1)
+                _, _, batch_g = self.collect_batch_grads(in_data, out_grads)
                 if op_name == OP_COV:
                     self.accumulate_result(torch.matmul(batch_g.T, batch_g), OP_COV)
                 else:
@@ -116,20 +116,23 @@ class Operation:
                     assert vector.ndim == 1
                     batch_gtv = batch_g.mul(vector.unsqueeze(0)).sum(dim=1)
                     cvp = torch.einsum('ni,n->i', batch_g, batch_gtv)
-                    if original_requires_grad(module, 'bias'):
-                        w_numel = module.weight.numel()
-                        self.accumulate_result(cvp[:w_numel].view_as(module.weight), OP_CVP, 'weight')
-                        self.accumulate_result(cvp[w_numel:].view_as(module.bias), OP_CVP, 'bias')
+                    if original_requires_grad(module, 'weight'):
+                        if original_requires_grad(module, 'bias'):
+                            w_numel = module.weight.numel()
+                            self.accumulate_result(cvp[:w_numel].view_as(module.weight), OP_CVP, 'weight')
+                            self.accumulate_result(cvp[w_numel:].view_as(module.bias), OP_CVP, 'bias')
+                        else:
+                            self.accumulate_result(cvp.view_as(module.weight), OP_CVP, 'weight')
                     else:
-                        self.accumulate_result(cvp.view_as(module.weight), OP_CVP, 'weight')
+                        self.accumulate_result(cvp.view_as(module.bias), OP_CVP, 'bias')
 
             elif op_name == OP_COV_KRON:
                 B = self.cov_kron_B(module, out_grads)
                 self.accumulate_result(B, OP_COV_KRON, 'B')
 
             elif op_name == OP_COV_UNIT_WISE:
-                assert original_requires_grad(module, 'weight')
-                assert original_requires_grad(module, 'bias')
+                assert original_requires_grad(module, 'weight') and original_requires_grad(module, 'bias'), \
+                    f'Both weight and bias have to require grad for {op_name} (module: {module}).'
                 rst = self.cov_unit_wise(module, self.extend_in_data(in_data), out_grads)
                 self.accumulate_result(rst, OP_COV_UNIT_WISE)
 
@@ -149,31 +152,44 @@ class Operation:
                 n_data = in_data.shape[0]
                 n1 = self._model_for_kernel.kernel.shape[0]
 
-                grads = self.batch_grads_weight(module, in_data, out_grads)
-                v = [grads]
-                if original_requires_grad(module, 'bias'):
-                    grads_b = self.batch_grads_bias(module, out_grads)
-                    v.append(grads_b)
-                g = torch.cat([_v.flatten(start_dim=1) for _v in v], axis=1)
+                batch_grads_w, batch_grads_b, batch_g = self.collect_batch_grads(in_data, out_grads)
 
                 precond = getattr(module, 'gram_precond', None)
                 if precond is not None:
-                    precond.precondition_vector_module(v, module)
-                    g2 = torch.cat([_v.flatten(start_dim=1) for _v in v], axis=1)
+                    precond.precondition_module(module, vec_weight=batch_grads_w, vec_bias=batch_grads_b)
+                    grads = [g.flatten(start_dim=1) for g in [batch_grads_w, batch_grads_b] if g is not None]
+                    batch_g2 = torch.cat(grads, dim=1)
                 else:
-                    g2 = g
+                    batch_g2 = batch_g
 
                 if n_data == n1:
-                    self._model_for_kernel.kernel += torch.matmul(g, g2.T)
+                    self._model_for_kernel.kernel += torch.matmul(batch_g, batch_g2.T)
                 else:
-                    self._model_for_kernel.kernel += torch.matmul(g[:n1], g2[n1:].T)
+                    self._model_for_kernel.kernel += torch.matmul(batch_g[:n1], batch_g2[n1:].T)
             else:
-                rst = getattr(self,
-                              f'{op_name}_weight')(module, in_data, out_grads)
-                self.accumulate_result(rst, op_name, 'weight')
+                if original_requires_grad(module, 'weight'):
+                    rst = getattr(self,
+                                  f'{op_name}_weight')(module, in_data, out_grads)
+                    self.accumulate_result(rst, op_name, 'weight')
                 if original_requires_grad(module, 'bias'):
                     rst = getattr(self, f'{op_name}_bias')(module, out_grads)
                     self.accumulate_result(rst, op_name, 'bias')
+
+    @torch.no_grad()
+    def collect_batch_grads(self, in_data, out_grads):
+        module = self._module
+        batch_grads_w = None
+        batch_grads_b = None
+        if original_requires_grad(module, 'weight'):
+            batch_grads_w = self.batch_grads_weight(module, in_data, out_grads)
+        if original_requires_grad(module, 'bias'):
+            batch_grads_b = self.batch_grads_bias(module, out_grads)
+        assert batch_grads_w is not None or batch_grads_w is not None, \
+            f'At least one of weight or bias has to require grad (module: {module}).'
+
+        grads = [batch_grads_w, batch_grads_b]
+        batch_g = torch.cat([g.flatten(start_dim=1) for g in grads if g is not None], dim=1)
+        return batch_grads_w, batch_grads_b, batch_g
 
     @staticmethod
     def extend_in_data(in_data):
@@ -356,7 +372,8 @@ class OperationManager:
             kwargs['kron_B'] = cov_kron['B']
         cov_diag = self.cov_diag(module)
         if cov_diag is not None:
-            kwargs['diag_weight'] = cov_diag['weight']
+            if original_requires_grad(module, 'weight'):
+                kwargs['diag_weight'] = cov_diag['weight']
             if original_requires_grad(module, 'bias'):
                 kwargs['diag_bias'] = cov_diag['bias']
         if all(v is None for v in kwargs.values()):
@@ -373,8 +390,11 @@ class OperationManager:
         cvp = self.cvp(module)
         if cvp is None:
             return None
-        params = [module.weight]
-        vectors = [cvp['weight']]
+        params = []
+        vectors = []
+        if original_requires_grad(module, 'weight'):
+            params.append(module.weight)
+            vectors.append(cvp['weight'])
         if original_requires_grad(module, 'bias'):
             params.append(module.bias)
             vectors.append(cvp['bias'])
