@@ -439,7 +439,7 @@ def fisher_free(
         print_progress=False,
         random_seed=None,
         **kwargs
-):
+) -> ParamVector:
 
     def fvp_fn(vec: ParamVector) -> ParamVector:
         f = calculate_fisher(model,
