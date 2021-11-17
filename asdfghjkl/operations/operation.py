@@ -28,6 +28,11 @@ ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
 
 class Operation:
     def __init__(self, module, op_names, model_for_kernel=None):
+        if hasattr(module, 'weight'):
+            requires_grad = module.weight.requires_grad
+            if hasattr(module, 'bias'):
+                requires_grad = requires_grad or module.bias.requires_grad
+            assert requires_grad, f'One of weight or bias has to require grad (module: {module}).'
         self._module = module
         self._model_for_kernel = model_for_kernel
         if isinstance(op_names, str):
