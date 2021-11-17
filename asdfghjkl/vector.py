@@ -10,6 +10,8 @@ __all__ = ['ParamVector', 'reduce_vectors', 'normalization', 'orthnormal']
 
 class ParamVector:
     def __init__(self, params: List[torch.Tensor], vectors):
+        assert len(params) > 0, 'params cannot be empty.'
+
         self.params: List[torch.Tensor] = params
         self.vectors: Dict[torch.Tensor, torch.Tensor] = {}
 
