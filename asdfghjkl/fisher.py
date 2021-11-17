@@ -399,7 +399,7 @@ def fisher_eig(
                              is_distributed=is_distributed,
                              all_reduce=True,
                              **kwargs)
-        return f.load_fvp(fisher_shape)
+        return f.load_fvp(fisher_shape).copy()
 
     # for making MC samplings at each iteration deterministic
     random_seed = torch.rand(1) * 100 if fisher_type == FISHER_MC else None
@@ -455,7 +455,7 @@ def fisher_free(
                              is_distributed=is_distributed,
                              all_reduce=True,
                              **kwargs)
-        return f.load_fvp(fisher_shape)
+        return f.load_fvp(fisher_shape).copy()
 
     # for making MC samplings at each iteration deterministic
     if fisher_type == FISHER_MC and random_seed is None:
