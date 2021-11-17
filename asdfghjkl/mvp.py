@@ -5,7 +5,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-from .precondition import NaturalGradient
 from .vector import ParamVector, orthnormal
 
 __all__ = [
@@ -76,7 +75,6 @@ def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
                               damping=1e-3,
                               max_iters=None,
                               tol=1e-8,
-                              preconditioner: NaturalGradient = None,
                               print_progress=False,
                               random_seed=None) -> ParamVector:
     """
