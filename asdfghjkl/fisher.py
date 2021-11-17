@@ -7,7 +7,6 @@ import torch.nn.functional as F
 from .core import no_centered_cov
 from .utils import skip_param_grad
 from .matrices import *
-from .symmatrix import SymMatrix
 from .vector import ParamVector, reduce_vectors
 from .mvp import power_method, conjugate_gradient_method
 
