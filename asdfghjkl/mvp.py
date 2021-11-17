@@ -83,6 +83,9 @@ def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
     d: damping
     Return x when x is close enough to inv(A) * b.
     """
+    if not isinstance(b, ParamVector):
+        raise TypeError(f'b has to be an instance of {ParamVector}. {type(b)} is given.')
+
     if max_iters is None:
         max_iters = b.numel()
 

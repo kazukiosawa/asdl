@@ -423,10 +423,10 @@ fisher_eig_for_mse = partial(fisher_eig, loss_type=LOSS_MSE)
 
 def fisher_free(
         model,
-        b,
         fisher_type: str,
         fisher_shape,
         loss_type: str,
+        b=None,
         data_loader=None,
         inputs=None,
         targets=None,
@@ -455,6 +455,10 @@ def fisher_free(
                              all_reduce=True,
                              **kwargs)
         return f.load_fvp(fisher_shape).copy()
+
+    if b is None:
+        grads = {p: p.grad for p in model.parameters() if p.requires_grad}
+        b = ParamVector(list(grads.keys()), grads)
 
     # for making MC samplings at each iteration deterministic
     if fisher_type == FISHER_MC and random_seed is None:
