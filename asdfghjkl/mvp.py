@@ -140,5 +140,5 @@ def _mvp(mvp_fn: Callable[[ParamVector], ParamVector],
         torch.manual_seed(random_seed)
     Mv = mvp_fn(vec)
     if damping:
-        Mv = Mv.add(vec, alpha=damping)
+        Mv.add_(vec, alpha=damping)
     return Mv
