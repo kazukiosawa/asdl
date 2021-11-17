@@ -189,7 +189,7 @@ class Operation:
             batch_grads_w = self.batch_grads_weight(module, in_data, out_grads)
         if original_requires_grad(module, 'bias'):
             batch_grads_b = self.batch_grads_bias(module, out_grads)
-        assert batch_grads_w is not None or batch_grads_w is not None, \
+        assert batch_grads_w is not None or batch_grads_b is not None, \
             f'At least one of weight or bias has to require grad (module: {module}).'
 
         grads = [batch_grads_w, batch_grads_b]
