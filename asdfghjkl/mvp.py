@@ -78,8 +78,7 @@ def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
                               tol=1e-8,
                               preconditioner=None,
                               print_progress=False,
-                              random_seed=None,
-                              save_log=False):
+                              random_seed=None) -> ParamVector:
     """
     Solve (A + d * I)x = b by conjugate gradient method.
     d: damping
@@ -108,7 +107,6 @@ def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
 
     b_norm = b.norm()
 
-    log = []
     for i in range(max_iters):
         Ap = _call_mvp(p)
         alpha = last_rz / p.dot(Ap)
@@ -116,7 +114,6 @@ def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
         r = r.add(Ap, -alpha)
         rr = r.dot(r)
         err = math.sqrt(rr) / b_norm
-        log.append({'step': i + 1, 'error': err})
         if print_progress:
             print(f'{i+1}/{max_iters} err={err}')
         if err < tol:
@@ -132,10 +129,7 @@ def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
         p = z.add(p, beta)
         last_rz = rz
 
-    if save_log:
-        return x, log
-    else:
-        return x
+    return x
 
 
 def _mvp(mvp_fn: Callable[[ParamVector], ParamVector],

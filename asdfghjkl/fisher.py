@@ -438,7 +438,6 @@ def fisher_free(
         is_distributed=False,
         print_progress=False,
         random_seed=None,
-        save_log=False,
         **kwargs
 ):
 
@@ -469,8 +468,7 @@ def fisher_free(
                                      tol=tol,
                                      preconditioner=preconditioner,
                                      print_progress=print_progress,
-                                     random_seed=random_seed,
-                                     save_log=save_log)
+                                     random_seed=random_seed)
 
 
 fisher_free_for_cross_entropy = partial(fisher_free, loss_type=LOSS_CROSS_ENTROPY)
