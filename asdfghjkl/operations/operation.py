@@ -239,6 +239,8 @@ class OperationManager:
         if self._vectors is None:
             return None
         vectors = self._vectors.get_vectors_by_module(module)
+        if vectors is None:
+            return None
         if flatten:
             return vectors.get_flatten_vector()
         return vectors

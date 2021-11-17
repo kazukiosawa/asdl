@@ -71,6 +71,9 @@ class ParamVector:
 
     def get_vectors_by_params(self, params: List[torch.Tensor]):
         vectors = {p: self.vectors[p] for p in params if p in self.vectors}
+        if len(vectors) == 0:
+            return None
+        params = list(vectors.keys())
         return ParamVector(params, vectors)
 
     def get_vector_by_param(self, param: torch.Tensor, default=None) -> torch.Tensor:
