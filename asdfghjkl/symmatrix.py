@@ -263,7 +263,7 @@ class SymMatrix:
         if vectors is not None:
             v = vectors.get_flatten_vector()
             mat_v = torch.mv(mat, v)
-            rst = ParamVector(vectors.params, mat_v)
+            rst = ParamVector(vectors.params(), mat_v)
             if inplace:
                 for v1, v2 in zip(vectors.values(), rst.values()):
                     v1.copy_(v2)

@@ -462,7 +462,7 @@ def fisher_free(
 
     if b is None:
         grads = {p: p.grad for p in model.parameters() if p.requires_grad}
-        b = ParamVector(list(grads.keys()), grads)
+        b = ParamVector(grads.keys(), grads.values())
 
     # for making MC samplings at each iteration deterministic
     if fisher_type == FISHER_MC and random_seed is None:

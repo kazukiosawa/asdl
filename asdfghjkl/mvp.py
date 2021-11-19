@@ -94,7 +94,7 @@ def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
 
     x = init_x
     if x is None:
-        x = ParamVector(b.params, [torch.zeros_like(p) for p in b.params])
+        x = ParamVector(b.params(), [torch.zeros_like(p) for p in b.params()])
         r = b.copy()
     else:
         Ax = _call_mvp(x)
