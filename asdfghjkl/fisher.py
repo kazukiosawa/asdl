@@ -191,16 +191,21 @@ class _FisherBase(MatrixManager):
 
     def load_fvp(self, fisher_shape: str) -> ParamVector:
         if fisher_shape == SHAPE_FULL:
-            return getattr(self._model, self.fvp_attr, None)
+            v = getattr(self._model, self.fvp_attr, None)
+            if v is None:
+                return None
+            return v.copy()
         else:
             rst = None
             for module in self._model.modules():
+                if module == self._model:
+                    continue
                 v = getattr(module, self.fvp_attr, None)
                 if v is not None:
                     if rst is None:
-                        rst = v
+                        rst = v.copy()
                     else:
-                        rst.extend(v)
+                        rst.extend(v.copy())
             return rst
 
 
@@ -398,7 +403,7 @@ def fisher_eig(
                              is_distributed=is_distributed,
                              all_reduce=True,
                              **kwargs)
-        return f.load_fvp(fisher_shape).copy()
+        return f.load_fvp(fisher_shape)
 
     # for making MC samplings at each iteration deterministic
     random_seed = torch.rand(1) * 100 if fisher_type == FISHER_MC else None
@@ -453,7 +458,7 @@ def fisher_free(
                              is_distributed=is_distributed,
                              all_reduce=True,
                              **kwargs)
-        return f.load_fvp(fisher_shape).copy()
+        return f.load_fvp(fisher_shape)
 
     if b is None:
         grads = {p: p.grad for p in model.parameters() if p.requires_grad}
