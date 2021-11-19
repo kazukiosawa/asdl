@@ -61,7 +61,7 @@ class TestCG(unittest.TestCase):
 
     def test_linear(self):
         """
-        Compare kernels for LinearNet.
+        Compare natural gradients for LinearNet.
         """
         n_dim = 32
         inputs = torch.randn(self.n_data, n_dim)
@@ -73,7 +73,7 @@ class TestCG(unittest.TestCase):
 
     def test_conv(self):
         """
-        Compare kernels for ConvNet.
+        Compare natural gradients for ConvNet.
         """
         n_dim = 16
         n_channels = 3
