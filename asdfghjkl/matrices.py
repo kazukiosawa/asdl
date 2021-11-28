@@ -1,12 +1,9 @@
 import os
 import copy
-import inspect
 
 import torch
-from torch.nn import Module
 import torch.distributed as dist
 
-from .core import supported_modules
 from .symmatrix import SymMatrix
 
 HESSIAN = 'hessian'  # Hessian
@@ -44,7 +41,7 @@ def _requires_matrix(module: torch.nn.Module):
         return False
     if module.weight.requires_grad:
         return True
-    return hasattr(module, 'bias') and module.bias.requires_grad
+    return hasattr(module, 'bias') and module.bias is not None and module.bias.requires_grad
 
 
 class MatrixManager:

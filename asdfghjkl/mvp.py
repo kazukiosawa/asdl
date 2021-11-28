@@ -1,19 +1,21 @@
 import math
-import copy
+from typing import List, Callable
 
+import numpy as np
 import torch
+import torch.nn as nn
 import torch.distributed as dist
-from .utils import *
+from .vector import ParamVector, normalization, orthnormal
 
 __all__ = [
     'power_method',
-    'conjugate_gradient_method',
-    'reduce_params'
+    'stochastic_lanczos_quadrature',
+    'conjugate_gradient_method'
 ]
 
 
-def power_method(mvp_fn,
-                 model,
+def power_method(mvp_fn: Callable[[ParamVector], ParamVector],
+                 model: nn.Module,
                  top_n=1,
                  max_iters=100,
                  tol=1e-3,
@@ -33,15 +35,15 @@ def power_method(mvp_fn,
         if print_progress:
             print(message)
 
-    eigvals = []
-    eigvecs = []
+    eigvals: List[float] = []
+    eigvecs: List[ParamVector] = []
     for i in range(top_n):
         _report(f'start power iteration for lambda({i+1}).')
-        vec = [torch.randn_like(p) for p in params]
+        vec = ParamVector(params, [torch.randn_like(p) for p in params])
         if is_distributed:
-            vec = flatten_parameters(vec)
+            vec = vec.get_flatten_vector()
             dist.broadcast(vec, src=0)
-            vec = unflatten_like_parameters(vec, params)
+            vec = ParamVector(params, vec)
 
         eigval = None
         last_eigval = None
@@ -49,7 +51,7 @@ def power_method(mvp_fn,
         for j in range(max_iters):
             vec = orthnormal(vec, eigvecs)
             Mv = _mvp(mvp_fn, vec, random_seed=random_seed)
-            eigval = group_product(Mv, vec).item()
+            eigval = Mv.dot(vec).item()
             if j > 0:
                 diff = abs(eigval - last_eigval) / (abs(last_eigval) + 1e-6)
                 _report(f'{j}/{max_iters} diff={diff}')
@@ -61,13 +63,15 @@ def power_method(mvp_fn,
         eigvecs.append(vec)
 
     # sort both in descending order
-    eigvals, eigvecs = (list(t) for t in zip(*sorted(zip(eigvals, eigvecs))[::-1]))
+    indices = np.argsort(eigvals)[::-1]
+    eigvals = [eigvals[idx] for idx in indices]
+    eigvecs = [eigvecs[idx] for idx in indices]
 
     return eigvals, eigvecs
 
 
-def stochastic_lanczos_quadrature(mvp_fn,
-                                  model,
+def stochastic_lanczos_quadrature(mvp_fn: Callable[[ParamVector], ParamVector],
+                                  model: nn.Module,
                                   n_v=1,
                                   num_iter=100,
                                   is_distributed=False,
@@ -79,43 +83,44 @@ def stochastic_lanczos_quadrature(mvp_fn,
 
     params = [p for p in model.parameters() if p.requires_grad]
     device = next(model.parameters()).device
-    eigen_list_full = []
-    weight_list_full = []
+    eigval_list_full: List[List[float]] = []
+    weight_list_full: List[List[float]] = []
 
     for k in range(n_v):
         vec = [torch.randint_like(p, high=2) for p in params]
         for v_i in vec:
             v_i[v_i==0] = -1
+        vec = ParamVector(params, vec)
         vec = normalization(vec)
         if is_distributed:
-            vec = flatten_parameters(vec)
+            vec = vec.get_flatten_vector()
             dist.broadcast(vec, src=0)
-            vec = unflatten_like_parameters(vec, params)
+            vec = ParamVector(params, vec)
 
-        vec_list = [vec]
-        alpha_list = []
-        beta_list = []
+        vec_list: List[ParamVector] = [vec]
+        alpha_list: List[float] = []
+        beta_list: List[float] = []
         for i in range(num_iter):
             if i==0:
                 w_prime = _mvp(mvp_fn, vec, random_seed=random_seed)
-                alpha = group_product(w_prime, vec)
+                alpha = w_prime.dot(vec)
                 alpha_list.append(alpha.item())
-                w = group_add(w_prime, vec, alpha=-alpha)
+                w = w_prime.add(vec, alpha=-alpha)
             else:
-                beta = torch.sqrt(group_product(w, w))
+                beta = torch.sqrt(w.dot(w))
                 beta_list.append(beta.item())
                 if beta.item() != 0.:
                     vec = orthnormal(w, vec_list)
                     vec_list.append(vec)
                 else:
-                    vec = [torch.randn_like(p) for p in params]
+                    vec = ParamVector(params, [torch.randn_like(p) for p in params])
                     vec = orthnormal(vec, vec_list)
                     vec_list.append(vec)
                 w_prime = _mvp(mvp_fn, vec, random_seed=random_seed)
-                alpha = group_product(w_prime, vec)
+                alpha = w_prime.dot(vec)
                 alpha_list.append(alpha.item())
-                w = group_add(w_prime, vec, alpha=-alpha)
-                w = group_add(w, v_list[-2], alpha=-beta)
+                w = w_prime.add(vec, alpha=-alpha)
+                w = w.add(vec_list[-2], alpha=-beta)
         
         T = torch.zeros(num_iter, num_iter).to(device)
         for i in range(num_iter):
@@ -125,60 +130,59 @@ def stochastic_lanczos_quadrature(mvp_fn,
                 T[i, i+1] = beta_list[i]
         eigval, eigvec = torch.linalg.eigh(T)
         weight_list = eigvec[0,:]**2
-        eigen_list_full.append(eigval.tolist())
+        eigval_list_full.append(eigval.tolist())
         weight_list_full.append(weight_list.tolist())
     
-    return eigen_list_full, weight_list_full
+    return eigval_list_full, weight_list_full
 
 
-def conjugate_gradient_method(mvp_fn,
-                              b,
-                              init_x=None,
+def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
+                              b: ParamVector,
+                              init_x: ParamVector = None,
                               damping=1e-3,
                               max_iters=None,
                               tol=1e-8,
                               preconditioner=None,
                               print_progress=False,
-                              random_seed=None,
-                              save_log=False):
+                              random_seed=None) -> ParamVector:
     """
     Solve (A + d * I)x = b by conjugate gradient method.
     d: damping
     Return x when x is close enough to inv(A) * b.
     """
-    if max_iters is None:
-        n_dim = sum([_b.numel() for _b in b])
-        max_iters = n_dim
+    if not isinstance(b, ParamVector):
+        raise TypeError(f'b has to be an instance of {ParamVector}. {type(b)} is given.')
 
-    def _call_mvp(v):
+    if max_iters is None:
+        max_iters = b.numel()
+
+    def _call_mvp(v: ParamVector) -> ParamVector:
         return _mvp(mvp_fn, v, random_seed, damping)
 
     x = init_x
     if x is None:
-        x = [torch.zeros_like(_b) for _b in b]
-        r = copy.deepcopy(b)
+        x = ParamVector(b.params(), [torch.zeros_like(p) for p in b.params()])
+        r = b.copy()
     else:
         Ax = _call_mvp(x)
-        r = group_add(b, Ax, -1)
+        r = b.add(Ax, alpha=-1)
 
     if preconditioner is None:
-        p = copy.deepcopy(r)
-        last_rz = group_product(r, r)
+        p = r.copy()
+        last_rz = r.dot(r)
     else:
-        p = preconditioner.precondition_vector(r)
-        last_rz = group_product(r, p)
+        p = preconditioner.precondition(r)
+        last_rz = r.dot(p)
 
-    b_norm = math.sqrt(group_product(b, b))
+    b_norm = b.norm()
 
-    log = []
     for i in range(max_iters):
         Ap = _call_mvp(p)
-        alpha = last_rz / group_product(p, Ap)
-        x = group_add(x, p, alpha)
-        r = group_add(r, Ap, -alpha)
-        rr = group_product(r, r)
+        alpha = last_rz / p.dot(Ap)
+        x.add_(p, alpha)
+        r.add_(Ap, -alpha)
+        rr = r.dot(r)
         err = math.sqrt(rr) / b_norm
-        log.append({'step': i + 1, 'error': err})
         if print_progress:
             print(f'{i+1}/{max_iters} err={err}')
         if err < tol:
@@ -187,48 +191,24 @@ def conjugate_gradient_method(mvp_fn,
             z = r
             rz = rr
         else:
-            z = preconditioner.precondition_vector(r)
-            rz = group_product(r, z)
+            z = preconditioner.precondition(r)
+            rz = r.dot(z)
 
         beta = rz / last_rz  # Fletcher-Reeves
-        p = group_add(z, p, beta)
+        p = z.add(p, beta)
         last_rz = rz
 
-    if save_log:
-        return x, log
-    else:
-        return x
+    return x
 
 
-def _mvp(mvp_fn,
-         vec,
+def _mvp(mvp_fn: Callable[[ParamVector], ParamVector],
+         vec: ParamVector,
          random_seed=None,
-         damping=None):
+         damping=None) -> ParamVector:
     if random_seed:
         # for matrices that are not deterministic (e.g., fisher_mc)
         torch.manual_seed(random_seed)
     Mv = mvp_fn(vec)
     if damping:
-        Mv = group_add(Mv, vec, damping)
+        Mv.add_(vec, alpha=damping)
     return Mv
-
-
-def reduce_params(params, is_master=True, all_reduce=False):
-    # pack
-    packed_tensor = flatten_parameters(params)
-    if all_reduce:
-        # all-reduce
-        dist.all_reduce(packed_tensor)
-    else:
-        dist.reduce(packed_tensor, dst=0)
-    if all_reduce or is_master:
-        # unpack
-        rst = unflatten_like_parameters(packed_tensor, params)
-    else:
-        rst = None
-
-    dist.barrier()
-
-    return rst
-
-

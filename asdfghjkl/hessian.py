@@ -1,7 +1,8 @@
 import torch
 from .symmatrix import SymMatrix, Diag
 from .matrices import SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_DIAG, HESSIAN, MatrixManager
-from .mvp import power_method, conjugate_gradient_method, reduce_params
+from .mvp import power_method, conjugate_gradient_method
+from .vector import ParamVector, reduce_vectors
 
 __all__ = [
     'hessian',
@@ -70,7 +71,7 @@ def hessian(model,
 
 def hvp(model,
         loss_fn,
-        vec,
+        vec: ParamVector,
         inputs=None,
         targets=None,
         data_loader=None,
@@ -88,7 +89,7 @@ def hvp(model,
             if rst is None:
                 rst = new_rst
             else:
-                rst = [v1 + v2 for v1, v2 in zip(rst, new_rst)]
+                rst += new_rst
     else:
         assert inputs is not None and targets is not None
         scale = 1 / inputs.shape[0] if data_average else 1
@@ -96,17 +97,18 @@ def hvp(model,
         rst = _hvp(model, loss_fn, inputs, targets, vec)
 
     if is_distributed:
-        rst = reduce_params(rst, is_master, all_reduce)
+        rst = reduce_vectors(rst, is_master, all_reduce)
 
-    return [v * scale for v in rst]
+    return rst.mul_(scale)
 
 
-def _hvp(model, loss_fn, inputs, targets, vec):
+def _hvp(model, loss_fn, inputs, targets, vec) -> ParamVector:
     model.zero_grad()
     loss = loss_fn(model(inputs), targets)
     params = [p for p in model.parameters() if p.requires_grad]
     grads = torch.autograd.grad(loss, inputs=params, create_graph=True)
-    return torch.autograd.grad(grads, inputs=params, grad_outputs=vec)
+    v = torch.autograd.grad(grads, inputs=params, grad_outputs=vec)
+    return ParamVector(params, v)
 
 
 def hessian_eig(
@@ -122,7 +124,7 @@ def hessian_eig(
     print_progress=False,
     data_average=False
 ):
-    def hvp_fn(vec):
+    def hvp_fn(vec: ParamVector) -> ParamVector:
         return hvp(model,
                    loss_fn,
                    vec,
@@ -158,7 +160,7 @@ def hessian_free(
         print_progress=False,
         data_average=False
 ):
-    def hvp_fn(vec):
+    def hvp_fn(vec: ParamVector) -> ParamVector:
         return hvp(model,
                    loss_fn,
                    vec,

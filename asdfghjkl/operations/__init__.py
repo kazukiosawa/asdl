@@ -18,13 +18,18 @@ __all__ = [
     'ScaleExt',
     'get_op_class',
     'Operation',
+    'OP_FULL_COV',
+    'OP_FULL_CVP',
+    'OP_COV',
+    'OP_CVP',
     'OP_COV_KRON',
     'OP_COV_DIAG',
     'OP_COV_UNIT_WISE',
     'OP_GRAM_DIRECT',
     'OP_GRAM_HADAMARD',
     'OP_BATCH_GRADS',
-    'ALL_OPS'
+    'ALL_OPS',
+    'OperationManager'
 ]
 
 
