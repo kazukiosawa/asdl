@@ -3,6 +3,7 @@ from .operations import *
 from .core import extend, supported_modules
 from .symmatrix import *
 from .matrices import *
+from .vector import *
 from .gradient import *
 from .mvp import *
 from .fisher import *

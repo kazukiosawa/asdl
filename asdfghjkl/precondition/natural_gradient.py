@@ -1,9 +1,12 @@
 import warnings
+
+import torch
 from torch import nn
 
 from ..core import module_wise_assignments, modules_to_assign
 from ..matrices import *
 from ..symmatrix import SymMatrix
+from ..vector import ParamVector
 from ..fisher import calculate_fisher, LOSS_CROSS_ENTROPY
 
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
@@ -55,7 +58,8 @@ class NaturalGradient:
     def parameters_for(self, shape):
         for module in self.modules_for(shape):
             for p in module.parameters():
-                yield p
+                if p.requires_grad:
+                    yield p
 
     def _get_module_fisher(self, module, postfix=None):
         if postfix is None:
@@ -88,10 +92,10 @@ class NaturalGradient:
             for module in self.modules_for(shape):
                 matrix = self._get_module_symmatrix(module, shape)
                 if matrix is not None:
-                    matrix.scaling(scale)
+                    matrix.mul_(scale)
         fisher = self._get_full_fisher()
         if fisher is not None:
-            fisher.scaling(scale)
+            fisher.mul_(scale)
 
     def _update_curvature(self,
                           inputs=None,
@@ -111,9 +115,9 @@ class NaturalGradient:
             self._scale_fisher(1 - ema_decay)
 
         rst = calculate_fisher(self.model,
-                               loss_type=self.loss_type,
                                fisher_type=self.fisher_type,
                                fisher_shapes=self.fisher_shape,
+                               loss_type=self.loss_type,
                                inputs=inputs,
                                targets=targets,
                                data_loader=data_loader,
@@ -182,28 +186,35 @@ class NaturalGradient:
         if fisher is not None:
             fisher.update_inv(damping)
 
-    def precondition(self, vecs=None):
+    def precondition(self, vectors: ParamVector = None):
         for shape in _module_level_shapes:
             for module in self.modules_for(shape):
-                self.precondition_module(module, shape)
-        fisher = self._get_full_fisher()
-        if fisher is not None:
-            if vecs is None:
-                vecs = [p.grad for p in self.parameters_for(SHAPE_FULL) if p.requires_grad]
-            fisher.mvp(vecs=vecs, use_inv=True, inplace=True)
+                self.precondition_module(module, shape, vectors)
+        params = [p for p in self.parameters_for(SHAPE_FULL)]
+        if len(params) > 0:
+            fisher = self._get_full_fisher()
+            assert fisher is not None, f'Fisher of shape {SHAPE_FULL} has not been calculated.'
+            if vectors is None:
+                vectors = ParamVector(params, [p.grad for p in params])
+            fisher.mvp(vectors=vectors, use_inv=True, inplace=True)
 
-    def precondition_module(self, module, shape=None, vec_weight=None, vec_bias=None):
+    def precondition_module(self, module, shape=None, vectors: ParamVector = None,
+                            vec_weight: torch.Tensor = None, vec_bias: torch.Tensor = None):
         if shape is None:
             for s in _module_level_shapes:
                 if module in self.modules_for(s):
                     shape = s
                     break
+        if vectors is not None:
+            vec_weight = vectors.get_vector_by_param(module.weight, None)
+            vec_bias = vectors.get_vector_by_param(module.bias, None)
         assert shape is not None, f'No shape is assigned to module: {module}.'
         matrix = self._get_module_symmatrix(module, shape)
-        if vec_weight is None:
+        assert matrix is not None, f'Matrix of shape {shape} for module {module} has not been calculated.'
+        if vec_weight is None and module.weight.requires_grad:
             vec_weight = module.weight.grad
-            if vec_bias is None and _bias_requires_grad(module):
-                vec_bias = module.bias.grad
+        if vec_bias is None and _bias_requires_grad(module):
+            vec_bias = module.bias.grad
         matrix.mvp(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=True, inplace=True)
 
 

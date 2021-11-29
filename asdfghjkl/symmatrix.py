@@ -3,6 +3,7 @@ from operator import iadd
 import numpy as np
 import torch
 from .utils import add_value_to_diagonal, cholesky_inv
+from .vector import ParamVector
 
 __all__ = [
     'matrix_to_tril',
@@ -63,6 +64,10 @@ def get_n_cols_by_tril(tril: torch.Tensor):
     return int(np.sqrt(2 * numel + 0.25) - 0.5)
 
 
+def symeig(A: torch.Tensor, upper=True):
+    return torch.linalg.eigvalsh(A, UPLO='U' if upper else 'L')
+
+
 def _save_as_numpy(path, tensor):
     dirname = os.path.dirname(path)
     if not os.path.isdir(dirname):
@@ -76,11 +81,21 @@ def _load_from_numpy(path, device='cpu'):
 
 
 class SymMatrix:
-    def __init__(self, data=None, kron=None, diag=None, unit=None):
+    def __init__(self, data=None, kron=None, diag=None, unit=None,
+                 kron_A=None, kron_B=None, diag_weight=None, diag_bias=None, unit_data=None):
         self.data = data
-        self.kron = kron
-        self.diag = diag
-        self.unit = unit
+        if kron_A is not None or kron_B is not None:
+            self.kron = Kron(kron_A, kron_B)
+        else:
+            self.kron = kron
+        if diag_weight is not None or diag_bias is not None:
+            self.diag = Diag(diag_weight, diag_bias)
+        else:
+            self.diag = diag
+        if unit_data is not None:
+            self.unit = UnitWise(unit_data)
+        else:
+            self.unit = unit
         self.inv = None
 
     @property
@@ -101,7 +116,7 @@ class SymMatrix:
 
     def __add__(self, other):
         # NOTE: inv will not be preserved
-        values = []
+        values = {}
         for attr in ['data', 'kron', 'diag', 'unit']:
             self_value = getattr(self, attr)
             other_value = getattr(other, attr)
@@ -112,9 +127,9 @@ class SymMatrix:
                     value = other_value
             else:
                 value = self_value
-            values.append(value)
+            values[attr] = value
 
-        return SymMatrix(*values)
+        return SymMatrix(**values)
 
     def __iadd__(self, other):
         for attr in ['data', 'kron', 'diag', 'unit']:
@@ -127,25 +142,25 @@ class SymMatrix:
                     setattr(self, attr, other_value)
         return self
 
-    def scaling(self, scale):
+    def mul_(self, value):
         if self.has_data:
-            self.data.mul_(scale)
+            self.data.mul_(value)
         if self.has_kron:
-            self.kron.scaling(scale)
+            self.kron.mul_(value)
         if self.has_diag:
-            self.diag.scaling(scale)
+            self.diag.mul_(value)
         if self.has_unit:
-            self.unit.scaling(scale)
+            self.unit.mul_(value)
         return self
 
     def eigenvalues(self):
         assert self.has_data
-        eig, _ = torch.symeig(self.data)
+        eig = symeig(self.data)
         return torch.sort(eig, descending=True)[0]
 
     def top_eigenvalue(self):
         assert self.has_data
-        eig, _ = torch.symeig(self.data)
+        eig = symeig(self.data)
         return eig.max().item()
 
     def trace(self):
@@ -239,42 +254,48 @@ class SymMatrix:
         if self.has_unit:
             self.unit.update_inv(damping)
 
-    def mvp(self, vecs=None, vec_weight=None, vec_bias=None, use_inv=False, inplace=False):
+    def mvp(self, vectors: ParamVector = None,
+            vec_weight: torch.Tensor = None, vec_bias: torch.Tensor = None,
+            use_inv=False, inplace=False):
         mat = self.inv if use_inv else self.data
 
         # full
-        if vecs is not None:
-            v = torch.cat([vec.flatten() for vec in vecs])
+        if vectors is not None:
+            v = vectors.get_flatten_vector()
             mat_v = torch.mv(mat, v)
-            pointer = 0
-            mat_vecs = []
-            for vec in vecs:
-                numel = vec.numel()
-                mat_vec = mat_v[pointer: pointer + numel].view_as(vec)
-                mat_vecs.append(mat_vec)
-                if inplace:
-                    vec.copy_(mat_vec)
-                pointer += numel
-            return mat_vecs
+            rst = ParamVector(vectors.params(), mat_v)
+            if inplace:
+                for v1, v2 in zip(vectors.values(), rst.values()):
+                    v1.copy_(v2)
+            return rst
 
         # layer-wise
-        assert vec_weight is not None
-        vec1d = vec_weight.flatten()
+        assert vec_weight is not None or vec_bias is not None
+        vecs = []
+        if vec_weight is not None:
+            vecs.append(vec_weight.flatten())
         if vec_bias is not None:
-            vec1d = torch.cat([vec1d, vec_bias.flatten()])
+            vecs.append(vec_bias.flatten())
+        vec1d = torch.cat(vecs)
         mvp1d = torch.mv(mat, vec1d)
-        if vec_bias is not None:
-            w_numel = vec_weight.numel()
-            mvp_w = mvp1d[:w_numel].view_as(vec_weight)
-            mvp_b = mvp1d[w_numel:]
+        if vec_weight is not None:
+            if vec_bias is not None:
+                w_numel = vec_weight.numel()
+                mvp_w = mvp1d[:w_numel].view_as(vec_weight)
+                mvp_b = mvp1d[w_numel:]
+                if inplace:
+                    vec_weight.copy_(mvp_w)
+                    vec_bias.copy_(mvp_b)
+                return mvp_w, mvp_b
+            mvp_w = mvp1d.view_as(vec_weight)
             if inplace:
                 vec_weight.copy_(mvp_w)
+            return [mvp_w]
+        else:
+            mvp_b = mvp1d.view_as(vec_bias)
+            if inplace:
                 vec_bias.copy_(mvp_b)
-            return mvp_w, mvp_b
-        mvp_w = mvp1d.view_as(vec_weight)
-        if inplace:
-            vec_weight.copy_(mvp_w)
-        return mvp_w
+            return [mvp_b]
 
 
 class Kron:
@@ -328,20 +349,20 @@ class Kron:
             self._B_dim = self.B.shape[0]
         return self._B_dim
 
-    def scaling(self, scale):
-        self.A.mul_(scale)
-        self.B.mul_(scale)
+    def mul_(self, value):
+        self.A.mul_(value)
+        self.B.mul_(value)
         return self
 
     def eigenvalues(self):
-        eig_A, _ = torch.symeig(self.A)
-        eig_B, _ = torch.symeig(self.B)
+        eig_A = symeig(self.A)
+        eig_B = symeig(self.B)
         eig = torch.ger(eig_A, eig_B).flatten()
         return torch.sort(eig, descending=True)[0]
 
     def top_eigenvalue(self):
-        eig_A, _ = torch.symeig(self.A)
-        eig_B, _ = torch.symeig(self.B)
+        eig_A = symeig(self.A)
+        eig_B = symeig(self.B)
         return (eig_A.max() * eig_B.max()).item()
 
     def trace(self):
@@ -459,11 +480,11 @@ class Diag:
     def has_bias(self):
         return self.bias is not None
 
-    def scaling(self, scale):
+    def mul_(self, value):
         if self.has_weight:
-            self.weight.mul_(scale)
+            self.weight.mul_(value)
         if self.has_bias:
-            self.bias.mul_(scale)
+            self.bias.mul_(value)
         return self
 
     def eigenvalues(self):
@@ -523,20 +544,24 @@ class Diag:
         if self.has_bias:
             self.bias_inv = 1 / (self.bias + damping)
 
-    def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
-        mat_w = self.weight_inv if use_inv else self.weight
-        if inplace:
-            mvp_w = vec_weight.mul_(mat_w)
-        else:
-            mvp_w = vec_weight.mul(mat_w)
+    def mvp(self, vec_weight=None, vec_bias=None, use_inv=False, inplace=False):
+        assert vec_weight is not None or vec_bias is not None
+        rst = []
+        if vec_weight is not None:
+            mat_w = self.weight_inv if use_inv else self.weight
+            if inplace:
+                mvp_w = vec_weight.mul_(mat_w)
+            else:
+                mvp_w = vec_weight.mul(mat_w)
+            rst.append(mvp_w)
         if vec_bias is not None:
             mat_b = self.bias_inv if use_inv else self.bias
             if inplace:
                 mvp_b = vec_bias.mul_(mat_b)
             else:
                 mvp_b = vec_bias.mul(mat_b)
-            return mvp_w, mvp_b
-        return mvp_w
+            rst.append(mvp_b)
+        return rst
 
 
 class UnitWise:
@@ -567,19 +592,19 @@ class UnitWise:
     def has_data(self):
         return self.data is not None
 
-    def scaling(self, scale):
+    def mul_(self, value):
         if self.has_data:
-            self.data.mul_(scale)
+            self.data.mul_(value)
         return self
 
     def eigenvalues(self):
         assert self.has_data
-        eig = [torch.symeig(block)[0] for block in self.data]
+        eig = [symeig(block) for block in self.data]
         eig = torch.cat(eig)
         return torch.sort(eig, descending=True)[0]
 
     def top_eigenvalue(self):
-        top = max([torch.symeig(block)[0].max().item() for block in self.data])
+        top = max([symeig(block).max().item() for block in self.data])
         return top
 
     def trace(self):
