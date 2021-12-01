@@ -9,6 +9,7 @@ import torchvision
 from asdfghjkl import KFAC, FISHER_EMP
 from asdfghjkl import empirical_natural_gradient
 from asdfghjkl import LBFGS
+from asdfghjkl.precondition import Shampoo
 import profiling
 import models
 
@@ -62,6 +63,28 @@ def time_sgd():
 
 def time_adam():
     optimizer = torch.optim.Adam(model.parameters(), lr=1)
+    loss = torch.Tensor().to(device)
+
+    def fwd():
+        nonlocal loss
+        with torch.autograd.profiler.emit_nvtx():
+            loss = cross_entropy(model(x), t)
+
+    def bwd():
+        with torch.autograd.profiler.emit_nvtx():
+            loss.backward()
+
+    def upd_param():
+        with torch.autograd.profiler.emit_nvtx():
+            optimizer.step()
+
+    profiling.time_funcs([fwd, bwd, upd_param],
+                         num_iters=args.num_iters,
+                         num_warmups=args.num_warmups)
+
+
+def time_shampoo():
+    optimizer = Shampoo(model.parameters())
     loss = torch.Tensor().to(device)
 
     def fwd():
@@ -197,6 +220,8 @@ if __name__ == '__main__':
         time_sgd()
     elif args.optim == 'adam':
         time_adam()
+    elif args.optim == 'shampoo':
+        time_shampoo()
     elif args.optim == 'kfac':
         time_kfac()
     elif args.optim == 'smw':
@@ -204,9 +229,10 @@ if __name__ == '__main__':
     elif args.optim == 'lbfgs':
         time_lbfgs()
 
+    max_memory = torch.cuda.max_memory_allocated()
+    print('max memory allocated: ', max_memory)
     if args.wandb:
         import wandb
-        max_memory = torch.cuda.max_memory_allocated()
         wandb.init(config=dict_args)
         summary = {'max_memory_allocated': max_memory,
                    'num_params': sum(p.numel() for p in model.parameters())}
