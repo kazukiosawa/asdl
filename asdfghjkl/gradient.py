@@ -57,7 +57,7 @@ def batch_gradient(model, loss_fn, inputs, targets):
         model.zero_grad()
         f = model(inputs)
         loss = loss_fn(f, targets)
-        loss.backward()
+        loss.backward(retain_graph=True, create_graph=True)
     return f
 
 
