@@ -1,5 +1,4 @@
 import warnings
-from torch import nn
 from .operation import *
 from .linear import Linear
 from .conv import Conv2d
@@ -25,6 +24,8 @@ __all__ = [
     'OP_COV_KRON',
     'OP_COV_DIAG',
     'OP_COV_UNIT_WISE',
+    'OP_RFIM_RELU',
+    'OP_RFIM_SOFTMAX',
     'OP_GRAM_DIRECT',
     'OP_GRAM_HADAMARD',
     'OP_BATCH_GRADS',
