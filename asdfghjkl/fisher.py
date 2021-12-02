@@ -221,11 +221,12 @@ class FisherExactCrossEntropy(_FisherCrossEntropy):
         return FISHER_EXACT
 
     def _fisher_core(self, closure, outputs, unused):
-        probs = F.softmax(outputs, dim=1)
         log_probs = F.log_softmax(outputs, dim=1)
-        _, n_classes = probs.shape
-        probs, _targets = torch.sort(probs, dim=1, descending=True)
-        sqrt_probs = torch.sqrt(probs)
+        _, n_classes = log_probs.shape
+        with torch.no_grad():
+            probs = F.softmax(outputs, dim=1)
+            probs, _targets = torch.sort(probs, dim=1, descending=True)
+            sqrt_probs = torch.sqrt(probs)
         for i in range(n_classes):
             def loss_expr():
                 loss = F.nll_loss(log_probs, _targets[:, i], reduction='none')

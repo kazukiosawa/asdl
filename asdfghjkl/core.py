@@ -18,7 +18,7 @@ def extend(model, *op_names, map_rule=None, vectors: ParamVector = None):
         def forward_hook(module, in_data, out_data):
             in_data = in_data[0].clone().detach()
             in_data = _preprocess_in_data(module, in_data, out_data)
-            manager.call_operations_in_forward(module, in_data)
+            manager.call_operations_in_forward(module, in_data, out_data)
 
             def backward_hook(out_grads):
                 out_grads = out_grads.clone().detach()
@@ -171,7 +171,7 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
         if module in specified_asgmts:
             yield *module_info, specified_asgmts[module]
         elif any(isinstance(key, str) and key in name for key in specified_asgmts):
-            key = next(isinstance(key, str) and key in name for key in specified_asgmts)
+            key = next(key for key in specified_asgmts if isinstance(key, str) and key in name)
             yield *module_info, specified_asgmts[key]
         elif module.__class__ in specified_asgmts:
             yield *module_info, specified_asgmts[module.__class__]
