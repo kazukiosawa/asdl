@@ -440,7 +440,7 @@ def fisher_esd(
         num_iter=100,
         num_bins=10000,
         sigma_squared=1e-5,
-        overhead=0.01,
+        overhead=None,
         is_distributed=False,
         **kwargs
 ):
@@ -476,19 +476,24 @@ def fisher_esd(
     eigvals = np.array(eigvals)
     weights = np.array(weights)
 
-    lambda_max = np.mean(np.max(eigvals, axis=1), axis=0) + overhead
-    lambda_min = np.mean(np.min(eigvals, axis=1), axis=0) - overhead
+    lambda_max = np.mean(np.max(eigvals, axis=1), axis=0)
+    lambda_min = np.mean(np.min(eigvals, axis=1), axis=0)
+    
+    sigma_squared = sigma_squared * max(1, (lambda_max - lambda_min))
+    if overhead is None:
+        overhead = np.sqrt(sigma_squared)
+    
+    range_max = lambda_max + overhead
+    range_min = np.max(0, lambda_min - overhead)
 
-    grids = np.linspace(lambda_min, lambda_max, num=num_bins)
-    sigma = sigma_squared * max(1, (lambda_max - lambda_min))
+    grids = np.linspace(range_min, range_max, num=num_bins)
 
-    num_runs = eigvals.shape[0]
-    density_output = np.zeros((num_runs, num_bins))
+    density_output = np.zeros((n_v, num_bins))
 
     for i in range(n_v):
         for j in range(num_bins):
             x = grids[j]
-            tmp_result = np.exp(-(x - eigvals[i, :])**2 / (2.0 * sigma)) / np.sqrt(2 * np.pi * sigma)
+            tmp_result = np.exp(-(x - eigvals[i, :])**2 / (2.0 * sigma_squared)) / np.sqrt(2 * np.pi * sigma_squared)
             density_output[i, j] = np.sum(tmp_result * weights[i, :])
     density = np.mean(density_output, axis=0)
     normalization = np.sum(density) * (grids[1] - grids[0])
