@@ -115,6 +115,10 @@ def stochastic_lanczos_quadrature(mvp_fn: Callable[[ParamVector], ParamVector],
                 else:
                     vec = ParamVector(params, [torch.randn_like(p) for p in params])
                     vec = orthnormal(vec, vec_list)
+                    if is_distributed:
+                        vec = vec.get_flatten_vector()
+                        dist.broadcast(vec, src=0)
+                        vec = ParamVector(params, vec)
                     vec_list.append(vec)
                 w_prime = _mvp(mvp_fn, vec, random_seed=random_seed)
                 alpha = w_prime.dot(vec)
