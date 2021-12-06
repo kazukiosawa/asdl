@@ -54,11 +54,11 @@ class ShampooHyperParams:
     # Block size for large layers (if > 0).
     # Block size = 1 ==> Adagrad (Don't do this, extremely inefficient!)
     # Block size should be as large as feasible under memory/time constraints.
-    block_size: int = 128
+    block_size: int = 0
     # Automatic shape interpretation (for eg: [4, 3, 1024, 512] would result in
     # 12 x [1024, 512] L and R statistics. Disabled by default which results in
     # Shampoo constructing statistics [4, 4], [3, 3], [1024, 1024], [512, 512].
-    best_effort_shape_interpretation: bool = True
+    best_effort_shape_interpretation: bool = False
     # Type of grafting (SGD or AdaGrad).
     # https://arxiv.org/pdf/2002.11803.pdf
     graft_type: int = LayerwiseGrafting.SGD
