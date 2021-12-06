@@ -14,6 +14,8 @@ OP_CVP = 'cvp'  # layer-wise covariance-vector product
 OP_COV_KRON = 'cov_kron'  # Kronecker-factored
 OP_COV_DIAG = 'cov_diag'  # diagonal
 OP_COV_UNIT_WISE = 'cov_unit_wise'  # unit-wise
+OP_RFIM_RELU = 'rfim_relu'  # relative FIM for ReLU
+OP_RFIM_SOFTMAX = 'rfim_softmax'  # relative FIM for sotmax
 
 # compute Gram matrix
 OP_GRAM_DIRECT = 'gram_direct'  # direct
@@ -23,6 +25,7 @@ OP_BATCH_GRADS = 'batch_grads'  # compute batched gradients (per-example gradien
 
 ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
            OP_COV_KRON, OP_COV_DIAG, OP_COV_UNIT_WISE,
+           OP_RFIM_RELU, OP_RFIM_SOFTMAX,
            OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS]
 
 
@@ -86,12 +89,11 @@ class Operation:
     def clear_results(self):
         self._op_results = {}
 
-    def forward_post_process(self, in_data: torch.Tensor):
+    def forward_post_process(self, in_data: torch.Tensor, out_data: torch.Tensor):
         module = self._module
 
-        if OP_COV_KRON in self._op_names or OP_GRAM_HADAMARD in self._op_names:
-            assert original_requires_grad(module, 'weight'), f'weight.requires_grad has to be True ' \
-                                                             f'for {OP_COV_KRON} and {OP_GRAM_HADAMARD} (module: {module}).'
+        if set([OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX]) & self._op_names:
+            assert original_requires_grad(module, 'weight'), f'weight.requires_grad has to be True (module: {module}).'
             if original_requires_grad(module, 'bias'):
                 in_data = self.extend_in_data(in_data)
 
@@ -108,6 +110,14 @@ class Operation:
                 else:
                     A = self.gram_A(module, in_data[:n1], in_data[n1:])
                 self.accumulate_result(A, OP_GRAM_HADAMARD, 'A')
+
+            if OP_RFIM_RELU in self._op_names:
+                out_data = out_data.clone().detach()
+                self.accumulate_result(self.rfim_relu(module, in_data, out_data), OP_RFIM_RELU)
+
+            if OP_RFIM_SOFTMAX in self._op_names:
+                out_data = out_data.clone().detach()
+                self.accumulate_result(self.rfim_softmax(module, in_data, out_data), OP_RFIM_SOFTMAX)
 
     def backward_pre_process(self, in_data, out_grads, vector: torch.Tensor = None):
         module = self._module
@@ -244,6 +254,14 @@ class Operation:
     def gram_B(module, out_grads1, out_grads2):
         raise NotImplementedError
 
+    @staticmethod
+    def rfim_relu(module, in_data, out_data):
+        raise NotImplementedError
+
+    @staticmethod
+    def rfim_softmax(module, in_data, out_data):
+        raise NotImplementedError
+
 
 class OperationManager:
     def __init__(self, vectors: ParamVector = None):
@@ -283,8 +301,8 @@ class OperationManager:
         for key in keys:
             del self._operations[key]
 
-    def call_operations_in_forward(self, module, in_data):
-        self.get_operation(module).forward_post_process(in_data)
+    def call_operations_in_forward(self, module, in_data, out_data):
+        self.get_operation(module).forward_post_process(in_data, out_data)
 
     def call_operations_in_backward(self, module, in_data, out_grads):
         vector = self.get_vectors_by_module(module, flatten=True)
@@ -411,3 +429,9 @@ class OperationManager:
             return None
         params = [p for p in module.parameters() if original_requires_grad(param=p)]
         return ParamVector(params, cvp)
+
+    def rfim_relu(self, module):
+        return self.get_result(module, OP_RFIM_RELU)
+
+    def rfim_softmax(self, module):
+        return self.get_result(module, OP_RFIM_SOFTMAX)

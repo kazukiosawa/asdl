@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from .operation import Operation
 
@@ -58,3 +59,19 @@ class Linear(Operation):
     @staticmethod
     def gram_B(module, out_grads1, out_grads2):
         return torch.matmul(out_grads1, out_grads2.T)  # n x n
+
+    @staticmethod
+    def rfim_relu(module, in_data, out_data):
+        nu = torch.sigmoid(out_data) ** 2  # n x f_out
+        xxt = torch.einsum('bi,bj->bij', in_data, in_data)  # n x f_in x f_in
+        return torch.einsum('bi,bjk->ijk', nu, xxt)  # f_out x f_in x f_in
+
+    @staticmethod
+    def rfim_softmax(module, in_data, out_data):
+        # equivalent to fisher_exact_for_cross_entropy
+        probs = F.softmax(out_data, dim=1)  # n x f_out
+        ppt = torch.bmm(probs.unsqueeze(2), probs.unsqueeze(1))  # n x f_out x f_out
+        diag_p = torch.stack([torch.diag(p) for p in probs], dim=0)  # n x f_out x f_out
+        f = diag_p - ppt  # n x f_out x f_out
+        xxt = torch.einsum('bi,bj->bij', in_data, in_data)  # n x f_in x f_in
+        return torch.einsum('bij,bkl->ikjl', f, xxt)  # (f_out)(f_in)(f_out)(f_in)
