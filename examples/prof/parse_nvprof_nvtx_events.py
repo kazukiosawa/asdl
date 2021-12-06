@@ -28,19 +28,20 @@ def get_markers():
     markers = []
     for _, row in df.iterrows():
         marker_id = row['id']
+        marker_name = row['name']
         sql = f"""
         SELECT timestamp
         FROM CUPTI_ACTIVITY_KIND_MARKER
         WHERE id = {marker_id}
         """
         _df = pd.read_sql(sql, con)
-        assert len(_df.index) == 2, f'Got {len(_df.index)} markers of the same id (name: {row["name"]}).' \
+        assert len(_df.index) == 2, f'Got {len(_df.index)} markers of the same id (name: {marker_name}).' \
                                     f' This has to be 2.'
         start = _df['timestamp'].iloc[0]
         end = _df['timestamp'].iloc[1]
         markers.append(
             {
-                'name': row['name'],
+                'name': marker_name,
                 'start': start,
                 'end': end,
                 'correlation_ids': get_correlation_ids_in_range(start, end)
@@ -79,10 +80,18 @@ def main():
     for kernel in kernels:
         _markers = [marker for marker in markers
                     if kernel['correlation_id'] in marker['correlation_ids']]
-        max_num_markers = max(max_num_markers, len(_markers))
+        if len(_markers) == 0:
+            continue
+        skip = False
         for i in range(len(_markers)):
-            kernel[f'marker{i}'] = _markers[i]['name']
-        save_kernels.append(kernel)
+            marker_name = _markers[i]['name']
+            if marker_name in exclude_names:
+                skip = True
+                break
+            kernel[f'marker{i}'] = marker_name
+        if not skip:
+            max_num_markers = max(max_num_markers, len(_markers))
+            save_kernels.append(kernel)
 
     print('Constructing dataframe and csv')
     df = pd.DataFrame(
@@ -103,6 +112,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('sqlite_path', type=str)
     parser.add_argument('--csv_path', type=str, default=None)
+    parser.add_argument('--exclude_names', type=str, default=None)
     args = parser.parse_args()
     con = sqlite3.connect(args.sqlite_path)
+    if args.exclude_names is not None:
+        exclude_names = args.exclude_names.split(',')
+    else:
+        exclude_names = []
     main()
