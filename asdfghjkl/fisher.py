@@ -484,7 +484,7 @@ def fisher_esd(
         overhead = np.sqrt(sigma_squared)
     
     range_max = lambda_max + overhead
-    range_min = np.max(0, lambda_min - overhead)
+    range_min = np.maximum(0., lambda_min - overhead)
 
     grids = np.linspace(range_min, range_max, num=num_bins)
 
