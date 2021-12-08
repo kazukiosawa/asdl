@@ -8,7 +8,7 @@ from .core import no_centered_cov
 from .utils import skip_param_grad
 from .matrices import *
 from .vector import ParamVector, reduce_vectors
-from .mvp import power_method, conjugate_gradient_method
+from .mvp import power_method, stochastic_lanczos_quadrature, conjugate_gradient_method
 
 _COV_FULL = 'cov_full'
 _CVP_FULL = 'cvp_full'
@@ -25,6 +25,9 @@ __all__ = [
     'fisher_eig',
     'fisher_eig_for_cross_entropy',
     'fisher_eig_for_mse',
+    'fisher_esd',
+    'fisher_esd_for_cross_entropy',
+    'fisher_esd_for_mse',
     'fisher_free',
     'fisher_free_for_cross_entropy',
     'fisher_free_for_mse',
@@ -424,6 +427,83 @@ def fisher_eig(
 
 fisher_eig_for_cross_entropy = partial(fisher_eig, loss_type=LOSS_CROSS_ENTROPY)
 fisher_eig_for_mse = partial(fisher_eig, loss_type=LOSS_MSE)
+
+
+def fisher_esd(
+        model,
+        fisher_type: str,
+        fisher_shape,
+        loss_type: str,
+        inputs=None,
+        targets=None,
+        data_loader=None,
+        n_v=1,
+        num_iter=100,
+        num_bins=10000,
+        sigma_squared=1e-5,
+        overhead=None,
+        is_distributed=False,
+        **kwargs
+):
+
+    # referenced from https://github.com/amirgholami/PyHessian/blob/master/density_plot.py
+
+    def fvp_fn(vec: ParamVector) -> ParamVector:
+        f = calculate_fisher(model,
+                             fisher_type,
+                             fisher_shape,
+                             loss_type,
+                             inputs=inputs,
+                             targets=targets,
+                             data_loader=data_loader,
+                             fvp=True,
+                             vec=vec,
+                             is_distributed=is_distributed,
+                             all_reduce=True,
+                             **kwargs)
+        return f.load_fvp(fisher_shape)
+    
+    # for making MC samplings at each iteration deterministic
+    random_seed = torch.rand(1) * 100 if fisher_type == FISHER_MC else None
+
+    eigvals, weights = stochastic_lanczos_quadrature(fvp_fn,
+                                                     model,
+                                                     n_v=n_v,
+                                                     num_iter=num_iter,
+                                                     is_distributed=is_distributed,
+                                                     random_seed=random_seed
+                                                     )
+    
+    eigvals = np.array(eigvals)
+    weights = np.array(weights)
+
+    lambda_max = np.mean(np.max(eigvals, axis=1), axis=0)
+    lambda_min = np.mean(np.min(eigvals, axis=1), axis=0)
+    
+    sigma_squared = sigma_squared * max(1, (lambda_max - lambda_min))
+    if overhead is None:
+        overhead = np.sqrt(sigma_squared)
+    
+    range_max = lambda_max + overhead
+    range_min = np.maximum(0., lambda_min - overhead)
+
+    grids = np.linspace(range_min, range_max, num=num_bins)
+
+    density_output = np.zeros((n_v, num_bins))
+
+    for i in range(n_v):
+        for j in range(num_bins):
+            x = grids[j]
+            tmp_result = np.exp(-(x - eigvals[i, :])**2 / (2.0 * sigma_squared)) / np.sqrt(2 * np.pi * sigma_squared)
+            density_output[i, j] = np.sum(tmp_result * weights[i, :])
+    density = np.mean(density_output, axis=0)
+    normalization = np.sum(density) * (grids[1] - grids[0])
+    density = density / normalization
+    return density, grids
+
+
+fisher_esd_for_cross_entropy = partial(fisher_esd, loss_type=LOSS_CROSS_ENTROPY)
+fisher_esd_for_mse = partial(fisher_esd, loss_type=LOSS_MSE)
 
 
 def fisher_free(

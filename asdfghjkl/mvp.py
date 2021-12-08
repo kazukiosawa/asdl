@@ -5,10 +5,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-from .vector import ParamVector, orthnormal
+from .vector import ParamVector, normalization, orthnormal
 
 __all__ = [
     'power_method',
+    'stochastic_lanczos_quadrature',
     'conjugate_gradient_method'
 ]
 
@@ -67,6 +68,76 @@ def power_method(mvp_fn: Callable[[ParamVector], ParamVector],
     eigvecs = [eigvecs[idx] for idx in indices]
 
     return eigvals, eigvecs
+
+
+def stochastic_lanczos_quadrature(mvp_fn: Callable[[ParamVector], ParamVector],
+                                  model: nn.Module,
+                                  n_v=1,
+                                  num_iter=100,
+                                  is_distributed=False,
+                                  random_seed=None):
+    # referenced from https://github.com/amirgholami/PyHessian/blob/master/pyhessian/hessian.py
+
+    assert n_v >= 1
+    assert num_iter >= 1
+
+    params = [p for p in model.parameters() if p.requires_grad]
+    device = next(model.parameters()).device
+    eigval_list_full: List[List[float]] = []
+    weight_list_full: List[List[float]] = []
+
+    for k in range(n_v):
+        vec = [torch.randint_like(p, high=2) for p in params]
+        for v_i in vec:
+            v_i[v_i==0] = -1
+        vec = ParamVector(params, vec)
+        vec = normalization(vec)
+        if is_distributed:
+            vec = vec.get_flatten_vector()
+            dist.broadcast(vec, src=0)
+            vec = ParamVector(params, vec)
+
+        vec_list: List[ParamVector] = [vec]
+        alpha_list: List[float] = []
+        beta_list: List[float] = []
+        for i in range(num_iter):
+            if i==0:
+                w_prime = _mvp(mvp_fn, vec, random_seed=random_seed)
+                alpha = w_prime.dot(vec)
+                alpha_list.append(alpha.item())
+                w = w_prime.add(vec, alpha=-alpha)
+            else:
+                beta = torch.sqrt(w.dot(w))
+                beta_list.append(beta.item())
+                if beta.item() != 0.:
+                    vec = orthnormal(w, vec_list)
+                    vec_list.append(vec)
+                else:
+                    vec = ParamVector(params, [torch.randn_like(p) for p in params])
+                    vec = orthnormal(vec, vec_list)
+                    if is_distributed:
+                        vec = vec.get_flatten_vector()
+                        dist.broadcast(vec, src=0)
+                        vec = ParamVector(params, vec)
+                    vec_list.append(vec)
+                w_prime = _mvp(mvp_fn, vec, random_seed=random_seed)
+                alpha = w_prime.dot(vec)
+                alpha_list.append(alpha.item())
+                w = w_prime.add(vec, alpha=-alpha)
+                w = w.add(vec_list[-2], alpha=-beta)
+        
+        T = torch.zeros(num_iter, num_iter).to(device)
+        for i in range(num_iter):
+            T[i, i] = alpha_list[i]
+            if i < num_iter-1:
+                T[i+1, i] = beta_list[i]
+                T[i, i+1] = beta_list[i]
+        eigval, eigvec = torch.linalg.eigh(T)
+        weight_list = eigvec[0,:]**2
+        eigval_list_full.append(eigval.tolist())
+        weight_list_full.append(weight_list.tolist())
+    
+    return eigval_list_full, weight_list_full
 
 
 def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
