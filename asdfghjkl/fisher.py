@@ -115,7 +115,7 @@ class _FisherBase(MatrixManager):
                         cxt.calc_full_cov(model)
                     if not calc_emp_loss_grad_after_fisher:
                         nonlocal total_loss
-                        total_loss += loss.item()
+                        total_loss += loss
 
                 y = model(x)
                 self._fisher_core(closure, y, t)
@@ -132,22 +132,25 @@ class _FisherBase(MatrixManager):
                 emp_loss = self.loss_fn(y, t)
                 emp_loss.backward()
                 nonlocal total_loss
-                total_loss += emp_loss.item()
+                total_loss += emp_loss
 
+            return y
+
+        outputs = None
         if data_loader is not None:
             # calculate fisher/fvp for the data_loader
             data_size = len(data_loader.dataset)
             if data_average:
                 scale /= data_size
             for inputs, targets in data_loader:
-                fisher_for_one_batch(inputs, targets)
+                outputs = fisher_for_one_batch(inputs, targets)
         else:
             # calculate fisher/fvp for a single batch
             assert inputs is not None
             data_size = inputs.shape[0]
             if data_average:
                 scale /= data_size
-            fisher_for_one_batch(inputs, targets)
+            outputs = fisher_for_one_batch(inputs, targets)
 
         if calc_emp_loss_grad and data_average:
             # divide gradients by data size
@@ -158,7 +161,7 @@ class _FisherBase(MatrixManager):
 
         if data_average:
             total_loss /= data_size
-        return total_loss
+        return total_loss, outputs
 
     def _fisher_core(self, closure, outputs, targets):
         raise NotImplementedError
@@ -349,25 +352,25 @@ def calculate_fisher(
             fisher_cls = FisherEmpMSE
 
     f = fisher_cls(model, **kwargs)
-    loss = f.calculate_fisher(
-             fisher_shapes,
-             inputs=inputs,
-             targets=targets,
-             data_loader=data_loader,
-             fvp=fvp,
-             vec=vec,
-             accumulate=accumulate,
-             data_average=data_average,
-             calc_emp_loss_grad=calc_emp_loss_grad,
-             seed=seed,
-             scale=scale)
+    loss, outputs = f.calculate_fisher(
+        fisher_shapes,
+        inputs=inputs,
+        targets=targets,
+        data_loader=data_loader,
+        fvp=fvp,
+        vec=vec,
+        accumulate=accumulate,
+        data_average=data_average,
+        calc_emp_loss_grad=calc_emp_loss_grad,
+        seed=seed,
+        scale=scale)
     if is_distributed:
         if fvp:
             f.reduce_fvp(is_master, all_reduce)
         else:
             f.reduce_fisher(is_master, all_reduce)
     if return_loss:
-        return f, loss
+        return f, loss, outputs
     else:
         return f
 

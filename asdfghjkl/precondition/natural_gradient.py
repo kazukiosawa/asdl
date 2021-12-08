@@ -129,7 +129,7 @@ class NaturalGradient:
                                scale=scale,
                                n_mc_samples=self.n_mc_samples)
         self.fisher_manager = rst[0]
-        return rst[1]  # loss value
+        return rst[1], rst[2]  # loss and outputs
 
     def accumulate_curvature(self,
                              inputs=None,
