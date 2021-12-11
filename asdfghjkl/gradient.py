@@ -52,19 +52,19 @@ def data_loader_gradient(
         dist.barrier()
 
 
-def batch_gradient(model, loss_fn, inputs, targets):
+def batch_gradient(model, loss_fn, inputs, targets, **backward_kwargs):
     with extend(model, OP_BATCH_GRADS):
         model.zero_grad()
         f = model(inputs)
         loss = loss_fn(f, targets)
-        loss.backward(retain_graph=True, create_graph=True)
+        loss.backward(**backward_kwargs)
     return f
 
 
-def batch_aug_gradient(model, loss_fn, inputs, targets):
+def batch_aug_gradient(model, loss_fn, inputs, targets, **backward_kwargs):
     with extend(model, OP_BATCH_GRADS):
         model.zero_grad()
         f = model(inputs)
         loss = loss_fn(f, targets)
-        loss.backward(retain_graph=True, create_graph=True)
+        loss.backward(**backward_kwargs)
     return f

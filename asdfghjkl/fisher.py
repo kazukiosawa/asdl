@@ -50,6 +50,7 @@ def fisher_for_cross_entropy(
     all_reduce=False,
     is_master=True,
     matrix_manager=None,
+    **backward_kwargs
 ):
     if isinstance(fisher_types, str):
         fisher_types = [fisher_types]
@@ -85,7 +86,8 @@ def fisher_for_cross_entropy(
         compute_full_fisher=SHAPE_FULL in fisher_shapes,
         compute_block_diag_fisher=SHAPE_BLOCK_DIAG in fisher_shapes,
         compute_param_grad=compute_param_grad,
-        n_mc_samples=n_mc_samples
+        n_mc_samples=n_mc_samples,
+        backward_kwargs=backward_kwargs
     )
 
     if data_loader is not None:
@@ -295,8 +297,11 @@ def _fisher_for_cross_entropy(
     compute_block_diag_fisher=False,
     compute_block_diag_fvp=False,
     vec=None,
-    n_mc_samples=1
+    n_mc_samples=1,
+    backward_kwargs=None
 ):
+    if backward_kwargs is None:
+        backward_kwargs = dict()
     logits = model(inputs)
     if logits.ndim > 2:
         # reduce augmented dimension
@@ -308,7 +313,7 @@ def _fisher_for_cross_entropy(
     def loss_and_backward(target):
         model.zero_grad(set_to_none=True)
         loss = F.nll_loss(log_probs, target, reduction='sum')
-        loss.backward(retain_graph=True, create_graph=True)
+        loss.backward(**backward_kwargs)
         if compute_full_fisher:
             _full_covariance(model)
         if compute_full_fvp:
