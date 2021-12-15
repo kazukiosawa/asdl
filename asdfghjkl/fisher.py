@@ -301,7 +301,11 @@ def _fisher_for_cross_entropy(
     backward_kwargs=None
 ):
     if backward_kwargs is None:
-        backward_kwargs = dict()
+        backward_kwargs = dict(retain_graph=True)
+    else:
+        assert type(backward_kwargs) is dict
+        backward_kwargs['retain_graph'] = True
+
     logits = model(inputs)
     if logits.ndim > 2:
         # reduce augmented dimension
@@ -309,7 +313,6 @@ def _fisher_for_cross_entropy(
     log_probs = F.log_softmax(logits, dim=1)
     probs = None
 
-    # TODO: only create graph if H-approx need to be differentiable.
     def loss_and_backward(target):
         model.zero_grad(set_to_none=True)
         loss = F.nll_loss(log_probs, target, reduction='sum')
