@@ -11,6 +11,7 @@ import torch.distributed as dist
 from .core import extend
 from .operations import *
 from .precondition import Precondition
+from .utils import flatten_after_batch
 
 
 __all__ = [
@@ -253,7 +254,8 @@ def empirical_direct_ntk(model, x1, x2=None):
         for k in range(n_classes):
             model.zero_grad()
             scalar = outputs[:, k].sum()
-            scalar.backward(retain_graph=(k < n_classes - 1))
+            # scalar.backward(retain_graph=(k < n_classes - 1))
+            scalar.backward(retain_graph=True, create_graph=True)
             j_k = []
             for module in model.modules():
                 operation = getattr(module, 'operation', None)
@@ -261,7 +263,7 @@ def empirical_direct_ntk(model, x1, x2=None):
                     continue
                 batch_grads = operation.get_op_results()[OP_BATCH_GRADS]
                 for g in batch_grads.values():
-                    j_k.append(g.flatten(start_dim=1))
+                    j_k.append(flatten_after_batch(g))
             j_k = torch.cat(j_k, dim=1)  # n x p
             if is_single_batch:
                 j1[:, k, :] = j_k

@@ -1,5 +1,5 @@
 import torch
-from ..utils import original_requires_grad
+from ..utils import original_requires_grad, flatten_after_batch
 
 # compute no-centered covariance
 OP_COV_KRON = 'cov_kron'  # Kronecker-factored
@@ -126,12 +126,12 @@ class Operation:
                 if original_requires_grad(module, 'bias'):
                     grads_b = self.batch_grads_bias(module, out_grads)
                     v.append(grads_b)
-                g = torch.cat([_v.flatten(start_dim=1) for _v in v], axis=1)
+                g = torch.cat([flatten_after_batch(_v) for _v in v], axis=1)
 
                 precond = getattr(module, 'gram_precond', None)
                 if precond is not None:
                     precond.precondition_vector_module(v, module)
-                    g2 = torch.cat([_v.flatten(start_dim=1) for _v in v], axis=1)
+                    g2 = torch.cat([flatten_after_batch(_v) for _v in v], axis=1)
                 else:
                     g2 = g
 

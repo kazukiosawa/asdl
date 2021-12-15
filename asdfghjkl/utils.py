@@ -84,3 +84,10 @@ def nvtx_range(msg):
         yield
     finally:
         nvtx.range_pop()
+
+
+def flatten_after_batch(tensor: torch.Tensor):
+    if tensor.ndim == 1:
+        return tensor.unsqueeze(-1)
+    else:
+        return tensor.flatten(start_dim=1)
