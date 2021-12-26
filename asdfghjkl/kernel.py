@@ -231,6 +231,42 @@ def _parallel(kernel_fn, model, loader1, loader2=None, store_on_device=True, gat
     else:
         return None
 
+        
+def linear_network_kernel(model, x, scale, jacond=True, differentiable=False):
+    n = x.shape
+    n_params = sum(p.numel() for p in model.parameters())
+
+    with extend(model, OP_BATCH_GRADS):
+        logits = model(x)
+        if logits.ndim > 2:
+            logits = logits.mean(dim=1)
+        n, c = logits.shape  
+        j1 = logits.new_zeros(n, c, n_params)
+        for k in range(c):
+            model.zero_grad()
+            scalar = logits[:, k].sum()
+            if differentiable:
+                scalar.backward(retain_graph=True, create_graph=True)
+            else:
+                scalar.backward(retain_graph=(k < c - 1))
+            j_k = []
+            for module in model.modules():
+                operation = getattr(module, 'operation', None)
+                if operation is None:
+                    continue
+                batch_grads = operation.get_op_results()[OP_BATCH_GRADS]
+                for g in batch_grads.values():
+                    j_k.append(g.flatten(start_dim=1))
+            j_k = torch.cat(j_k, dim=1)  # n x p
+            j1[:, k, :] = j_k
+
+    if jacond:
+        L = logits_hessian_cross_entropy(logits)
+        j2 = (j1.transpose(1, 2) @ L).transpose(1, 2)
+    else:
+        j2 = j1
+    return logits, torch.einsum('ncp,p,mdp->nmcd', j1, scale, j2)  # n1 x n1 x c x c
+
 
 def empirical_direct_ntk(model, x1, x2=None):
     n1 = x1.shape[0]
@@ -354,10 +390,9 @@ def _empirical_class_wise_ntk(model, x1, x2=None, hadamard=False, precond=None):
 
 
 def logits_hessian_cross_entropy(logits):
-    probs = F.softmax(logits, dim=1)
-    ppt = torch.bmm(probs.unsqueeze(2), probs.unsqueeze(1))  # n x c x c
-    diag_p = torch.stack([torch.diag(p) for p in probs], dim=0)  # n x c x c
-    return diag_p - ppt  # n x c x c
+    p = torch.softmax(logits, dim=-1)
+    L = torch.diag_embed(p) - torch.einsum('mk,mc->mck', p, p)
+    return L
 
 
 def logits_second_order_grad_cross_entropy(logits, targets, damping=1e-5):
