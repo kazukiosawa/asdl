@@ -231,7 +231,7 @@ def _parallel(kernel_fn, model, loader1, loader2=None, store_on_device=True, gat
     else:
         return None
 
-        
+
 def linear_network_kernel(model, x, scale, jacond=True, differentiable=False):
     n = x.shape
     n_params = sum(p.numel() for p in model.parameters())
@@ -240,7 +240,7 @@ def linear_network_kernel(model, x, scale, jacond=True, differentiable=False):
         logits = model(x)
         if logits.ndim > 2:
             logits = logits.mean(dim=1)
-        n, c = logits.shape  
+        n, c = logits.shape
         j1 = logits.new_zeros(n, c, n_params)
         for k in range(c):
             model.zero_grad()
@@ -256,7 +256,7 @@ def linear_network_kernel(model, x, scale, jacond=True, differentiable=False):
                     continue
                 batch_grads = operation.get_op_results()[OP_BATCH_GRADS]
                 for g in batch_grads.values():
-                    j_k.append(g.flatten(start_dim=1))
+                    j_k.append(flatten_after_batch(g))
             j_k = torch.cat(j_k, dim=1)  # n x p
             j1[:, k, :] = j_k
 
@@ -290,8 +290,7 @@ def empirical_direct_ntk(model, x1, x2=None):
         for k in range(n_classes):
             model.zero_grad()
             scalar = outputs[:, k].sum()
-            # scalar.backward(retain_graph=(k < n_classes - 1))
-            scalar.backward(retain_graph=True, create_graph=True)
+            scalar.backward(retain_graph=(k < n_classes - 1))
             j_k = []
             for module in model.modules():
                 operation = getattr(module, 'operation', None)
