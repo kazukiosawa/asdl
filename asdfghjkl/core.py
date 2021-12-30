@@ -219,6 +219,8 @@ def _preprocess_in_data(module, in_data, out_data):
         in_data_norm = (out_data - layernorm.bias).div(layernorm.weight)
         in_data = in_data_norm
         # reduce dimensions
+        # n x * x norm_shape[0] x norm_shape[1] x ... norm_shape[-1]
+        # -> n x norm_shape[0] x ... x norm_shape[-1]
         norm_shape_len = len(layernorm.weight.shape)
         in_data_shape_len = len(in_data.shape)
         if norm_shape_len < in_data_shape_len-1:
@@ -232,6 +234,9 @@ def _preprocess_out_grads(module, out_grads):
         out_grads = out_grads.flatten(start_dim=2)
     
     if isinstance(module, nn.LayerNorm):
+        # reduce dimensions
+        # n x * x norm_shape[0] x norm_shape[1] x ... norm_shape[-1]
+        # -> n x norm_shape[0] x ... x norm_shape[-1]
         norm_shape_len = len(module.weight.shape)
         out_grads_shape_len = len(out_grads.shape)
         if norm_shape_len < out_grads_shape_len-1:
