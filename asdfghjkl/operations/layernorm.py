@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from .operation import Operation
+from .operation import Operation, OP_COV_KRON, OP_GRAM_HADAMARD
 
 
 class LayerNorm(Operation):
