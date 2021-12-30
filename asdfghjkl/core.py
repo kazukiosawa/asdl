@@ -6,7 +6,7 @@ from .operations import *
 from .matrices import *
 from .vector import ParamVector
 
-_supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d, Bias, Scale)
+_supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d, nn.LayerNorm, Bias, Scale)
 
 
 @contextmanager
@@ -218,6 +218,11 @@ def _preprocess_in_data(module, in_data, out_data):
         # restore normalized input
         in_data_norm = (out_data - layernorm.bias).div(layernorm.weight)
         in_data = in_data_norm
+        # reduce dimensions
+        norm_shape_len = len(layernorm.weight.shape)
+        in_data_shape_len = len(in_data.shape)
+        if norm_shape_len < in_data_shape_len-1:
+            in_data = in_data.sum(dim=list(range(1, in_data_shape_len-norm_shape_len)))
 
     return in_data
 
@@ -225,5 +230,11 @@ def _preprocess_in_data(module, in_data, out_data):
 def _preprocess_out_grads(module, out_grads):
     if isinstance(module, nn.Conv2d):
         out_grads = out_grads.flatten(start_dim=2)
+    
+    if isinstance(module, nn.LayerNorm):
+        norm_shape_len = len(module.weight.shape)
+        out_grads_shape_len = len(out_grads.shape)
+        if norm_shape_len < out_grads_shape_len-1:
+            out_grads = out_grads.sum(dim=list(range(1, out_grads_shape_len-norm_shape_len)))
 
     return out_grads
