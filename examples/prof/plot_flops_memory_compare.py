@@ -11,11 +11,13 @@ import models
 
 _colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
 
-optim_colors = {'Adam': _colors[0],
-                'Shampoo': _colors[1],
-                'K-FAC (emp)': _colors[2],
-                'L-BFGS (m=20)': _colors[3],
-                'SMW-NG': _colors[4],
+optim_colors = {
+    'SGD': _colors[0],
+    'Adam': _colors[1],
+    'Shampoo': _colors[2],
+    'K-FAC (emp)': _colors[3],
+    'L-BFGS (m=20)': _colors[4],
+    'SMW-NG': _colors[5],
                 }
 
 parser = argparse.ArgumentParser()
@@ -49,6 +51,7 @@ def plot(ax, all_counts, optim, funcs, title=None, ylabel=True, legend=True, plo
         ys.append(y)
     ax.plot(xs, ys, label=optim, color=optim_colors[optim], marker='o')
     ax.set_yscale('log')
+    ax.grid('--')
 
     if legend:
         ax.legend(loc='upper left')
@@ -56,22 +59,41 @@ def plot(ax, all_counts, optim, funcs, title=None, ylabel=True, legend=True, plo
 
 def main():
     optim_funcs = {
-        'Adam': {'stats': AdamStats,
+        'SGD': {'fwd': Forward,
+                'bwd_weight': BackwardWeight,
+                'bwd_input': BackwardInput},
+        'Adam': {'fwd': Forward,
+                 'bwd_weight': BackwardWeight,
+                 'bwd_input': BackwardInput,
+                 'stats': AdamStats,
                  'precond': AdamPrecond},
-        'Shampoo': {'stats': ShampooStats,
+        'Shampoo': {'fwd': Forward,
+                    'bwd_weight': BackwardWeight,
+                    'bwd_input': BackwardInput,
+                    'stats': ShampooStats,
                     'inv': ShampooInv,
                     'precond': ShampooPrecond},
-        'K-FAC (emp)': {'stats': KFACStats,
+        'K-FAC (emp)': {'fwd': Forward,
+                        'bwd_weight': BackwardWeight,
+                        'bwd_input': BackwardInput,
+                        'stats': KFACStats,
                         'inv': KFACInv,
                         'precond': KFACPrecond},
-        'L-BFGS (m=20)': {'precond': LBFGSPrecond},
-        'SMW-NG': {'stats': SMWNGStats,
+        'L-BFGS (m=20)': {'fwd': Forward,
+                          'bwd_weight': BackwardWeight,
+                          'bwd_input': BackwardInput,
+                          'precond': LBFGSPrecond},
+        'SMW-NG': {'fwd': Forward,
+                   'bwd_weight': BackwardWeight,
+                   'bwd_input': BackwardInput,
+                   'stats': SMWNGStats,
                    'precond': SMWNGPrecond},
     }
-    fig = plt.figure(figsize=(len(archs) * 15, 10))
+    fig = plt.figure(figsize=(len(archs) * 15, 15))
     gs = fig.add_gridspec(2, len(archs))
 
-    counters = [AdamStats(), AdamPrecond(),
+    counters = [Forward(), BackwardWeight(), BackwardInput(),
+                AdamStats(), AdamPrecond(),
                 ShampooStats(), ShampooInv(), ShampooPrecond(),
                 KFACStats(), KFACInv(), KFACPrecond(),
                 LBFGSPrecond(hist_size=20), SMWNGStats(), SMWNGPrecond()]
