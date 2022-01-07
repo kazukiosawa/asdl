@@ -66,7 +66,7 @@ def main():
             if j==0:
                 axs[i, j].set_ylabel('Density (Log Scale)')
             if i==1:
-                axs[i, j].set_xlabel('Eigenvlaue')
+                axs[i, j].set_xlabel('Eigenvalue')
     lgd = fig.legend(['slq', 'exact'], bbox_to_anchor=(1.13,0.8))
     fig.tight_layout()
     fig.savefig('example_esd.png', bbox_extra_artists=(lgd,), bbox_inches='tight')
