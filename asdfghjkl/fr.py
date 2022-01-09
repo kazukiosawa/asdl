@@ -56,6 +56,13 @@ class PastTask:
             self.mean = self._evaluate_mean(model).cpu()
 
         else:
+            n_memorable_points = len(self.memorable_points)
+            if n_memorable_points > 2000:
+                n_batches = 8
+            elif n_memorable_points > 1000:
+                n_batches = 4
+            else:
+                n_batches = 2
             # Split forward passes into mini-batches to save memory
             import numpy as np
             mem_batch_indices = np.array_split(range(len(self.memorable_points)), n_batches)
