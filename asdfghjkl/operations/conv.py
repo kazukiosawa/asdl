@@ -45,19 +45,19 @@ class Conv2d(Operation):
 
     @staticmethod
     def cov_kron_A(module, in_data):
+        out_size = in_data.shape[-1]
         m = in_data.transpose(0, 1).flatten(
             start_dim=1
         )  # (c_in)(kernel_size) x n(out_size)
         return torch.matmul(
             m, m.T
-        )  # (c_in)(kernel_size) x (c_in)(kernel_size)
+        ).div(out_size)  # (c_in)(kernel_size) x (c_in)(kernel_size)
 
     @staticmethod
     def cov_kron_B(module, out_grads):
-        out_size = out_grads.shape[-1]
         m = out_grads.transpose(0,
                                 1).flatten(start_dim=1)  # c_out x n(out_size)
-        return torch.matmul(m, m.T).div(out_size)  # c_out x c_out
+        return torch.matmul(m, m.T)  # c_out x c_out
 
     @staticmethod
     def gram_A(module, in_data1, in_data2):

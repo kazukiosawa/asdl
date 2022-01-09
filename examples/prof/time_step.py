@@ -3,20 +3,19 @@ import json
 import yaml
 
 import torch
-from torch.nn.functional import cross_entropy
+from torch.nn.functional import mse_loss
 import torchvision
 
-from asdfghjkl import KFAC, FISHER_EMP
+from asdfghjkl import KFAC, FISHER_EMP, LOSS_MSE
 from asdfghjkl import empirical_natural_gradient
 from asdfghjkl import LBFGS
+from asdfghjkl.precondition import Shampoo
 import profiling
 import models
 
 
 # yapf: disable
 parser = argparse.ArgumentParser()
-parser.add_argument('--batch_size', type=int, default=64,
-                    help='input batch size')
 parser.add_argument('--input_size', type=str, default='32,32',
                     help='input size')
 parser.add_argument('--optim', type=str, default='kfac',
@@ -33,6 +32,8 @@ parser.add_argument('--num_warmups', type=int, default=5,
                     help='number of warmup iterations')
 parser.add_argument('--config', default=None, nargs='+',
                     help='config YAML file path')
+parser.add_argument('--decoder', action='store_true')
+parser.add_argument('--emit_nvtx', action='store_true')
 parser.add_argument('--wandb', action='store_true',
                     help='If True, record summary to W&B')
 # yapf: enable
@@ -44,18 +45,16 @@ def time_sgd():
 
     def fwd():
         nonlocal loss
-        with torch.autograd.profiler.emit_nvtx():
-            loss = cross_entropy(model(x), t)
+        loss = mse_loss(call_forward(), t)
 
     def bwd():
-        with torch.autograd.profiler.emit_nvtx():
-            loss.backward()
+        loss.backward()
 
     def upd_param():
-        with torch.autograd.profiler.emit_nvtx():
-            optimizer.step()
+        optimizer.step()
 
     profiling.time_funcs([fwd, bwd, upd_param],
+                         emit_nvtx=args.emit_nvtx,
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
 
@@ -66,43 +65,58 @@ def time_adam():
 
     def fwd():
         nonlocal loss
-        with torch.autograd.profiler.emit_nvtx():
-            loss = cross_entropy(model(x), t)
+        loss = mse_loss(call_forward(), t)
 
     def bwd():
-        with torch.autograd.profiler.emit_nvtx():
-            loss.backward()
+        loss.backward()
 
     def upd_param():
-        with torch.autograd.profiler.emit_nvtx():
-            optimizer.step()
+        optimizer.step()
 
     profiling.time_funcs([fwd, bwd, upd_param],
+                         emit_nvtx=args.emit_nvtx,
+                         num_iters=args.num_iters,
+                         num_warmups=args.num_warmups)
+
+
+def time_shampoo():
+    optimizer = Shampoo(model.parameters())
+    loss = torch.Tensor().to(device)
+
+    def fwd():
+        nonlocal loss
+        loss = mse_loss(call_forward(), t)
+
+    def bwd():
+        loss.backward()
+
+    def upd_param():
+        optimizer.step()
+
+    profiling.time_funcs([fwd, bwd, upd_param],
+                         emit_nvtx=args.emit_nvtx,
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
 
 
 def time_kfac():
-    ng = KFAC(model, FISHER_EMP, damping=1.)
+    ng = KFAC(model, FISHER_EMP, loss_type=LOSS_MSE, damping=1.)
     optimizer = torch.optim.SGD(model.parameters(), lr=1)
 
     def fwd_bwd_upd_curv():
-        with torch.autograd.profiler.emit_nvtx():
-            ng.refresh_curvature(x, t, calc_emp_loss_grad=True)
+        ng.refresh_curvature(x, t, calc_emp_loss_grad=True)
 
     def upd_inv():
-        with torch.autograd.profiler.emit_nvtx():
-            ng.update_inv()
+        ng.update_inv()
 
     def precond():
-        with torch.autograd.profiler.emit_nvtx():
-            ng.precondition()
+        ng.precondition()
 
     def upd_param():
-        with torch.autograd.profiler.emit_nvtx():
-            optimizer.step()
+        optimizer.step()
 
     profiling.time_funcs([fwd_bwd_upd_curv, upd_inv, precond, upd_param],
+                         emit_nvtx=args.emit_nvtx,
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
 
@@ -111,14 +125,13 @@ def time_smw():
     optimizer = torch.optim.SGD(model.parameters(), lr=1)
 
     def fwd_bwd_precond():
-        with torch.autograd.profiler.emit_nvtx():
-            empirical_natural_gradient(model, x, t, loss_fn=cross_entropy)
+        empirical_natural_gradient(model, x, t, loss_fn=mse_loss)
 
     def upd_param():
-        with torch.autograd.profiler.emit_nvtx():
-            optimizer.step()
+        optimizer.step()
 
     profiling.time_funcs([fwd_bwd_precond, upd_param],
+                         emit_nvtx=args.emit_nvtx,
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
 
@@ -131,24 +144,19 @@ def time_lbfgs():
 
     def fwd():
         nonlocal loss
-        with torch.autograd.profiler.emit_nvtx():
-            loss = cross_entropy(model(x), t)
+        loss = mse_loss(call_forward(), t)
 
     def bwd():
-        with torch.autograd.profiler.emit_nvtx():
-            loss.backward()
+        loss.backward()
 
     def upd_hist():
-        with torch.autograd.profiler.emit_nvtx():
-            lbfgs.update_history()
+        lbfgs.update_history()
 
     def precond():
-        with torch.autograd.profiler.emit_nvtx():
-            lbfgs.precondition()
+        lbfgs.precondition()
 
     def upd_param():
-        with torch.autograd.profiler.emit_nvtx():
-            optimizer.step()
+        optimizer.step()
 
     fwd()
     bwd()
@@ -157,8 +165,16 @@ def time_lbfgs():
         upd_hist()
 
     profiling.time_funcs([fwd, bwd, upd_hist, precond, upd_param],
+                         emit_nvtx=args.emit_nvtx,
                          num_iters=args.num_iters,
                          num_warmups=args.num_warmups)
+
+
+def call_forward():
+    if args.decoder:
+        return model(x, memory)
+    else:
+        return model(x)
 
 
 if __name__ == '__main__':
@@ -188,8 +204,10 @@ if __name__ == '__main__':
 
     # prepare data
     input_size = [int(s) for s in args.input_size.split(',')]
-    x = torch.rand(args.batch_size, *input_size).to(device)
-    t = torch.tensor([0] * x.size(0)).long().to(device)
+    x = torch.rand(*input_size).to(device)
+    memory = torch.rand(*input_size).to(device)
+    y = call_forward()
+    t = torch.rand(y.shape).to(device)
 
     torch.cuda.reset_peak_memory_stats()
 
@@ -197,6 +215,8 @@ if __name__ == '__main__':
         time_sgd()
     elif args.optim == 'adam':
         time_adam()
+    elif args.optim == 'shampoo':
+        time_shampoo()
     elif args.optim == 'kfac':
         time_kfac()
     elif args.optim == 'smw':
@@ -204,9 +224,10 @@ if __name__ == '__main__':
     elif args.optim == 'lbfgs':
         time_lbfgs()
 
+    max_memory = torch.cuda.max_memory_allocated()
+    print('max memory allocated: ', max_memory)
     if args.wandb:
         import wandb
-        max_memory = torch.cuda.max_memory_allocated()
         wandb.init(config=dict_args)
         summary = {'max_memory_allocated': max_memory,
                    'num_params': sum(p.numel() for p in model.parameters())}
