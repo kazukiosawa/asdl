@@ -51,7 +51,7 @@ class PastTask:
         self.kernel_inv = torch.linalg.inv(kernel).detach_()
 
     @torch.no_grad()
-    def update_mean(self, model, n_batches=4):
+    def update_mean(self, model, n_batches=8):
         if n_batches == 1:
             self.mean = self._evaluate_mean(model).cpu()
 
