@@ -10,7 +10,8 @@ from .vector import ParamVector, normalization, orthnormal
 __all__ = [
     'power_method',
     'stochastic_lanczos_quadrature',
-    'conjugate_gradient_method'
+    'conjugate_gradient_method',
+    'quadratic_form'
 ]
 
 
@@ -203,6 +204,14 @@ def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
         last_rz = rz
 
     return x
+
+
+def quadratic_form(mvp_fn: Callable[[ParamVector], ParamVector],
+                   v: ParamVector,
+                   random_seed=None,
+                   damping=0):
+    Av = _mvp(mvp_fn, v, random_seed, damping)
+    return v.dot(Av)
 
 
 def _mvp(mvp_fn: Callable[[ParamVector], ParamVector],
