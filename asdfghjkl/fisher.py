@@ -8,7 +8,7 @@ from .core import no_centered_cov
 from .utils import skip_param_grad
 from .matrices import *
 from .vector import ParamVector, reduce_vectors
-from .mvp import power_method, stochastic_lanczos_quadrature, conjugate_gradient_method
+from .mvp import power_method, stochastic_lanczos_quadrature, conjugate_gradient_method, quadratic_form
 
 _COV_FULL = 'cov_full'
 _CVP_FULL = 'cvp_full'
@@ -31,6 +31,9 @@ __all__ = [
     'fisher_free',
     'fisher_free_for_cross_entropy',
     'fisher_free_for_mse',
+    'fisher_quadratic_form',
+    'fisher_quadratic_form_for_cross_entropy',
+    'fisher_quadratic_form_for_mse',
     'LOSS_CROSS_ENTROPY',
     'LOSS_MSE'
 ]
@@ -565,3 +568,42 @@ def fisher_free(
 
 fisher_free_for_cross_entropy = partial(fisher_free, loss_type=LOSS_CROSS_ENTROPY)
 fisher_free_for_mse = partial(fisher_free, loss_type=LOSS_MSE)
+
+
+def fisher_quadratic_form(
+        model,
+        fisher_type: str,
+        fisher_shape,
+        loss_type: str,
+        v=None,
+        data_loader=None,
+        inputs=None,
+        targets=None,
+        is_distributed=False,
+        **kwargs
+) -> float:
+
+    def fvp_fn(vec: ParamVector) -> ParamVector:
+        f = calculate_fisher(model,
+                             fisher_type,
+                             fisher_shape,
+                             loss_type,
+                             inputs=inputs,
+                             targets=targets,
+                             data_loader=data_loader,
+                             fvp=True,
+                             vec=vec,
+                             is_distributed=is_distributed,
+                             all_reduce=True,
+                             **kwargs)
+        return f.load_fvp(fisher_shape)
+
+    if v is None:
+        grads = {p: p.grad for p in model.parameters() if p.requires_grad}
+        v = ParamVector(grads.keys(), grads.values())
+
+    return quadratic_form(fvp_fn, v, **kwargs)
+
+
+fisher_quadratic_form_for_cross_entropy = partial(fisher_quadratic_form, loss_type=LOSS_CROSS_ENTROPY)
+fisher_quadratic_form_for_mse = partial(fisher_quadratic_form, loss_type=LOSS_MSE)

@@ -148,8 +148,11 @@ class Operation:
             elif op_name == OP_COV_UNIT_WISE:
                 assert original_requires_grad(module, 'weight') and original_requires_grad(module, 'bias'), \
                     f'Both weight and bias have to require grad for {op_name} (module: {module}).'
-                rst = self.cov_unit_wise(module, in_data, out_grads)
-                #rst = self.cov_unit_wise(module, self.extend_in_data(in_data), out_grads)
+                if not isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm)):
+                    in_data_extended = self.extend_in_data(in_data)
+                else:
+                    in_data_extended = in_data
+                rst = self.cov_unit_wise(module, in_data_extended, out_grads)
                 self.accumulate_result(rst, OP_COV_UNIT_WISE)
 
             elif op_name == OP_GRAM_HADAMARD:
