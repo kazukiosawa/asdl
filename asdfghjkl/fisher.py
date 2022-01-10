@@ -581,8 +581,7 @@ def fisher_quadratic_form(
         targets=None,
         is_distributed=False,
         **kwargs
-) -> float:
-
+):
     def fvp_fn(vec: ParamVector) -> ParamVector:
         f = calculate_fisher(model,
                              fisher_type,
