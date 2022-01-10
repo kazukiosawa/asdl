@@ -5,6 +5,7 @@ import torch
 import torch.distributed as dist
 
 from .symmatrix import SymMatrix
+from .utils import vit_check
 
 HESSIAN = 'hessian'  # Hessian
 FISHER_EXACT = 'fisher_exact'  # exact Fisher
@@ -37,6 +38,8 @@ _normalizations = (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d)
 
 
 def _requires_matrix(module: torch.nn.Module):
+    if vit_check(module):
+        return True
     if not hasattr(module, 'weight'):
         return False
     if module.weight.requires_grad:

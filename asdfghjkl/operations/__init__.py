@@ -6,6 +6,8 @@ from .batchnorm import BatchNorm1d, BatchNorm2d
 from .layernorm import LayerNorm
 from .bias import Bias, BiasExt
 from .scale import Scale, ScaleExt
+from .embeddings import ViTEmbeddings
+from ..utils import vit_check
 
 __all__ = [
     'Linear',
@@ -17,6 +19,7 @@ __all__ = [
     'Scale',
     'BiasExt',
     'ScaleExt',
+    'ViTEmbeddings',
     'get_op_class',
     'Operation',
     'OP_FULL_COV',
@@ -51,6 +54,8 @@ def get_op_class(module):
         return BiasExt
     elif isinstance(module, Scale):
         return ScaleExt
+    elif vit_check(module):
+        return ViTEmbeddings
     else:
         warnings.warn(f'Failed to lookup operations for Module {module}.')
         return None

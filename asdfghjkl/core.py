@@ -1,7 +1,8 @@
 from contextlib import contextmanager
 
+import torch
 import torch.nn as nn
-from .utils import im2col_2d, record_original_requires_grad
+from .utils import im2col_2d, record_original_requires_grad, vit_check
 from .operations import *
 from .matrices import *
 from .vector import ParamVector
@@ -65,13 +66,13 @@ def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = 
 
 def supported_modules(model):
     for module in model.modules():
-        if isinstance(module, _supported_module_classes):
+        if isinstance(module, _supported_module_classes) or vit_check(module):
             yield module
 
 
 def named_supported_modules(model):
     for name, module in model.named_modules():
-        if isinstance(module, _supported_module_classes):
+        if isinstance(module, _supported_module_classes) or vit_check(module):
             yield name, module
 
 
@@ -164,6 +165,11 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
             if param is not None:
                 requires_grad = requires_grad or param.requires_grad
                 record_original_requires_grad(param)
+        if vit_check(module):
+            requires_grad = True
+            for attr in ['cls_token', 'position_embeddings']:
+                param = getattr(module, attr)
+                record_original_requires_grad(param)
         if not requires_grad:
             # no assignment for a module that do not have params that require grad
             continue
@@ -196,6 +202,9 @@ def named_modules_to_assign(value, *assign_rules):
 
 
 def _preprocess_in_data(module, in_data, out_data):
+    if isinstance(module, nn.Linear):
+        in_data = torch.einsum('n...f->nf', in_data)
+
     if isinstance(module, nn.Conv2d):
         in_data = im2col_2d(in_data, module)
 
@@ -230,6 +239,9 @@ def _preprocess_in_data(module, in_data, out_data):
 
 
 def _preprocess_out_grads(module, out_grads):
+    if isinstance(module, nn.Linear):
+        out_grads = torch.einsum('n...f->nf', out_grads)
+
     if isinstance(module, nn.Conv2d):
         out_grads = out_grads.flatten(start_dim=2)
     

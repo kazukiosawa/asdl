@@ -2,7 +2,7 @@ from typing import Dict
 
 import torch
 import torch.nn as nn
-from ..utils import original_requires_grad
+from ..utils import original_requires_grad, vit_check
 from ..symmatrix import *
 from ..vector import ParamVector
 
@@ -133,9 +133,14 @@ class Operation:
                     cvp = torch.einsum('ni,n->i', batch_g, batch_gtv)
                     if original_requires_grad(module, 'weight'):
                         if original_requires_grad(module, 'bias'):
-                            w_numel = module.weight.numel()
-                            self.accumulate_result(cvp[:w_numel].view_as(module.weight), OP_CVP, 'weight')
-                            self.accumulate_result(cvp[w_numel:].view_as(module.bias), OP_CVP, 'bias')
+                            if vit_check(module):
+                                w_numel = module.cls_token.numel()
+                                self.accumulate_result(cvp[:w_numel].view_as(module.cls_token), OP_CVP, 'weight')
+                                self.accumulate_result(cvp[w_numel:].view_as(module.position_embeddings), OP_CVP, 'bias')
+                            else:
+                                w_numel = module.weight.numel()
+                                self.accumulate_result(cvp[:w_numel].view_as(module.weight), OP_CVP, 'weight')
+                                self.accumulate_result(cvp[w_numel:].view_as(module.bias), OP_CVP, 'bias')
                         else:
                             self.accumulate_result(cvp.view_as(module.weight), OP_CVP, 'weight')
                     else:
@@ -148,7 +153,8 @@ class Operation:
             elif op_name == OP_COV_UNIT_WISE:
                 assert original_requires_grad(module, 'weight') and original_requires_grad(module, 'bias'), \
                     f'Both weight and bias have to require grad for {op_name} (module: {module}).'
-                if not isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm)):
+                if not isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm)) \
+                                                                                                or vit_check(module):
                     in_data_extended = self.extend_in_data(in_data)
                 else:
                     in_data_extended = in_data
@@ -419,12 +425,16 @@ class OperationManager:
             return None
         params = []
         vectors = []
-        if original_requires_grad(module, 'weight'):
-            params.append(module.weight)
-            vectors.append(cvp['weight'])
-        if original_requires_grad(module, 'bias'):
-            params.append(module.bias)
-            vectors.append(cvp['bias'])
+        if vit_check(module):
+            params.extend([module.cls_token, module.position_embeddings])
+            vectors.extend([cvp['weight'], cvp['bias']])
+        else:
+            if original_requires_grad(module, 'weight'):
+                params.append(module.weight)
+                vectors.append(cvp['weight'])
+            if original_requires_grad(module, 'bias'):
+                params.append(module.bias)
+                vectors.append(cvp['bias'])
         return ParamVector(params, vectors)
 
     def full_cvp_paramvector(self, module):

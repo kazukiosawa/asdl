@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from transformers import ViTForImageClassification
 from .core import no_centered_cov
 from .utils import skip_param_grad
 from .matrices import *
@@ -118,6 +119,8 @@ class _FisherBase(MatrixManager):
                         total_loss += loss.item()
 
                 y = model(x)
+                if isinstance(model, ViTForImageClassification):
+                    y = y['logits']
                 self._fisher_core(closure, y, t)
                 for module in model.modules():
                     # accumulate layer-wise fisher/fvp

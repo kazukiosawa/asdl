@@ -74,7 +74,7 @@ class ParamVector:
         return torch.norm(self.get_flatten_vector())
 
     def get_vectors_by_module(self, module: nn.Module):
-        params = [p for p in module.parameters()]
+        params = [p for p in module.parameters(recurse=False)]
         return self.get_vectors_by_params(params)
 
     def get_vectors_by_params(self, params: List[torch.Tensor]):

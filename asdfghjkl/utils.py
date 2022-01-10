@@ -11,7 +11,7 @@ __all__ = [
     'original_requires_grad', 'record_original_requires_grad',
     'restore_original_requires_grad', 'skip_param_grad', 'im2col_2d',
     'im2col_2d_slow', 'add_value_to_diagonal', 'cholesky_inv',
-    'PseudoBatchLoaderGenerator'
+    'vit_check', 'PseudoBatchLoaderGenerator'
 ]
 
 
@@ -19,7 +19,8 @@ def original_requires_grad(module=None, param_name=None, param=None):
     if param is None:
         assert module is not None and param_name is not None
         param = getattr(module, param_name, None)
-    return param is not None and getattr(param, _REQUIRES_GRAD_ATTR)
+    return (param is not None and getattr(param, _REQUIRES_GRAD_ATTR)) or \
+            (module is not None and vit_check(module))
 
 
 def record_original_requires_grad(param):
@@ -91,6 +92,10 @@ def add_value_to_diagonal(x: torch.Tensor, value):
 def cholesky_inv(X):
     u = torch.linalg.cholesky(X)
     return torch.cholesky_inverse(u)
+
+
+def vit_check(module):
+    return module.__class__.__name__ == "ViTEmbeddings"
 
 
 class PseudoBatchLoaderGenerator:
