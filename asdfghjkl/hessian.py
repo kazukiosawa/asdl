@@ -1,14 +1,15 @@
 import torch
 from .symmatrix import SymMatrix, Diag
 from .matrices import SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_DIAG, HESSIAN, MatrixManager
-from .mvp import power_method, conjugate_gradient_method
+from .mvp import power_method, conjugate_gradient_method, quadratic_form
 from .vector import ParamVector, reduce_vectors
 
 __all__ = [
     'hessian',
     'hvp',
     'hessian_eig',
-    'hessian_free'
+    'hessian_free',
+    'hessian_quadratic_form'
 ]
 _supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_DIAG]
 
@@ -102,12 +103,11 @@ def hvp(model,
     return rst.mul_(scale)
 
 
-def _hvp(model, loss_fn, inputs, targets, vec) -> ParamVector:
-    model.zero_grad()
+def _hvp(model, loss_fn, inputs, targets, vec: ParamVector) -> ParamVector:
     loss = loss_fn(model(inputs), targets)
     params = [p for p in model.parameters() if p.requires_grad]
     grads = torch.autograd.grad(loss, inputs=params, create_graph=True)
-    v = torch.autograd.grad(grads, inputs=params, grad_outputs=vec)
+    v = torch.autograd.grad(grads, inputs=params, grad_outputs=tuple(vec.values()))
     return ParamVector(params, v)
 
 
@@ -177,6 +177,37 @@ def hessian_free(
                                      max_iters=max_iters,
                                      tol=tol,
                                      print_progress=print_progress)
+
+
+def hessian_quadratic_form(
+        model,
+        loss_fn,
+        v=None,
+        data_loader=None,
+        inputs=None,
+        targets=None,
+        is_distributed=False,
+        data_average=True,
+        damping=0,
+):
+    def hvp_fn(vec: ParamVector) -> ParamVector:
+        return hvp(model,
+                   loss_fn,
+                   vec,
+                   inputs=inputs,
+                   targets=targets,
+                   data_loader=data_loader,
+                   data_average=data_average,
+                   all_reduce=True,
+                   is_distributed=is_distributed)
+
+    if v is None:
+        grads = {p: p.grad for p in model.parameters() if p.requires_grad}
+        v = ParamVector(grads.keys(), grads.values())
+
+    return quadratic_form(hvp_fn,
+                          v,
+                          damping=damping)
 
 
 def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
