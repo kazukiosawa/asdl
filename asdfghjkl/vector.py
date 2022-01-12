@@ -4,6 +4,7 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 import torch.distributed as dist
+from .utils import vit_check
 
 __all__ = ['ParamVector', 'reduce_vectors', 'normalization', 'orthnormal']
 
@@ -74,7 +75,10 @@ class ParamVector:
         return torch.norm(self.get_flatten_vector())
 
     def get_vectors_by_module(self, module: nn.Module):
-        params = [p for p in module.parameters(recurse=False)]
+        if vit_check(module):
+            params = [module.cls_token, module.position_embeddings]
+        else:
+            params = [p for p in module.parameters()]
         return self.get_vectors_by_params(params)
 
     def get_vectors_by_params(self, params: List[torch.Tensor]):
