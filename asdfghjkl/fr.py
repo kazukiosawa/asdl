@@ -51,20 +51,14 @@ class PastTask:
         self.kernel_inv = torch.linalg.inv(kernel).detach_()
 
     @torch.no_grad()
-    def update_mean(self, model, n_batches=8):
+    def update_mean(self, model, max_mem_per_batch=500):
+        import numpy as np
+        n_batches = int(np.ceil(len(self.memorable_points) / max_mem_per_batch))
+
         if n_batches == 1:
             self.mean = self._evaluate_mean(model).cpu()
-
         else:
-            n_memorable_points = len(self.memorable_points)
-            if n_memorable_points > 2000:
-                n_batches = 8
-            elif n_memorable_points > 1000:
-                n_batches = 4
-            else:
-                n_batches = 2
             # Split forward passes into mini-batches to save memory
-            import numpy as np
             mem_batch_indices = np.array_split(range(len(self.memorable_points)), n_batches)
             self.mean = torch.cat([self._evaluate_mean(model, idx=idx).cpu() for idx in mem_batch_indices])
 
