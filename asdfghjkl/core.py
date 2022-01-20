@@ -17,14 +17,12 @@ def extend(model, op_names):
         op_names = [name for name in op_names if name != OP_ACCUMULATE_GRADS]
     handles = []
 
-    # TODO: detaching here should happen by default but we need option to enable
     def forward_hook(module, in_data, out_data):
-        in_data = in_data[0].clone()#.detach()
+        in_data = in_data[0]
         in_data = _preprocess_in_data(module, in_data, out_data)
         _call_operations_in_forward(module, in_data)
 
         def backward_hook(out_grads):
-            out_grads = out_grads.clone()#.detach()
             out_grads = _preprocess_out_grads(module, out_grads)
             _call_operations_in_backward(module, in_data, out_grads)
 

@@ -36,13 +36,10 @@ class ScaleExt(Operation):
 
     @staticmethod
     def cov_kron_A(module, in_data):
-        N = in_data.size(0)
-        setattr(module, 'n_in_data', in_data.reshape(N, -1))
+        setattr(module, 'n_in_data', in_data)
         return torch.ones(1, 1, device=in_data.device) 
 
     @staticmethod
     def cov_kron_B(module, out_grads):
         N = out_grads.size(0)
-        in_data = module.n_in_data
-        cov = (in_data * out_grads.view(N, -1)).sum(dim=1).square().sum()
-        return cov.reshape(1, 1)
+        return (module.n_in_data * out_grads).view(N, -1).sum(dim=1).square().sum().view(1, 1)
