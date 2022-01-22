@@ -51,7 +51,7 @@ class PastTask:
         self.kernel_inv = torch.linalg.inv(kernel).detach_()
 
     @torch.no_grad()
-    def update_mean(self, model, max_mem_per_batch=500):
+    def update_mean(self, model, max_mem_per_batch=250):#, max_mem_per_batch=500):
         import numpy as np
         n_batches = int(np.ceil(len(self.memorable_points) / max_mem_per_batch))
 
@@ -291,6 +291,7 @@ class FROMP:
             with customize_head(model, task.class_ids, softmax=self.penalty_type!='der', temp=self.temp):
                 if not self.use_identity_kernel:
                     task.update_kernel(model, self.kernel_fn, self.eps)
+                torch.cuda.empty_cache()
                 task.update_mean(model)
 
     def get_penalty(self, tau=None, temp=None, max_tasks=None, mem_indices=None, use_kprior_penalty=False):
