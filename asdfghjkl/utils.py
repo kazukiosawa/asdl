@@ -158,3 +158,6 @@ class PseudoBatchLoaderGenerator:
                 prefetch_factor=loader.prefetch_factor,
                 persistent_workers=loader.persistent_workers)
             yield data_loader
+
+    def __len__(self) -> int:
+        return len(self.pseudo_batch_sampler)
