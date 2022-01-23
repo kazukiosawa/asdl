@@ -51,7 +51,7 @@ class PastTask:
         self.kernel_inv = torch.linalg.inv(kernel).detach_()
 
     @torch.no_grad()
-    def update_mean(self, model, max_mem_per_batch=250):#, max_mem_per_batch=500):
+    def update_mean(self, model, max_mem_per_batch=125):#, max_mem_per_batch=250):#, max_mem_per_batch=500):
         import numpy as np
         n_batches = int(np.ceil(len(self.memorable_points) / max_mem_per_batch))
 
@@ -291,8 +291,9 @@ class FROMP:
             with customize_head(model, task.class_ids, softmax=self.penalty_type!='der', temp=self.temp):
                 if not self.use_identity_kernel:
                     task.update_kernel(model, self.kernel_fn, self.eps)
-                torch.cuda.empty_cache()
+                empty_gpu_cache(f"pre task.update_mean for task #{task.id}")
                 task.update_mean(model)
+                empty_gpu_cache(f"post task.update_mean for task #{task.id}")
 
     def get_penalty(self, tau=None, temp=None, max_tasks=None, mem_indices=None, use_kprior_penalty=False):
         assert self.is_ready, 'Functional regularization is not ready yet, ' \
@@ -476,3 +477,18 @@ def disable_broadcast_buffers(module):
     yield
     if isinstance(module, DDP):
         module.broadcast_buffers = tmp
+
+
+def empty_gpu_cache(name):
+	import torch
+	import subprocess
+
+	print(f"Emptying GPU cache ({name})...")
+
+	print(f"\tbefore:")
+    print(subprocess.run(['nvidia-smi'], check=True, capture_output=True, text=True).stdout)
+
+    torch.cuda.empty_cache()
+
+	print(f"\tafter:")
+    print(subprocess.run(['nvidia-smi'], check=True, capture_output=True, text=True).stdout)
