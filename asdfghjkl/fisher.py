@@ -118,7 +118,7 @@ class _FisherBase(MatrixManager):
                         cxt.calc_full_cov(model)
                     if not calc_emp_loss_grad_after_fisher:
                         nonlocal total_loss
-                        total_loss += loss
+                        total_loss += float(loss)
 
                 y = model(x)
                 self._fisher_core(closure, y, t)
@@ -135,7 +135,7 @@ class _FisherBase(MatrixManager):
                 emp_loss = self.loss_fn(y, t)
                 emp_loss.backward()
                 nonlocal total_loss
-                total_loss += emp_loss
+                total_loss += float(emp_loss)
 
             return y
 
