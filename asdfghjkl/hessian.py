@@ -83,32 +83,36 @@ def hvp(model,
     device = next(model.parameters()).device
     if data_loader is not None:
         scale = 1 / len(data_loader.dataset) if data_average else 1
-        rst = None
+        hvp_all = None
+        g_all = None
         for inputs, targets in data_loader:
             inputs, targets = inputs.to(device), targets.to(device)
-            new_rst = _hvp(model, loss_fn, inputs, targets, vec)
-            if rst is None:
-                rst = new_rst
+            hvp_new, g_new = _hvp(model, loss_fn, inputs, targets, vec)
+            if hvp_all is None:
+                hvp_all = hvp_new
+                g_all = g_new
             else:
-                rst += new_rst
+                hvp_all += hvp_new
+                g_all += g_new
     else:
         assert inputs is not None and targets is not None
         scale = 1 / inputs.shape[0] if data_average else 1
         inputs, targets = inputs.to(device), targets.to(device)
-        rst = _hvp(model, loss_fn, inputs, targets, vec)
+        hvp_all, g_all = _hvp(model, loss_fn, inputs, targets, vec)
 
     if is_distributed:
-        rst = reduce_vectors(rst, is_master, all_reduce)
+        hvp_all = reduce_vectors(hvp_all, is_master, all_reduce)
+        g_all = reduce_vectors(g_all, is_master, all_reduce)
 
-    return rst.mul_(scale)
+    return hvp_all.mul_(scale), g_all.mul_(scale)
 
 
-def _hvp(model, loss_fn, inputs, targets, vec: ParamVector) -> ParamVector:
+def _hvp(model, loss_fn, inputs, targets, vec: ParamVector):
     loss = loss_fn(model(inputs), targets)
     params = [p for p in model.parameters() if p.requires_grad]
     grads = torch.autograd.grad(loss, inputs=params, create_graph=True)
     v = torch.autograd.grad(grads, inputs=params, grad_outputs=tuple(vec.values()))
-    return ParamVector(params, v)
+    return ParamVector(params, v), ParamVector(params, grads)
 
 
 def hessian_eig(
@@ -132,7 +136,7 @@ def hessian_eig(
                    targets=targets,
                    data_loader=data_loader,
                    data_average=data_average,
-                   is_distributed=is_distributed)
+                   is_distributed=is_distributed)[0]
 
     eigvals, eigvecs = power_method(hvp_fn,
                                     model,
@@ -168,7 +172,7 @@ def hessian_free(
                    targets=targets,
                    data_loader=data_loader,
                    data_average=data_average,
-                   is_distributed=is_distributed)
+                   is_distributed=is_distributed)[0]
 
     return conjugate_gradient_method(hvp_fn,
                                      b,
@@ -188,26 +192,26 @@ def hessian_quadratic_form(
         targets=None,
         is_distributed=False,
         data_average=True,
-        damping=0,
+        damping=None,
 ):
-    def hvp_fn(vec: ParamVector) -> ParamVector:
-        return hvp(model,
-                   loss_fn,
-                   vec,
-                   inputs=inputs,
-                   targets=targets,
-                   data_loader=data_loader,
-                   data_average=data_average,
-                   all_reduce=True,
-                   is_distributed=is_distributed)
-
     if v is None:
         grads = {p: p.grad for p in model.parameters() if p.requires_grad}
         v = ParamVector(grads.keys(), grads.values())
 
-    return quadratic_form(hvp_fn,
-                          v,
-                          damping=damping)
+    hv, g = hvp(model,
+                loss_fn,
+                v,
+                inputs=inputs,
+                targets=targets,
+                data_loader=data_loader,
+                data_average=data_average,
+                all_reduce=True,
+                is_distributed=is_distributed)
+
+    if damping:
+        hv.add_(v, alpha=damping)
+
+    return v.dot(g), v.dot(hv)
 
 
 def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
