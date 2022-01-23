@@ -107,11 +107,11 @@ class _FisherBase(MatrixManager):
                 torch.random.manual_seed(seed)
 
             with no_centered_cov(model, fisher_shapes, cvp=fvp, vectors=vec) as cxt:
-                def closure(loss_expr):
+                def closure(loss_expr, retain_graph=False):
                     cxt.clear_batch_grads()
                     loss = loss_expr()
                     with skip_param_grad(model, disable=calc_emp_loss_grad_with_fisher):
-                        loss.backward(retain_graph=True)
+                        loss.backward(retain_graph=retain_graph)
                     if fvp:
                         cxt.calc_full_cvp(model)
                     else:
@@ -231,7 +231,7 @@ class FisherExactCrossEntropy(_FisherCrossEntropy):
 
     def _fisher_core(self, closure, outputs, unused):
         log_probs = F.log_softmax(outputs, dim=1)
-        _, n_classes = log_probs.shape
+        n, n_classes = log_probs.shape
         with torch.no_grad():
             probs = F.softmax(outputs, dim=1)
             sqrt_probs = torch.sqrt(probs)
@@ -240,7 +240,7 @@ class FisherExactCrossEntropy(_FisherCrossEntropy):
             def loss_expr():
                 loss = F.nll_loss(log_probs, targets, reduction='none')
                 return loss.mul(sqrt_probs[:, i]).sum()
-            closure(loss_expr)
+            closure(loss_expr, retain_graph=i < n_classes - 1)
 
 
 class FisherMCCrossEntropy(_FisherCrossEntropy):
@@ -259,7 +259,8 @@ class FisherMCCrossEntropy(_FisherCrossEntropy):
         for i in range(self.n_mc_samples):
             with torch.no_grad():
                 targets = dist.sample()
-            closure(lambda: F.nll_loss(log_probs, targets, reduction='sum') / self.n_mc_samples)
+            closure(lambda: F.nll_loss(log_probs, targets, reduction='sum') / self.n_mc_samples,
+                    retain_graph=i < self.n_mc_samples - 1)
 
 
 class FisherEmpCrossEntropy(_FisherCrossEntropy):
@@ -269,7 +270,8 @@ class FisherEmpCrossEntropy(_FisherCrossEntropy):
 
     def _fisher_core(self, closure, outputs, targets):
         log_probs = F.log_softmax(outputs, dim=1)
-        closure(lambda: F.nll_loss(log_probs, targets, reduction='sum'))
+        closure(lambda: F.nll_loss(log_probs, targets, reduction='sum'),
+                retain_graph=False)
 
 
 class _FisherMSE(_FisherBase):
@@ -286,7 +288,7 @@ class FisherExactMSE(_FisherMSE):
     def _fisher_core(self, closure, outputs, unused):
         _, n_dims = outputs.shape
         for i in range(n_dims):
-            closure(lambda: outputs[:, i].sum())
+            closure(lambda: outputs[:, i].sum(), retain_graph=i < n_dims - 1)
 
 
 class FisherMCMSE(_FisherMSE):
@@ -304,7 +306,8 @@ class FisherMCMSE(_FisherMSE):
         for i in range(self.n_mc_samples):
             with torch.no_grad():
                 targets = dist.sample()
-            closure(lambda: 0.5 * F.mse_loss(outputs, targets, reduction='sum') / self.n_mc_samples)
+            closure(lambda: 0.5 * F.mse_loss(outputs, targets, reduction='sum') / self.n_mc_samples,
+                    retain_graph=i < self.n_mc_samples - 1)
 
 
 class FisherEmpMSE(_FisherMSE):
@@ -313,7 +316,8 @@ class FisherEmpMSE(_FisherMSE):
         return FISHER_EMP
 
     def _fisher_core(self, closure, outputs, targets):
-        closure(lambda: 0.5 * (outputs - targets).norm(dim=1).sum())
+        closure(lambda: 0.5 * (outputs - targets).norm(dim=1).sum(),
+                retain_graph=False)
 
 
 def calculate_fisher(
