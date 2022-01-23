@@ -44,6 +44,7 @@ class ParamVector:
     def __iadd__(self, other):
         for v1, v2 in zip(self.values(), other.values()):
             v1 += v2
+        return self
 
     def add(self, other, alpha=1):
         vectors = [v1.add(v2, alpha=alpha) for v1, v2 in zip(self.values(), other.values())]
