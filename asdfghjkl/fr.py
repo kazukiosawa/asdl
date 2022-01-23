@@ -482,13 +482,13 @@ def disable_broadcast_buffers(module):
 def empty_gpu_cache(name):
 	import torch
 	import subprocess
-
+	
 	print(f"Emptying GPU cache ({name})...")
-
+	
 	print(f"\tbefore:")
-    print(subprocess.run(['nvidia-smi'], check=True, capture_output=True, text=True).stdout)
-
-    torch.cuda.empty_cache()
-
+	print(subprocess.run(['nvidia-smi'], check=True, capture_output=True, text=True).stdout)
+	
+	torch.cuda.empty_cache()
+	
 	print(f"\tafter:")
-    print(subprocess.run(['nvidia-smi'], check=True, capture_output=True, text=True).stdout)
+	print(subprocess.run(['nvidia-smi'], check=True, capture_output=True, text=True).stdout)
