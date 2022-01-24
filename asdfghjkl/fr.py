@@ -287,13 +287,13 @@ class FROMP:
         self.observed_tasks.append(PastTask(memorable_points, class_ids, memorable_points_indices))
 
         # update information (kernel & mean) for each observed task
-        for task in self.observed_tasks:
+        for i, task in enumerate(self.observed_tasks):
             with customize_head(model, task.class_ids, softmax=self.penalty_type!='der', temp=self.temp):
                 if not self.use_identity_kernel:
                     task.update_kernel(model, self.kernel_fn, self.eps)
-                empty_gpu_cache(f"pre task.update_mean for task #{task.id}")
+                empty_gpu_cache(f"pre task.update_mean for task #{i+1}")
                 task.update_mean(model)
-                empty_gpu_cache(f"post task.update_mean for task #{task.id}")
+                empty_gpu_cache(f"post task.update_mean for task #{i+1}")
 
     def get_penalty(self, tau=None, temp=None, max_tasks=None, mem_indices=None, use_kprior_penalty=False):
         assert self.is_ready, 'Functional regularization is not ready yet, ' \
