@@ -350,9 +350,9 @@ def collect_memorable_points(model,
                                     n_memorable_points=n_memorable_points, select_method=select_method)
 
     n_task_data = len(dataset.get_task_targets()) if hasattr(dataset, 'task_indices') else len(dataset)
-    if n_task_data == n_memorable_points:
+    if n_memorable_points >= n_task_data:
         # Use ALL data points as memorable points
-        memorable_points_indices = range(n_memorable_points)
+        memorable_points_indices = range(n_task_data)
     elif 'global' in select_method:
         memorable_points_indices = _collect_memorable_points(**memorable_points_kwargs)
     else:
