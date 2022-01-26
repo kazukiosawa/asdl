@@ -48,9 +48,9 @@ class Linear(Operation):
     @staticmethod
     def cov_unit_wise(module, in_data, out_grads):
         n, f_in = in_data.shape[0], in_data.shape[1]
-        in_in = torch.bmm(in_data.unsqueeze(2), in_data.unsqueeze(1)).view(n, -1) # n x (f_in x f_in)
-        grad_grad = out_grads.mul(out_grads) # n x f_out
-        return torch.matmul(grad_grad.T, in_in).view(-1, f_in, f_in) # f_out x f_in x_fin
+        in_in = torch.bmm(in_data.unsqueeze(2), in_data.unsqueeze(1)).view(n, -1)  # n x (f_in x f_in)
+        grad_grad = out_grads.mul(out_grads)  # n x f_out
+        return torch.matmul(grad_grad.T, in_in).view(-1, f_in, f_in)  # f_out x f_in x_fin
 
     @staticmethod
     def gram_A(module, in_data1, in_data2):
