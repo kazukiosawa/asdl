@@ -51,7 +51,7 @@ class PastTask:
         self.kernel_inv = torch.linalg.inv(kernel).detach_()
 
     @torch.no_grad()
-    def update_mean(self, model, max_mem_per_batch=500):
+    def update_mean(self, model, max_mem_per_batch=200):#500):
         import numpy as np
         n_batches = int(np.ceil(len(self.memorable_points) / max_mem_per_batch))
 
@@ -387,6 +387,10 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
     elif hasattr(dataset, 'task_indices'):
         targets = torch.tensor(dataset.get_task_targets())
     else:
+        print(type(data_loader))
+        print(vars(data_loader).keys())
+        print(type(dataset))
+        print(vars(dataset).keys())
         targets = torch.tensor([dataset[i][1] for i in range(len(dataset))])
 
     # define number of memorable points per class
