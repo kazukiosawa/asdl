@@ -86,13 +86,13 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
             - Each rule has to be one of the following format:
                 1. Tuple(key, value1, value2, ...)
                     1-1. Tuple(<an instance of torch.nn.Module>, str, str, ...)
-                        - for the module which is equivalent to the key
+                        - for the module that is equivalent to the key
                     1-2. Tuple(str, str, str, ...)
-                        - for a module(s) which contains the key in its name
+                        - for modules that contain the key in its name
                     1-3. Tuple(<a subclass of torch.nn.Module>, str, str, ...)
-                        - for a module(s) which is an instance of the key
+                        - for modules that are instances of the key
                 2. str (represents a value)
-                    - for a module(s) which hasn't been assigned any value
+                    - for modules that havn't been assigned any value
             - Tuple rules (format 1) cannot have the same key to each others.
             - All str rules (format 2) are considered together as one Tuple rule.
             - If more than one Tuple rules are applicable to a module,
