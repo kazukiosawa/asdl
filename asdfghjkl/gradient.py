@@ -4,7 +4,7 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from .core import extend
 from .operations import OP_BATCH_GRADS
 
-__all__ = ['data_loader_gradient', 'batch_gradient', 'jacobian']
+__all__ = ['data_loader_gradient', 'batch_gradient', 'save_batch_gradient', 'jacobian']
 
 
 def data_loader_gradient(
@@ -59,19 +59,35 @@ def data_loader_gradient(
     return total_loss
 
 
-def batch_gradient(model, loss_fn, inputs, targets):
+def batch_gradient(model, closure, return_outputs=False):
     with extend(model, OP_BATCH_GRADS) as cxt:
-        model.zero_grad()
-        f = model(inputs)
-        loss = loss_fn(f, targets)
-        loss.backward()
+        outputs = closure()
         grads = []
         for module in model.modules():
             g = cxt.batch_grads(module, flatten=True)
             if g is not None:
                 grads.append(g)
         grads = torch.cat(grads, dim=1)  # (n, p)
-    return grads, f
+    if return_outputs:
+        return grads, outputs
+    else:
+        return grads
+
+
+def save_batch_gradient(model, closure, return_outputs=False):
+    with extend(model, OP_BATCH_GRADS) as cxt:
+        outputs = closure()
+        for module in model.modules():
+            grads = cxt.batch_grads(module)
+            if grads is not None:
+                for key, value in grads.items():
+                    param = getattr(module, key)
+                    if hasattr(param, 'batch_grad'):
+                        param.batch_grad += value
+                    else:
+                        setattr(param, 'batch_grad', value)
+    if return_outputs:
+        return outputs
 
     
 def jacobian(model, x):
