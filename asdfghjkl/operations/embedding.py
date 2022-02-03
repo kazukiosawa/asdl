@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from .operation import Operation, OP_COV_KRON, OP_COV_UNIT_WISE, OP_GRAM_HADAMARD, OP_GRAM_DIRECT
+from .operation import Operation
 
 
 class Embedding(Operation):
@@ -27,8 +27,10 @@ class Embedding(Operation):
 
     @staticmethod
     def cov_diag_weight(module, in_data, out_grads):
-        raise NotImplementedError
-
-    @staticmethod
-    def cov_unit_wise(module, in_data, out_grads):
-        raise NotImplementedError
+        out_out = out_grads.mul(out_grads)  # n x embedding_dim
+        cov = torch.zeros_like(module.weight)
+        for i, index in enumerate(in_data):
+            cov.index_put_((index,), out_out[i], accumulate=True)
+            if module.padding_idx is not None:
+                cov[module.padding_idx].fill_(0)
+        return cov
