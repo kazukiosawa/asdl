@@ -10,7 +10,7 @@ _supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2
 
 
 @contextmanager
-def extend(model, *op_names, map_rule=None, vectors: ParamVector = None):
+def extend(model, *op_names, map_rule=None, vectors: ParamVector = None) -> OperationContext:
     handles = []
     cxt = OperationContext(vectors=vectors)
 
@@ -52,7 +52,7 @@ def extend(model, *op_names, map_rule=None, vectors: ParamVector = None):
         del cxt
 
 
-def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = None):
+def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = None) -> OperationContext:
     shape_to_op = {
         SHAPE_FULL: OP_BATCH_GRADS,  # full
         SHAPE_LAYER_WISE: OP_CVP if cvp else OP_COV,  # layer-wise block-diagonal
@@ -63,7 +63,7 @@ def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = 
     return extend(model, *shapes, map_rule=lambda s: shape_to_op[s], vectors=vectors)
 
 
-def save_inputs_outgrads(model: nn.Module, target_modules=None, target_classes=None):
+def save_inputs_outgrads(model: nn.Module, target_modules=None, target_classes=None) -> OperationContext:
     assign_rules = []
     if target_modules is not None:
         for module in target_modules:
