@@ -390,12 +390,6 @@ class OperationContext:
         cvp = torch.einsum('ni,n->i', bg, bgtv)
         self.accumulate_result(module, cvp, OP_FULL_CVP)
 
-    def cov(self, module):
-        return self.get_result(module, OP_COV)
-
-    def cvp(self, module):
-        return self.get_result(module, OP_CVP)
-
     def load_op_in_out(self, module):
         operation = self.get_operation(module)
         in_data = self.in_data(module)
@@ -403,6 +397,18 @@ class OperationContext:
         assert in_data is not None and out_grads is not None, \
             "in_data and out_grads have not been saved."
         return operation, in_data, out_grads
+
+    def cov(self, module):
+        return self.get_result(module, OP_COV)
+
+    def cvp(self, module):
+        return self.get_result(module, OP_CVP)
+
+    def calc_cov(self, module):
+        operation, in_data, out_grads = self.load_op_in_out(module)
+        _, _, batch_g = operation.collect_batch_grads(in_data, out_grads)
+        cov = torch.matmul(batch_g.T, batch_g)
+        self.accumulate_result(module, cov, OP_COV)
 
     def cov_kron(self, module):
         return self.get_result(module, OP_COV_KRON)
