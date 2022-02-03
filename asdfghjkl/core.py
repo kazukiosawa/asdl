@@ -196,7 +196,13 @@ def named_modules_to_assign(value, *assign_rules):
 
 
 def _preprocess_in_data(module, in_data, out_data):
+    if isinstance(module, nn.Linear):
+        if in_data.ndim > 2:
+            # n x * x f_in -> n x f_in
+            in_data = in_data.flatten(end_dim=in_data.ndim-2)
+
     if isinstance(module, nn.Conv2d):
+        # n x c x h_in x w_in -> n x c(kh)(kw) x (h_out)(w_out)
         in_data = im2col_2d(in_data, module)
 
     if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
@@ -218,9 +224,7 @@ def _preprocess_in_data(module, in_data, out_data):
         # restore normalized input
         in_data_norm = (out_data - layernorm.bias).div(layernorm.weight)
         in_data = in_data_norm
-        # reduce dimensions
-        # n x * x norm_shape[0] x norm_shape[1] x ... norm_shape[-1]
-        # -> n x norm_shape[0] x ... x norm_shape[-1]
+        # n x * x norm_shape -> n x norm_shape
         norm_shape_len = len(layernorm.weight.shape)
         in_data_shape_len = len(in_data.shape)
         if norm_shape_len < in_data_shape_len-1:
@@ -230,13 +234,17 @@ def _preprocess_in_data(module, in_data, out_data):
 
 
 def _preprocess_out_grads(module, out_grads):
+    if isinstance(module, nn.Linear):
+        if out_grads.ndim > 2:
+            # n x * x f_out -> n x f_out
+            out_grads = out_grads.flatten(end_dim=out_grads.ndim-2)
+
     if isinstance(module, nn.Conv2d):
+        # n x c x h_out x w_out -> n x c(h_out)(w_out)
         out_grads = out_grads.flatten(start_dim=2)
     
     if isinstance(module, nn.LayerNorm):
-        # reduce dimensions
-        # n x * x norm_shape[0] x norm_shape[1] x ... norm_shape[-1]
-        # -> n x norm_shape[0] x ... x norm_shape[-1]
+        # n x * x norm_shape -> n x norm_shape
         norm_shape_len = len(module.weight.shape)
         out_grads_shape_len = len(out_grads.shape)
         if norm_shape_len < out_grads_shape_len-1:
