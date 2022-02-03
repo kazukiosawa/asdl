@@ -130,7 +130,7 @@ class NaturalGradient:
         if cxt is not None:
             assert self.fisher_type == FISHER_EMP, f'fisher_type needs to be {FISHER_EMP} ' \
                                                    f'for computation based on {OperationContext}'
-            for module, shapes in module_wise_assignments(self.model, self.fisher_shape):
+            for module, shapes in module_wise_assignments(self.model, *self.fisher_shape):
                 shape = shapes[0]
                 if shape == SHAPE_LAYER_WISE:
                     cxt.calc_cov(module)
