@@ -316,7 +316,7 @@ class FisherEmpMSE(_FisherMSE):
         return FISHER_EMP
 
     def _fisher_core(self, closure, outputs, targets):
-        closure(lambda: 0.5 * (outputs - targets).norm(dim=1).sum(),
+        closure(lambda: 0.5 * F.mse_loss(outputs, targets, reduction='sum'),
                 retain_graph=False)
 
 
