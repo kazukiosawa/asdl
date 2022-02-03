@@ -146,6 +146,7 @@ class NaturalGradient:
                 new_fisher.mul_(scale)
                 dst_fisher = self._get_module_fisher(module)
                 if dst_fisher is None or not accumulate:
+                    del dst_fisher
                     self._set_module_fisher(module, new_fisher)
                 else:
                     dst_fisher += new_fisher
