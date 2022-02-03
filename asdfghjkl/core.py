@@ -63,6 +63,22 @@ def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = 
     return extend(model, *shapes, map_rule=lambda s: shape_to_op[s], vectors=vectors)
 
 
+def save_inputs_outgrads(model: nn.Module, target_modules=None, target_classes=None):
+    assign_rules = []
+    if target_modules is not None:
+        for module in target_modules:
+            assign_rules.append((module, OP_SAVE_INPUTS, OP_SAVE_OUTGRADS))
+    if target_classes is not None:
+        if isinstance(target_classes, list):
+            target_classes = tuple(target_classes)
+        for module in model.modules():
+            if isinstance(module, target_classes):
+                assign_rules.append((module, OP_SAVE_INPUTS, OP_SAVE_OUTGRADS))
+    if target_modules is None and target_classes is None:
+        assign_rules = [OP_SAVE_INPUTS, OP_SAVE_OUTGRADS]
+    return extend(model, *assign_rules)
+
+
 def supported_modules(model):
     for module in model.modules():
         if isinstance(module, _supported_module_classes):

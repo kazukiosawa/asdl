@@ -22,11 +22,14 @@ OP_GRAM_DIRECT = 'gram_direct'  # direct
 OP_GRAM_HADAMARD = 'gram_hada'  # Hadamard-factored
 
 OP_BATCH_GRADS = 'batch_grads'  # compute batched gradients (per-example gradients)
+OP_SAVE_INPUTS = 'save_inputs'  # save inputs during a forward-pass
+OP_SAVE_OUTGRADS = 'save_outgrads'  # save outgrads during a backward-pass
 
 ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
            OP_COV_KRON, OP_COV_DIAG, OP_COV_UNIT_WISE,
            OP_RFIM_RELU, OP_RFIM_SOFTMAX,
-           OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS]
+           OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS,
+           OP_SAVE_INPUTS, OP_SAVE_OUTGRADS]
 
 
 class Operation:
@@ -48,7 +51,7 @@ class Operation:
         self._op_names = op_names
         self._op_results = {}
 
-    def accumulate_result(self, value, *keys):
+    def accumulate_result(self, value, *keys, concat=False, concat_dim=0):
         """
         Examples:
              accumulate_result(data, OP_COV_UNIT_WISE)
@@ -64,6 +67,8 @@ class Operation:
         key = keys[-1]
         if results.get(key, None) is None:
             results[key] = value
+        elif concat:
+            results[key] = torch.cat([results[key], value], dim=concat_dim)
         else:
             results[key] += value
 
@@ -91,6 +96,9 @@ class Operation:
 
     def forward_post_process(self, in_data: torch.Tensor, out_data: torch.Tensor):
         module = self._module
+
+        if OP_SAVE_INPUTS in self._op_names:
+            self.accumulate_result(in_data, OP_SAVE_INPUTS, concat=True)
 
         if set([OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX]) & self._op_names:
             assert original_requires_grad(module, 'weight'), f'weight.requires_grad has to be True (module: {module}).'
@@ -122,6 +130,9 @@ class Operation:
     def backward_pre_process(self, in_data, out_grads, vector: torch.Tensor = None):
         module = self._module
         for op_name in self._op_names:
+            if op_name == OP_SAVE_INPUTS:
+                continue
+
             if op_name in [OP_COV, OP_CVP]:
                 _, _, batch_g = self.collect_batch_grads(in_data, out_grads)
                 if op_name == OP_COV:
@@ -146,13 +157,12 @@ class Operation:
                 self.accumulate_result(B, OP_COV_KRON, 'B')
 
             elif op_name == OP_COV_UNIT_WISE:
-                assert original_requires_grad(module, 'weight') and original_requires_grad(module, 'bias'), \
-                    f'Both weight and bias have to require grad for {op_name} (module: {module}).'
-                if not isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm)):
-                    in_data_extended = self.extend_in_data(in_data)
-                else:
-                    in_data_extended = in_data
-                rst = self.cov_unit_wise(module, in_data_extended, out_grads)
+                if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm)):
+                    assert original_requires_grad(module, 'weight') and original_requires_grad(module, 'bias'), \
+                        f'Both weight and bias have to require grad for {op_name} (module: {module}).'
+                elif original_requires_grad(module, 'bias'):
+                    in_data = self.extend_in_data(in_data)
+                rst = self.cov_unit_wise(module, in_data, out_grads)
                 self.accumulate_result(rst, OP_COV_UNIT_WISE)
 
             elif op_name == OP_GRAM_HADAMARD:
@@ -185,6 +195,10 @@ class Operation:
                     self._model_for_kernel.kernel += torch.matmul(batch_g, batch_g2.T)
                 else:
                     self._model_for_kernel.kernel += torch.matmul(batch_g[:n1], batch_g2[n1:].T)
+
+            elif op_name == OP_SAVE_OUTGRADS:
+                self.accumulate_result(out_grads, OP_SAVE_OUTGRADS, concat=True)
+
             else:
                 if original_requires_grad(module, 'weight'):
                     rst = getattr(self,
@@ -439,3 +453,9 @@ class OperationManager:
 
     def rfim_softmax(self, module):
         return self.get_result(module, OP_RFIM_SOFTMAX)
+
+    def in_data(self, module):
+        return self.get_result(module, OP_SAVE_INPUTS)
+
+    def out_grads(self, module):
+        return self.get_result(module, OP_SAVE_OUTGRADS)
