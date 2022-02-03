@@ -228,7 +228,11 @@ def _preprocess_in_data(module, in_data, out_data):
         norm_shape_len = len(layernorm.weight.shape)
         in_data_shape_len = len(in_data.shape)
         if norm_shape_len < in_data_shape_len-1:
-            in_data = in_data.sum(dim=list(range(1, in_data_shape_len-norm_shape_len)))
+            in_data = in_data.flatten(end_dim=-norm_shape_len-1)
+
+    if isinstance(module, nn.Embedding):
+        # n x *  -> n
+        in_data = in_data.flatten()
 
     return in_data
 
@@ -248,6 +252,10 @@ def _preprocess_out_grads(module, out_grads):
         norm_shape_len = len(module.weight.shape)
         out_grads_shape_len = len(out_grads.shape)
         if norm_shape_len < out_grads_shape_len-1:
-            out_grads = out_grads.sum(dim=list(range(1, out_grads_shape_len-norm_shape_len)))
+            out_grads = out_grads.flatten(end_dim=-norm_shape_len-1)
+
+    if isinstance(module, nn.Embedding):
+        # n x * x embedding_dim -> n x embedding_dim
+        out_grads = out_grads.flatten(end_dim=-2)
 
     return out_grads
