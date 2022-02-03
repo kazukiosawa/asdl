@@ -396,14 +396,44 @@ class OperationManager:
     def cvp(self, module):
         return self.get_result(module, OP_CVP)
 
+    def load_op_in_out(self, module):
+        operation = self.get_operation(module)
+        in_data = self.in_data(module)
+        out_grads = self.out_grads(module)
+        assert in_data is not None and out_grads is not None, \
+            "in_data and out_grads have not been saved."
+        return operation, in_data, out_grads
+
     def cov_kron(self, module):
         return self.get_result(module, OP_COV_KRON)
+
+    def calc_cov_kron(self, module):
+        operation, in_data, out_grads = self.load_op_in_out(module)
+        if original_requires_grad(module, 'bias'):
+            in_data = Operation.extend_in_data(in_data)
+        A = operation.cov_kron_A(module, in_data)
+        B = operation.cov_kron_B(module, out_grads)
+        self.accumulate_result(module, A, OP_COV_KRON, 'A')
+        self.accumulate_result(module, B, OP_COV_KRON, 'B')
 
     def cov_unit_wise(self, module):
         return self.get_result(module, OP_COV_UNIT_WISE)
 
+    def calc_cov_unit_wise(self, module):
+        operation, in_data, out_grads = self.load_op_in_out(module)
+        unit = operation.cov_unit_wise(module, in_data, out_grads)
+        self.accumulate_result(module, unit, OP_COV_UNIT_WISE)
+
     def cov_diag(self, module):
         return self.get_result(module, OP_COV_DIAG)
+
+    def calc_cov_diag(self, module):
+        operation, in_data, out_grads = self.load_op_in_out(module)
+        diag_w = operation.cov_diag_weight(module, in_data, out_grads)
+        self.accumulate_result(module, diag_w, OP_COV_DIAG, 'weight')
+        if original_requires_grad(module, 'bias'):
+            diag_b = operation.cov_diag_bias(module, out_grads)
+            self.accumulate_result(module, diag_b, OP_COV_DIAG, 'bias')
 
     def cov_symmatrix(self, module):
         kwargs = dict(data=self.cov(module), unit_data=self.cov_unit_wise(module))
