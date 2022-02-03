@@ -47,7 +47,7 @@ class LayerNorm(Operation):
     
     @staticmethod
     def cov_diag_bias(module, out_grads):
-        return out_grads.mul(out_grads).sum(dim=0) # normalized_shape
+        return out_grads.mul(out_grads).sum(dim=0)  # normalized_shape
     
     @staticmethod
     def cov_unit_wise(module, in_data, out_grads):
