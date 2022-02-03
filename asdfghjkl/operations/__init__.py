@@ -35,7 +35,7 @@ __all__ = [
     'OP_SAVE_INPUTS',
     'OP_SAVE_OUTGRADS',
     'ALL_OPS',
-    'OperationManager'
+    'OperationContext'
 ]
 
 

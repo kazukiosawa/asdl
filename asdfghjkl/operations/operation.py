@@ -281,7 +281,7 @@ class Operation:
         raise NotImplementedError
 
 
-class OperationManager:
+class OperationContext:
     def __init__(self, vectors: ParamVector = None):
         self._operations: Dict[nn.Module, Operation] = {}
         self._vectors: ParamVector = vectors

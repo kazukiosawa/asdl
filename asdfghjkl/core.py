@@ -12,7 +12,7 @@ _supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2
 @contextmanager
 def extend(model, *op_names, map_rule=None, vectors: ParamVector = None):
     handles = []
-    manager = OperationManager(vectors=vectors)
+    manager = OperationContext(vectors=vectors)
 
     try:
         def forward_hook(module, in_data, out_data):
