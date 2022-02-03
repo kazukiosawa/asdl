@@ -51,12 +51,12 @@ class LayerNorm(Operation):
     
     @staticmethod
     def cov_unit_wise(module, in_data, out_grads):
-        n_features = in_data.flatten(start_dim=1).shape[1] # (f[0] x f[1] x ... x f[-1])
-        grads_w = in_data.mul(out_grads) # n x normalized_shape
-        grads_b = out_grads # n x normalized_shape
-        cov_ww = (grads_w ** 2).sum(0).flatten() # n_features x 1
-        cov_bb = (grads_b ** 2).sum(0).flatten() # n_features x 1
-        cov_wb = (grads_w * grads_b).sum(0).flatten() # n_features x 1
+        n_features = in_data.flatten(start_dim=1).shape[1]  # (f[0] x f[1] x ... x f[-1])
+        grads_w = in_data.mul(out_grads)  # n x normalized_shape
+        grads_b = out_grads  # n x normalized_shape
+        cov_ww = (grads_w ** 2).sum(0).flatten()  # n_features x 1
+        cov_bb = (grads_b ** 2).sum(0).flatten()  # n_features x 1
+        cov_wb = (grads_w * grads_b).sum(0).flatten()  # n_features x 1
         blocks = torch.zeros(n_features, 2, 2).to(in_data.device)
         for i in range(n_features):
             blocks[i][0][0] = cov_ww[i]
