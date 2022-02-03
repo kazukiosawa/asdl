@@ -12,18 +12,18 @@ _supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2
 @contextmanager
 def extend(model, *op_names, map_rule=None, vectors: ParamVector = None):
     handles = []
-    manager = OperationContext(vectors=vectors)
+    cxt = OperationContext(vectors=vectors)
 
     try:
         def forward_hook(module, in_data, out_data):
             in_data = in_data[0].clone().detach()
             in_data = _preprocess_in_data(module, in_data, out_data)
-            manager.call_operations_in_forward(module, in_data, out_data)
+            cxt.call_operations_in_forward(module, in_data, out_data)
 
             def backward_hook(out_grads):
                 out_grads = out_grads.clone().detach()
                 out_grads = _preprocess_out_grads(module, out_grads)
-                manager.call_operations_in_backward(module, in_data, out_grads)
+                cxt.call_operations_in_backward(module, in_data, out_grads)
 
             if out_data.requires_grad:
                 handles.append(out_data.register_hook(backward_hook))
@@ -37,19 +37,19 @@ def extend(model, *op_names, map_rule=None, vectors: ParamVector = None):
                 continue
             # register hooks and operations for child modules
             handles.append(module.register_forward_hook(forward_hook))
-            manager.register_operation(module, op_class(module, op_names))
-        if not manager.is_operation_registered(model):
+            cxt.register_operation(module, op_class(module, op_names))
+        if not cxt.is_operation_registered(model):
             # register empty operation for parent model
-            manager.register_operation(model, Operation(model, []))
+            cxt.register_operation(model, Operation(model, []))
 
-        yield manager
+        yield cxt
 
     finally:
         # remove hooks and operations from modules
         for handle in handles:
             handle.remove()
-        manager.clear_operations()
-        del manager
+        cxt.clear_operations()
+        del cxt
 
 
 def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = None):
