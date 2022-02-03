@@ -4,6 +4,7 @@ from .linear import Linear
 from .conv import Conv2d
 from .batchnorm import BatchNorm1d, BatchNorm2d
 from .layernorm import LayerNorm
+from .embedding import Embedding
 from .bias import Bias, BiasExt
 from .scale import Scale, ScaleExt
 
@@ -31,6 +32,8 @@ __all__ = [
     'OP_GRAM_DIRECT',
     'OP_GRAM_HADAMARD',
     'OP_BATCH_GRADS',
+    'OP_SAVE_INPUTS',
+    'OP_SAVE_OUTGRADS',
     'ALL_OPS',
     'OperationManager'
 ]
@@ -47,6 +50,8 @@ def get_op_class(module):
         return BatchNorm2d
     elif isinstance(module, nn.LayerNorm):
         return LayerNorm
+    elif isinstance(module, nn.Embedding):
+        return Embedding
     elif isinstance(module, Bias):
         return BiasExt
     elif isinstance(module, Scale):

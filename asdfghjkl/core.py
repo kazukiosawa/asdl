@@ -6,7 +6,7 @@ from .operations import *
 from .matrices import *
 from .vector import ParamVector
 
-_supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d, nn.LayerNorm, Bias, Scale)
+_supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d, nn.LayerNorm, nn.Embedding, Bias, Scale)
 
 
 @contextmanager
