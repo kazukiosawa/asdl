@@ -4,6 +4,7 @@ import torch
 from torch import nn
 
 from ..core import module_wise_assignments, modules_to_assign
+from ..operations import OperationContext
 from ..matrices import *
 from ..symmatrix import SymMatrix
 from ..vector import ParamVector
@@ -61,13 +62,24 @@ class NaturalGradient:
                 if p.requires_grad:
                     yield p
 
+    @property
+    def _fisher_attr(self):
+        return self.fisher_type
+
     def _get_module_fisher(self, module, postfix=None):
         if postfix is None:
-            attr = self.fisher_type
+            attr = self._fisher_attr
         else:
-            attr = f'{self.fisher_type}_{postfix}'
+            attr = f'{self._fisher_attr}_{postfix}'
         fisher = getattr(module, attr, None)
         return fisher
+
+    def _set_module_fisher(self, module, fisher, postfix=None):
+        if postfix is None:
+            attr = self._fisher_attr
+        else:
+            attr = f'{self._fisher_attr}_{postfix}'
+        setattr(module, attr, fisher)
 
     def _get_full_fisher(self):
         return self._get_module_fisher(self.model)
@@ -101,6 +113,7 @@ class NaturalGradient:
                           inputs=None,
                           targets=None,
                           data_loader=None,
+                          cxt: OperationContext = None,
                           accumulate=False,
                           ema_decay=None,
                           data_average=True,
@@ -114,35 +127,60 @@ class NaturalGradient:
             scale *= ema_decay
             self._scale_fisher(1 - ema_decay)
 
-        rst = calculate_fisher(self.model,
-                               fisher_type=self.fisher_type,
-                               fisher_shapes=self.fisher_shape,
-                               loss_type=self.loss_type,
-                               inputs=inputs,
-                               targets=targets,
-                               data_loader=data_loader,
-                               accumulate=accumulate,
-                               data_average=data_average,
-                               calc_emp_loss_grad=calc_emp_loss_grad,
-                               return_loss=True,
-                               seed=seed,
-                               scale=scale,
-                               n_mc_samples=self.n_mc_samples)
-        self.fisher_manager = rst[0]
-        return rst[1], rst[2]  # loss and outputs
+        if cxt is not None:
+            assert self.fisher_type == FISHER_EMP, f'fisher_type needs to be {FISHER_EMP} ' \
+                                                   f'for computation based on {OperationContext}'
+            for module, shapes in module_wise_assignments(self.model, self.fisher_shape):
+                shape = shapes[0]
+                if shape == SHAPE_LAYER_WISE:
+                    cxt.calc_cov(module)
+                elif shape == SHAPE_KRON:
+                    cxt.calc_cov_kron(module)
+                elif shape == SHAPE_UNIT_WISE:
+                    cxt.calc_cov_unit_wise(module)
+                elif shape == SHAPE_DIAG:
+                    cxt.calc_cov_diag(module)
+                else:
+                    raise ValueError(f'Invalid shape: {shape}')
+                new_fisher = cxt.cov_symmatrix(module)
+                new_fisher.mul_(scale)
+                dst_fisher = self._get_module_fisher(module)
+                if dst_fisher is None or not accumulate:
+                    self._set_module_fisher(module, new_fisher)
+                else:
+                    dst_fisher += new_fisher
+        else:
+            rst = calculate_fisher(self.model,
+                                   fisher_type=self.fisher_type,
+                                   fisher_shapes=self.fisher_shape,
+                                   loss_type=self.loss_type,
+                                   inputs=inputs,
+                                   targets=targets,
+                                   data_loader=data_loader,
+                                   accumulate=accumulate,
+                                   data_average=data_average,
+                                   calc_emp_loss_grad=calc_emp_loss_grad,
+                                   return_loss=True,
+                                   seed=seed,
+                                   scale=scale,
+                                   n_mc_samples=self.n_mc_samples)
+            self.fisher_manager = rst[0]
+            return rst[1], rst[2]  # loss and outputs
 
     def accumulate_curvature(self,
                              inputs=None,
                              targets=None,
                              data_loader=None,
+                             cxt: OperationContext = None,
                              ema_decay=None,
                              data_average=True,
                              calc_emp_loss_grad=False,
                              seed=None,
                              scale=1):
-        return self._update_curvature(inputs,
-                                      targets,
-                                      data_loader,
+        return self._update_curvature(inputs=inputs,
+                                      targets=targets,
+                                      data_loader=data_loader,
+                                      cxt=cxt,
                                       accumulate=True,
                                       ema_decay=ema_decay,
                                       data_average=data_average,
@@ -154,15 +192,17 @@ class NaturalGradient:
                           inputs=None,
                           targets=None,
                           data_loader=None,
+                          cxt: OperationContext = None,
                           data_average=True,
                           calc_emp_loss_grad=False,
                           seed=None,
                           scale=1):
         if self.ema_decay != _invalid_ema_decay:
             warnings.warn(f'ema_decay ({self.ema_decay}) will be ignored.')
-        return self._update_curvature(inputs,
-                                      targets,
-                                      data_loader,
+        return self._update_curvature(inputs=inputs,
+                                      targets=targets,
+                                      data_loader=data_loader,
+                                      cxt=cxt,
                                       accumulate=False,
                                       ema_decay=_invalid_ema_decay,
                                       data_average=data_average,
