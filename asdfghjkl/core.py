@@ -192,6 +192,8 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
         elif module.__class__ in specified_asgmts:
             yield *module_info, specified_asgmts[module.__class__]
         else:
+            if len(common_asgmts) == 0:
+                continue
             yield *module_info, common_asgmts
 
 
