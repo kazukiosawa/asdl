@@ -34,7 +34,7 @@ class Embedding(Operation):
         in_data: n x *
 
         Return:
-            A: num_embeddings x embedding_dim
+            A: num_embeddings x num_embeddings
         """
         counts = torch.stack(
             [torch.bincount(in_data[i], minlength=module.num_embeddings) for i in range(in_data.shape[0])])
