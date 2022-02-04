@@ -64,8 +64,9 @@ def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = 
 
 
 def save_inputs_outgrads(model: nn.Module, targets=None, ignore_modules=None) -> OperationContext:
-    assign_rules = [(t, OP_SAVE_INPUTS, OP_SAVE_OUTGRADS) for t in targets]
-    if targets is None:
+    if targets is not None:
+        assign_rules = [(t, OP_SAVE_INPUTS, OP_SAVE_OUTGRADS) for t in targets]
+    else:
         assign_rules = [OP_SAVE_INPUTS, OP_SAVE_OUTGRADS]
     return extend(model, *assign_rules, ignore_modules=ignore_modules)
 
