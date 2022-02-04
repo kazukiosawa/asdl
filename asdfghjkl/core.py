@@ -10,7 +10,7 @@ _supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2
 
 
 @contextmanager
-def extend(model, *op_names, map_rule=None, vectors: ParamVector = None) -> OperationContext:
+def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamVector = None) -> OperationContext:
     handles = []
     cxt = OperationContext(vectors=vectors)
 
@@ -28,7 +28,7 @@ def extend(model, *op_names, map_rule=None, vectors: ParamVector = None) -> Oper
             if out_data.requires_grad:
                 handles.append(out_data.register_hook(backward_hook))
 
-        for module, op_names in module_wise_assignments(model, *op_names, map_rule=map_rule):
+        for module, op_names in module_wise_assignments(model, *op_names, ignore_modules=ignore_modules, map_rule=map_rule):
             if len(op_names) == 0:
                 # no operation is assigned
                 continue
@@ -63,20 +63,11 @@ def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = 
     return extend(model, *shapes, map_rule=lambda s: shape_to_op[s], vectors=vectors)
 
 
-def save_inputs_outgrads(model: nn.Module, target_modules=None, target_classes=None) -> OperationContext:
-    assign_rules = []
-    if target_modules is not None:
-        for module in target_modules:
-            assign_rules.append((module, OP_SAVE_INPUTS, OP_SAVE_OUTGRADS))
-    if target_classes is not None:
-        if isinstance(target_classes, list):
-            target_classes = tuple(target_classes)
-        for module in model.modules():
-            if isinstance(module, target_classes):
-                assign_rules.append((module, OP_SAVE_INPUTS, OP_SAVE_OUTGRADS))
-    if target_modules is None and target_classes is None:
+def save_inputs_outgrads(model: nn.Module, targets=None, ignore_modules=None) -> OperationContext:
+    assign_rules = [(t, OP_SAVE_INPUTS, OP_SAVE_OUTGRADS) for t in targets]
+    if targets is None:
         assign_rules = [OP_SAVE_INPUTS, OP_SAVE_OUTGRADS]
-    return extend(model, *assign_rules)
+    return extend(model, *assign_rules, ignore_modules=ignore_modules)
 
 
 def supported_modules(model):
@@ -91,7 +82,7 @@ def named_supported_modules(model):
             yield name, module
 
 
-def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
+def module_wise_assignments(model, *assign_rules, ignore_modules=None, map_rule=None, named=False):
     """
     Assign certain values to each module based on assign_rules.
 
@@ -152,6 +143,9 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
     assert all(isinstance(rule, (str, tuple)) for rule in assign_rules), \
         f'every assign rule has to be {str} or {tuple}.'
 
+    if ignore_modules is None:
+        ignore_modules = []
+
     if map_rule is None:
         def identical(x): return x
         map_rule = identical
@@ -172,6 +166,8 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
             specified_asgmts[key] = [map_rule(value) for value in values]
 
     for name, module in named_supported_modules(model):
+        if module in ignore_modules:
+            continue
         module_info = (name, module) if named else (module,)
 
         requires_grad = False
@@ -197,8 +193,8 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
             yield *module_info, common_asgmts
 
 
-def modules_to_assign(model, value, *assign_rules, named=False):
-    for assign_info in module_wise_assignments(model, *assign_rules, named=named):
+def modules_to_assign(model, value, *assign_rules, ignore_modules=None, named=False):
+    for assign_info in module_wise_assignments(model, *assign_rules, ignore_modules=ignore_modules, named=named):
         values = assign_info[-1]
         if value in values:
             if named:

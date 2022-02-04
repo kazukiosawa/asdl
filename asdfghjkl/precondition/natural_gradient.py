@@ -35,6 +35,7 @@ class NaturalGradient:
         n_mc_samples=1,
         damping=1e-5,
         ema_decay=_invalid_ema_decay,
+        ignore_modules=None,
     ):
         from torch.nn.parallel import DistributedDataParallel as DDP
         assert not isinstance(model, DDP), f'{DDP} is not supported.'
@@ -48,13 +49,23 @@ class NaturalGradient:
         self.fisher_manager = None
         if isinstance(fisher_shape, str):
             fisher_shape = [fisher_shape]
-        for name, module, shapes in module_wise_assignments(model, *fisher_shape, named=True):
+        for name, module, shapes in module_wise_assignments(model,
+                                                            *fisher_shape,
+                                                            ignore_modules=ignore_modules,
+                                                            named=True):
             assert len(shapes) == 1, f'Each module has to be assigned one Fisher shape. ' \
                                      f'{name} is assigned {len(shapes)} shapes.'
         self.fisher_shape = fisher_shape
+        self.ignore_modules = ignore_modules
+        self._modules_for = {}
 
     def modules_for(self, shape):
-        return modules_to_assign(self.model, shape, *self.fisher_shape)
+        if shape not in self._modules_for:
+            self._modules_for[shape] = list(modules_to_assign(self.model,
+                                                              shape,
+                                                              *self.fisher_shape,
+                                                              ignore_modules=self.ignore_modules))
+        return self._modules_for[shape]
 
     def parameters_for(self, shape):
         for module in self.modules_for(shape):
@@ -130,7 +141,8 @@ class NaturalGradient:
         if cxt is not None:
             assert self.fisher_type == FISHER_EMP, f'fisher_type needs to be {FISHER_EMP} ' \
                                                    f'for computation based on {OperationContext}'
-            for module, shapes in module_wise_assignments(self.model, *self.fisher_shape):
+            for module, shapes in module_wise_assignments(self.model, *self.fisher_shape,
+                                                          ignore_modules=self.ignore_modules):
                 shape = shapes[0]
                 if shape == SHAPE_LAYER_WISE:
                     cxt.calc_cov(module)
@@ -277,8 +289,9 @@ class LayerWiseNaturalGradient(NaturalGradient):
                  loss_type=LOSS_CROSS_ENTROPY,
                  n_mc_samples=1,
                  damping=1e-5,
-                 ema_decay=_invalid_ema_decay):
-        super().__init__(model, fisher_type, SHAPE_LAYER_WISE, loss_type, n_mc_samples, damping, ema_decay)
+                 ema_decay=_invalid_ema_decay,
+                 ignore_modules=None):
+        super().__init__(model, fisher_type, SHAPE_LAYER_WISE, loss_type, n_mc_samples, damping, ema_decay, ignore_modules)
 
 
 class KFAC(NaturalGradient):
@@ -288,11 +301,12 @@ class KFAC(NaturalGradient):
                  loss_type=LOSS_CROSS_ENTROPY,
                  n_mc_samples=1,
                  damping=1e-5,
-                 ema_decay=_invalid_ema_decay):
+                 ema_decay=_invalid_ema_decay,
+                 ignore_modules=None):
         fisher_shape = [SHAPE_KRON,
                         (nn.BatchNorm1d, SHAPE_UNIT_WISE),
                         (nn.BatchNorm2d, SHAPE_UNIT_WISE)]
-        super().__init__(model, fisher_type, fisher_shape, loss_type, n_mc_samples, damping, ema_decay)
+        super().__init__(model, fisher_type, fisher_shape, loss_type, n_mc_samples, damping, ema_decay, ignore_modules)
 
 
 class UnitWiseNaturalGradient(NaturalGradient):
@@ -302,8 +316,9 @@ class UnitWiseNaturalGradient(NaturalGradient):
                  loss_type=LOSS_CROSS_ENTROPY,
                  n_mc_samples=1,
                  damping=1e-5,
-                 ema_decay=_invalid_ema_decay):
-        super().__init__(model, fisher_type, SHAPE_UNIT_WISE, loss_type, n_mc_samples, damping, ema_decay)
+                 ema_decay=_invalid_ema_decay,
+                 ignore_modules=None):
+        super().__init__(model, fisher_type, SHAPE_UNIT_WISE, loss_type, n_mc_samples, damping, ema_decay, ignore_modules)
 
 
 class DiagNaturalGradient(NaturalGradient):
@@ -313,8 +328,9 @@ class DiagNaturalGradient(NaturalGradient):
                  loss_type=LOSS_CROSS_ENTROPY,
                  n_mc_samples=1,
                  damping=1e-5,
-                 ema_decay=_invalid_ema_decay):
-        super().__init__(model, fisher_type, SHAPE_DIAG, loss_type, n_mc_samples, damping, ema_decay)
+                 ema_decay=_invalid_ema_decay,
+                 ignore_modules=None):
+        super().__init__(model, fisher_type, SHAPE_DIAG, loss_type, n_mc_samples, damping, ema_decay, ignore_modules)
 
 
 def _bias_requires_grad(module):
