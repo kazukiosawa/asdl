@@ -244,10 +244,6 @@ def _preprocess_in_data(module, in_data, out_data):
         if norm_shape_len < in_data_shape_len-1:
             in_data = in_data.flatten(end_dim=-norm_shape_len-1)
 
-    if isinstance(module, nn.Embedding):
-        # n x *  -> n
-        in_data = in_data.flatten()
-
     return in_data
 
 
@@ -267,9 +263,5 @@ def _preprocess_out_grads(module, out_grads):
         out_grads_shape_len = len(out_grads.shape)
         if norm_shape_len < out_grads_shape_len-1:
             out_grads = out_grads.flatten(end_dim=-norm_shape_len-1)
-
-    if isinstance(module, nn.Embedding):
-        # n x * x embedding_dim -> n x embedding_dim
-        out_grads = out_grads.flatten(end_dim=-2)
 
     return out_grads
