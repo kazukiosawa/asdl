@@ -16,7 +16,7 @@ _module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIA
 
 __all__ = [
     'NaturalGradient', 'FullNaturalGradient', 'LayerWiseNaturalGradient', 'KFAC',
-    'UnitWiseNaturalGradient', 'DiagNaturalGradient'
+    'UnitWiseNaturalGradient', 'DiagNaturalGradient', 'EmpiricalNaturalGradient'
 ]
 
 
@@ -331,6 +331,21 @@ class DiagNaturalGradient(NaturalGradient):
                  ema_decay=_invalid_ema_decay,
                  ignore_modules=None):
         super().__init__(model, fisher_type, SHAPE_DIAG, loss_type, n_mc_samples, damping, ema_decay, ignore_modules)
+
+
+class EmpiricalNaturalGradient(NaturalGradient):
+    def __init__(self,
+                 model,
+                 fisher_shape=SHAPE_FULL,
+                 damping=1e-5,
+                 ema_decay=_invalid_ema_decay,
+                 ignore_modules=None):
+        super().__init__(model,
+                         fisher_type=FISHER_EMP,
+                         fisher_shape=fisher_shape,
+                         damping=damping,
+                         ema_decay=ema_decay,
+                         ignore_modules=ignore_modules)
 
 
 def _bias_requires_grad(module):
