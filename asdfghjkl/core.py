@@ -6,29 +6,29 @@ from .operations import *
 from .matrices import *
 from .vector import ParamVector
 
-_supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d, nn.LayerNorm, Bias, Scale)
+_supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d, nn.LayerNorm, nn.Embedding, Bias, Scale)
 
 
 @contextmanager
-def extend(model, *op_names, map_rule=None, vectors: ParamVector = None):
+def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamVector = None) -> OperationContext:
     handles = []
-    manager = OperationManager(vectors=vectors)
+    cxt = OperationContext(vectors=vectors)
 
     try:
         def forward_hook(module, in_data, out_data):
             in_data = in_data[0].clone().detach()
             in_data = _preprocess_in_data(module, in_data, out_data)
-            manager.call_operations_in_forward(module, in_data, out_data)
+            cxt.call_operations_in_forward(module, in_data, out_data)
 
             def backward_hook(out_grads):
                 out_grads = out_grads.clone().detach()
                 out_grads = _preprocess_out_grads(module, out_grads)
-                manager.call_operations_in_backward(module, in_data, out_grads)
+                cxt.call_operations_in_backward(module, in_data, out_grads)
 
             if out_data.requires_grad:
                 handles.append(out_data.register_hook(backward_hook))
 
-        for module, op_names in module_wise_assignments(model, *op_names, map_rule=map_rule):
+        for module, op_names in module_wise_assignments(model, *op_names, ignore_modules=ignore_modules, map_rule=map_rule):
             if len(op_names) == 0:
                 # no operation is assigned
                 continue
@@ -37,22 +37,22 @@ def extend(model, *op_names, map_rule=None, vectors: ParamVector = None):
                 continue
             # register hooks and operations for child modules
             handles.append(module.register_forward_hook(forward_hook))
-            manager.register_operation(module, op_class(module, op_names))
-        if not manager.is_operation_registered(model):
+            cxt.register_operation(module, op_class(module, op_names))
+        if not cxt.is_operation_registered(model):
             # register empty operation for parent model
-            manager.register_operation(model, Operation(model, []))
+            cxt.register_operation(model, Operation(model, []))
 
-        yield manager
+        yield cxt
 
     finally:
         # remove hooks and operations from modules
         for handle in handles:
             handle.remove()
-        manager.clear_operations()
-        del manager
+        cxt.clear_operations()
+        del cxt
 
 
-def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = None):
+def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = None) -> OperationContext:
     shape_to_op = {
         SHAPE_FULL: OP_BATCH_GRADS,  # full
         SHAPE_LAYER_WISE: OP_CVP if cvp else OP_COV,  # layer-wise block-diagonal
@@ -61,6 +61,14 @@ def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = 
         SHAPE_DIAG: OP_COV_DIAG,  # diagonal
     }
     return extend(model, *shapes, map_rule=lambda s: shape_to_op[s], vectors=vectors)
+
+
+def save_inputs_outgrads(model: nn.Module, targets=None, ignore_modules=None) -> OperationContext:
+    if targets is not None:
+        assign_rules = [(t, OP_SAVE_INPUTS, OP_SAVE_OUTGRADS) for t in targets]
+    else:
+        assign_rules = [OP_SAVE_INPUTS, OP_SAVE_OUTGRADS]
+    return extend(model, *assign_rules, ignore_modules=ignore_modules)
 
 
 def supported_modules(model):
@@ -75,7 +83,7 @@ def named_supported_modules(model):
             yield name, module
 
 
-def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
+def module_wise_assignments(model, *assign_rules, ignore_modules=None, map_rule=None, named=False):
     """
     Assign certain values to each module based on assign_rules.
 
@@ -86,13 +94,13 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
             - Each rule has to be one of the following format:
                 1. Tuple(key, value1, value2, ...)
                     1-1. Tuple(<an instance of torch.nn.Module>, str, str, ...)
-                        - for the module which is equivalent to the key
+                        - for the module that is equivalent to the key
                     1-2. Tuple(str, str, str, ...)
-                        - for a module(s) which contains the key in its name
+                        - for modules that contain the key in its name
                     1-3. Tuple(<a subclass of torch.nn.Module>, str, str, ...)
-                        - for a module(s) which is an instance of the key
+                        - for modules that are instances of the key
                 2. str (represents a value)
-                    - for a module(s) which hasn't been assigned any value
+                    - for modules that havn't been assigned any value
             - Tuple rules (format 1) cannot have the same key to each others.
             - All str rules (format 2) are considered together as one Tuple rule.
             - If more than one Tuple rules are applicable to a module,
@@ -136,6 +144,9 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
     assert all(isinstance(rule, (str, tuple)) for rule in assign_rules), \
         f'every assign rule has to be {str} or {tuple}.'
 
+    if ignore_modules is None:
+        ignore_modules = []
+
     if map_rule is None:
         def identical(x): return x
         map_rule = identical
@@ -156,6 +167,10 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
             specified_asgmts[key] = [map_rule(value) for value in values]
 
     for name, module in named_supported_modules(model):
+        if module in ignore_modules:
+            continue
+        if any(keyword in name for keyword in ignore_modules if isinstance(keyword, str)):
+            continue
         module_info = (name, module) if named else (module,)
 
         requires_grad = False
@@ -176,11 +191,13 @@ def module_wise_assignments(model, *assign_rules, map_rule=None, named=False):
         elif module.__class__ in specified_asgmts:
             yield *module_info, specified_asgmts[module.__class__]
         else:
+            if len(common_asgmts) == 0:
+                continue
             yield *module_info, common_asgmts
 
 
-def modules_to_assign(model, value, *assign_rules, named=False):
-    for assign_info in module_wise_assignments(model, *assign_rules, named=named):
+def modules_to_assign(model, value, *assign_rules, ignore_modules=None, named=False):
+    for assign_info in module_wise_assignments(model, *assign_rules, ignore_modules=ignore_modules, named=named):
         values = assign_info[-1]
         if value in values:
             if named:
@@ -196,7 +213,13 @@ def named_modules_to_assign(value, *assign_rules):
 
 
 def _preprocess_in_data(module, in_data, out_data):
+    if isinstance(module, nn.Linear):
+        if in_data.ndim > 2:
+            # n x * x f_in -> n x f_in
+            in_data = in_data.flatten(end_dim=in_data.ndim-2)
+
     if isinstance(module, nn.Conv2d):
+        # n x c x h_in x w_in -> n x c(kh)(kw) x (h_out)(w_out)
         in_data = im2col_2d(in_data, module)
 
     if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
@@ -218,28 +241,30 @@ def _preprocess_in_data(module, in_data, out_data):
         # restore normalized input
         in_data_norm = (out_data - layernorm.bias).div(layernorm.weight)
         in_data = in_data_norm
-        # reduce dimensions
-        # n x * x norm_shape[0] x norm_shape[1] x ... norm_shape[-1]
-        # -> n x norm_shape[0] x ... x norm_shape[-1]
+        # n x * x norm_shape -> n x norm_shape
         norm_shape_len = len(layernorm.weight.shape)
         in_data_shape_len = len(in_data.shape)
         if norm_shape_len < in_data_shape_len-1:
-            in_data = in_data.sum(dim=list(range(1, in_data_shape_len-norm_shape_len)))
+            in_data = in_data.flatten(end_dim=-norm_shape_len-1)
 
     return in_data
 
 
 def _preprocess_out_grads(module, out_grads):
+    if isinstance(module, nn.Linear):
+        if out_grads.ndim > 2:
+            # n x * x f_out -> n x f_out
+            out_grads = out_grads.flatten(end_dim=out_grads.ndim-2)
+
     if isinstance(module, nn.Conv2d):
+        # n x c x h_out x w_out -> n x c(h_out)(w_out)
         out_grads = out_grads.flatten(start_dim=2)
     
     if isinstance(module, nn.LayerNorm):
-        # reduce dimensions
-        # n x * x norm_shape[0] x norm_shape[1] x ... norm_shape[-1]
-        # -> n x norm_shape[0] x ... x norm_shape[-1]
+        # n x * x norm_shape -> n x norm_shape
         norm_shape_len = len(module.weight.shape)
         out_grads_shape_len = len(out_grads.shape)
         if norm_shape_len < out_grads_shape_len-1:
-            out_grads = out_grads.sum(dim=list(range(1, out_grads_shape_len-norm_shape_len)))
+            out_grads = out_grads.flatten(end_dim=-norm_shape_len-1)
 
     return out_grads
