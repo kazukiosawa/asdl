@@ -134,7 +134,7 @@ class NaturalGradient:
         if ema_decay is None:
             ema_decay = self.ema_decay
         if ema_decay != _invalid_ema_decay:
-            assert accumulate, 'ema_decay cannot be set when accumulate=False.'
+            accumulate = True
             scale *= ema_decay
             self._scale_fisher(1 - ema_decay)
 
