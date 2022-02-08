@@ -120,17 +120,17 @@ class NaturalGradient:
         if fisher is not None:
             fisher.mul_(scale)
 
-    def _update_curvature(self,
-                          inputs=None,
-                          targets=None,
-                          data_loader=None,
-                          cxt: OperationContext = None,
-                          accumulate=False,
-                          ema_decay=None,
-                          data_average=True,
-                          calc_emp_loss_grad=False,
-                          seed=None,
-                          scale=1):
+    def update_curvature(self,
+                         inputs=None,
+                         targets=None,
+                         data_loader=None,
+                         cxt: OperationContext = None,
+                         accumulate=False,
+                         ema_decay=None,
+                         data_average=True,
+                         calc_emp_loss_grad=False,
+                         seed=None,
+                         scale=1):
         if ema_decay is None:
             ema_decay = self.ema_decay
         if ema_decay != _invalid_ema_decay:
@@ -190,16 +190,16 @@ class NaturalGradient:
                              calc_emp_loss_grad=False,
                              seed=None,
                              scale=1):
-        return self._update_curvature(inputs=inputs,
-                                      targets=targets,
-                                      data_loader=data_loader,
-                                      cxt=cxt,
-                                      accumulate=True,
-                                      ema_decay=ema_decay,
-                                      data_average=data_average,
-                                      calc_emp_loss_grad=calc_emp_loss_grad,
-                                      seed=seed,
-                                      scale=scale)
+        return self.update_curvature(inputs=inputs,
+                                     targets=targets,
+                                     data_loader=data_loader,
+                                     cxt=cxt,
+                                     accumulate=True,
+                                     ema_decay=ema_decay,
+                                     data_average=data_average,
+                                     calc_emp_loss_grad=calc_emp_loss_grad,
+                                     seed=seed,
+                                     scale=scale)
 
     def refresh_curvature(self,
                           inputs=None,
@@ -212,16 +212,16 @@ class NaturalGradient:
                           scale=1):
         if self.ema_decay != _invalid_ema_decay:
             warnings.warn(f'ema_decay ({self.ema_decay}) will be ignored.')
-        return self._update_curvature(inputs=inputs,
-                                      targets=targets,
-                                      data_loader=data_loader,
-                                      cxt=cxt,
-                                      accumulate=False,
-                                      ema_decay=_invalid_ema_decay,
-                                      data_average=data_average,
-                                      calc_emp_loss_grad=calc_emp_loss_grad,
-                                      seed=seed,
-                                      scale=scale)
+        return self.update_curvature(inputs=inputs,
+                                     targets=targets,
+                                     data_loader=data_loader,
+                                     cxt=cxt,
+                                     accumulate=False,
+                                     ema_decay=_invalid_ema_decay,
+                                     data_average=data_average,
+                                     calc_emp_loss_grad=calc_emp_loss_grad,
+                                     seed=seed,
+                                     scale=scale)
 
     def reduce_curvature(self, all_reduce=True):
         self.fisher_manager.reduce_matrices(all_reduce=all_reduce)
