@@ -37,7 +37,7 @@ def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamV
                 continue
             # register hooks and operations for child modules
             handles.append(module.register_forward_hook(forward_hook))
-            cxt.register_operation(module, op_class(module, op_names))
+            cxt.register_operation(module, op_class(module, op_names, model_for_kernel=model))
         if not cxt.is_operation_registered(model):
             # register empty operation for parent model
             cxt.register_operation(model, Operation(model, []))
