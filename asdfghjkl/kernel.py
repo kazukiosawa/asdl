@@ -516,6 +516,10 @@ def empirical_natural_gradient(model, inputs, targets, loss_fn=F.cross_entropy, 
         b /= n ** 2
         ones /= n
     batch_loss.backward(gradient=(ones - b) / damping)
+    if data_average:
+        return batch_loss.mean()
+    else:
+        return batch_loss.sum()
 
 
 def kernel_free_cross_entropy(model,
