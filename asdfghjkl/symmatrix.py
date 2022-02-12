@@ -634,13 +634,21 @@ class UnitWise:
         self.inv = torch.inverse(data + dmp)
 
     def mvp(self, vec_weight, vec_bias, use_inv=False, inplace=False):
-        # only for BatchNormNd
-        mat = self.inv if use_inv else self.data  # (f, 2, 2)
-        v = torch.stack([vec_weight, vec_bias], dim=1)  # (f, 2)
-        v = v.unsqueeze(2)  # (f, 2, 1)
-        mvp_wb = torch.matmul(mat, v).squeeze(2)  # (f, 2)
-        mvp_w = mvp_wb[:, 0]
-        mvp_b = mvp_wb[:, 1]
+        mat = self.inv if use_inv else self.data  # (f, 2, 2) or (f_out, f_in+1, f_in+1)
+        if vec_weight.shape == vec_bias and vec_weight.shape[-1] == 2:
+            # for BatchNormNd
+            v = torch.stack([vec_weight, vec_bias], dim=1)  # (f, 2)
+            v = v.unsqueeze(2)  # (f, 2, 1)
+            mvp_wb = torch.matmul(mat, v).squeeze(2)  # (f, 2)
+            mvp_w = mvp_wb[:, 0]
+            mvp_b = mvp_wb[:, 1]
+        else:
+            v = torch.hstack([vec_weight, vec_bias.unsqueeze(dim=1)])  # (f_out, f_in+1)
+            v = v.unsqueeze(2)  # (f_out, f_in+1, 1)
+            mvp_wb = torch.matmul(mat, v).squeeze(2)  # (f_out, f_in+1)
+            mvp_w = mvp_wb[:, :-1]
+            mvp_b = mvp_wb[:, -1]
+
         if inplace:
             vec_weight.copy_(mvp_w)
             vec_bias.copy_(mvp_b)
