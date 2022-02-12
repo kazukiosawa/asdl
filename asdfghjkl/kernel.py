@@ -375,17 +375,18 @@ def natural_gradient_cross_entropy(model, inputs, targets, kernel, damping=1e-5)
     hessian = logits_hessian_cross_entropy(outputs)  # n x c x c
 
     is_class_wise = kernel.ndim == 3  # n x n x c
-    mat = outputs.new_zeros(n * c, n * c)  # nc x nc
-    for i in range(n):
-        for j in range(n):
-            if is_class_wise:
-                # dense x diagonal
-                diag_repeated = kernel[i, j].repeat(c, 1)  # c x c
-                block = torch.mul(hessian[i], diag_repeated)
-            else:
+    if is_class_wise:
+        mat = torch.mul(
+            kernel.repeat(1, 1, c).reshape(n, n, c, c),
+            hessian.repeat(n, 1, 1).reshape(n, n, c, c).transpose(0, 1))
+        mat = mat.transpose(1, 2).reshape(n * c, n * c)
+    else:
+        mat = outputs.new_zeros(n * c, n * c)  # nc x nc
+        for i in range(n):
+            for j in range(n):
                 # dense x dense
                 block = torch.matmul(hessian[i], kernel[i, j])
-            mat[i * c: (i+1) * c, j * c: (j+1) * c] = block
+                mat[i * c: (i+1) * c, j * c: (j+1) * c] = block
     mat.div_(n)
     mat = _add_value_to_diagonal(mat, damping)
     inv = torch.inverse(mat)
@@ -397,6 +398,8 @@ def natural_gradient_cross_entropy(model, inputs, targets, kernel, damping=1e-5)
 
     # compute natural-gradient by auto-differentiation
     torch.autograd.backward(outputs, grad_tensors=v)
+
+    return loss
 
 
 def efficient_natural_gradient_cross_entropy(model, inputs, targets, class_kernels, damping=1e-5):
