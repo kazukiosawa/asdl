@@ -54,10 +54,18 @@ class Conv2d(Operation):
 
     @staticmethod
     def cov_diag_weight(module, in_data, out_grads):
-        in_in = torch.square(in_data).transpose(0, 1).flatten(start_dim=1)  # (c_in)(kernel_size) x n(out_size)
-        grad_grad = torch.square(out_grads).transpose(0, 1).flatten(start_dim=1)  # c_out x n(out_size)
-        rst = torch.matmul(grad_grad, in_in.T)  # c_out x (c_in)(kernel_size)
-        return rst.view_as(module.weight)  # c_out x c_in x k_h x k_w
+        c_out, c_in, kh, kw = module.weight.shape
+        out_size = in_data.shape[-1]
+
+        # select a calculation method that consumes less memory
+        if out_size * (c_out + c_in * kh * kw) < c_out * c_in * kh * kw:
+            in_in = torch.square(in_data).transpose(0, 1).flatten(start_dim=1)  # (c_in)(kernel_size) x n(out_size)
+            grad_grad = torch.square(out_grads).transpose(0, 1).flatten(start_dim=1)  # c_out x n(out_size)
+            rst = torch.matmul(grad_grad, in_in.T)  # c_out x (c_in)(kernel_size)
+            return rst.view_as(module.weight)  # c_out x c_in x k_h x k_w
+        else:
+            bg = Conv2d.batch_grads_weight(module, in_data, out_grads)  # n x c_out x c_in x k_h x k_w
+            return torch.square(bg).sum(dim=0)  # c_out x c_in x k_h x k_w
 
     @staticmethod
     def cov_diag_bias(module, out_grads):
