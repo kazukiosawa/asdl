@@ -23,6 +23,16 @@ class Conv2d(Operation):
         return im2col_2d(in_data, module)
 
     @staticmethod
+    def extend_in_data(in_data):
+        # Extend in_data with ones.
+        # conv2d: n x (c_in)(kernel_size) x out_size
+        #      -> n x {(c_in)(kernel_size) + 1} x out_size
+        shape = list(in_data.shape)
+        shape[1] = 1
+        ones = in_data.new_ones(shape)
+        return torch.cat((in_data, ones), dim=1)
+
+    @staticmethod
     def preprocess_out_grads(module, out_grads):
         # n x c x h_out x w_out -> n x c(h_out)(w_out)
         return out_grads.flatten(start_dim=2)

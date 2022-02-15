@@ -31,6 +31,13 @@ ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
            OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS,
            OP_SAVE_INPUTS, OP_SAVE_OUTGRADS]
 
+FWD_OPS = [OP_SAVE_INPUTS, OP_COV_KRON, OP_GRAM_HADAMARD,
+           OP_RFIM_RELU, OP_RFIM_SOFTMAX]
+BWD_OPS_WITH_INPUTS = [OP_COV, OP_CVP, OP_COV_DIAG, OP_COV_UNIT_WISE,
+                       OP_BATCH_GRADS, OP_GRAM_DIRECT]
+BWD_OPS = [OP_SAVE_OUTGRADS, OP_COV_KRON, OP_GRAM_HADAMARD,
+           OP_RFIM_RELU, OP_RFIM_SOFTMAX] + BWD_OPS_WITH_INPUTS
+
 
 class Operation:
     def __init__(self, module, op_names, model_for_kernel=None):
@@ -97,22 +104,22 @@ class Operation:
     @torch.no_grad()
     def forward_post_process(self, in_data: torch.Tensor, out_data: torch.Tensor):
         module = self._module
+        op_names = self._op_names
 
-        if OP_SAVE_INPUTS in self._op_names:
-            in_data = self.preprocess_in_data(module, in_data, out_data)
-            self.accumulate_result(in_data, OP_SAVE_INPUTS, concat=True)
-
-        if set([OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX]) & self._op_names:
-            assert original_requires_grad(module, 'weight'), f'weight.requires_grad has to be True (module: {module}).'
+        if any(op_name in FWD_OPS for op_name in op_names):
             in_data = self.preprocess_in_data(module, in_data, out_data)
             if original_requires_grad(module, 'bias'):
                 in_data = self.extend_in_data(in_data)
 
-            if OP_COV_KRON in self._op_names:
+        for op_name in op_names:
+            if op_name not in FWD_OPS:
+                continue
+            if op_name == OP_SAVE_INPUTS:
+                self.accumulate_result(in_data, OP_SAVE_INPUTS, concat=True)
+            elif op_name == OP_COV_KRON:
                 A = self.cov_kron_A(module, in_data)
                 self.accumulate_result(A, OP_COV_KRON, 'A')
-
-            if OP_GRAM_HADAMARD in self._op_names:
+            elif op_name == OP_GRAM_HADAMARD:
                 assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
                 n_data = in_data.shape[0]
                 n1 = self._model_for_kernel.kernel.shape[0]
@@ -121,57 +128,53 @@ class Operation:
                 else:
                     A = self.gram_A(module, in_data[:n1], in_data[n1:])
                 self.accumulate_result(A, OP_GRAM_HADAMARD, 'A')
-
-            if OP_RFIM_RELU in self._op_names:
-                out_data = out_data.clone().detach()
+            elif op_name == OP_RFIM_RELU:
                 self.accumulate_result(self.rfim_relu(module, in_data, out_data), OP_RFIM_RELU)
-
-            if OP_RFIM_SOFTMAX in self._op_names:
-                out_data = out_data.clone().detach()
+            elif op_name == OP_RFIM_SOFTMAX:
                 self.accumulate_result(self.rfim_softmax(module, in_data, out_data), OP_RFIM_SOFTMAX)
 
     @torch.no_grad()
     def backward_pre_process(self, in_data, out_data, out_grads, vector: torch.Tensor = None):
         module = self._module
-        in_data = self.preprocess_in_data(module, in_data, out_data)
-        out_grads = self.preprocess_out_grads(module, out_grads)
+        op_names = self._op_names
 
-        for op_name in self._op_names:
-            if op_name == OP_SAVE_INPUTS:
+        if any(op_name in BWD_OPS for op_name in op_names):
+            out_grads = self.preprocess_out_grads(module, out_grads)
+        if any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names):
+            in_data = self.preprocess_in_data(module, in_data, out_data)
+            if original_requires_grad(module, 'bias'):
+                in_data = self.extend_in_data(in_data)
+
+        for op_name in op_names:
+            if op_name not in BWD_OPS:
                 continue
-
-            if op_name in [OP_COV, OP_CVP]:
+            if op_name == OP_COV:
                 _, _, batch_g = self.collect_batch_grads(in_data, out_grads)
-                if op_name == OP_COV:
-                    self.accumulate_result(torch.matmul(batch_g.T, batch_g), OP_COV)
-                else:
-                    assert vector is not None
-                    assert vector.ndim == 1
-                    batch_gtv = batch_g.mul(vector.unsqueeze(0)).sum(dim=1)
-                    cvp = torch.einsum('ni,n->i', batch_g, batch_gtv)
-                    if original_requires_grad(module, 'weight'):
-                        if original_requires_grad(module, 'bias'):
-                            w_numel = module.weight.numel()
-                            self.accumulate_result(cvp[:w_numel].view_as(module.weight), OP_CVP, 'weight')
-                            self.accumulate_result(cvp[w_numel:].view_as(module.bias), OP_CVP, 'bias')
-                        else:
-                            self.accumulate_result(cvp.view_as(module.weight), OP_CVP, 'weight')
+                self.accumulate_result(torch.matmul(batch_g.T, batch_g), OP_COV)
+            elif op_name == OP_CVP:
+                _, _, batch_g = self.collect_batch_grads(in_data, out_grads)
+                assert vector is not None
+                assert vector.ndim == 1
+                batch_gtv = batch_g.mul(vector.unsqueeze(0)).sum(dim=1)
+                cvp = torch.einsum('ni,n->i', batch_g, batch_gtv)
+                if original_requires_grad(module, 'weight'):
+                    if original_requires_grad(module, 'bias'):
+                        w_numel = module.weight.numel()
+                        self.accumulate_result(cvp[:w_numel].view_as(module.weight), OP_CVP, 'weight')
+                        self.accumulate_result(cvp[w_numel:].view_as(module.bias), OP_CVP, 'bias')
                     else:
-                        self.accumulate_result(cvp.view_as(module.bias), OP_CVP, 'bias')
-
+                        self.accumulate_result(cvp.view_as(module.weight), OP_CVP, 'weight')
+                else:
+                    self.accumulate_result(cvp.view_as(module.bias), OP_CVP, 'bias')
             elif op_name == OP_COV_KRON:
                 B = self.cov_kron_B(module, out_grads)
                 self.accumulate_result(B, OP_COV_KRON, 'B')
-
             elif op_name == OP_COV_UNIT_WISE:
                 if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm)):
                     assert original_requires_grad(module, 'weight') and original_requires_grad(module, 'bias'), \
-                        f'Both weight and bias have to require grad for {op_name} (module: {module}).'
-                elif original_requires_grad(module, 'bias'):
-                    in_data = self.extend_in_data(in_data)
+                        f'Both weight and bias have to require grad for {OP_COV_UNIT_WISE} (module: {module}).'
                 rst = self.cov_unit_wise(module, in_data, out_grads)
                 self.accumulate_result(rst, OP_COV_UNIT_WISE)
-
             elif op_name == OP_GRAM_HADAMARD:
                 assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
                 n_data = in_data.shape[0]
@@ -182,7 +185,6 @@ class Operation:
                     B = self.gram_B(module, out_grads[:n1], out_grads[n1:])
                 A = self._op_results[OP_GRAM_HADAMARD]['A']
                 self._model_for_kernel.kernel += B.mul(A)
-
             elif op_name == OP_GRAM_DIRECT:
                 assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_DIRECT}.'
                 n_data = in_data.shape[0]
@@ -202,11 +204,9 @@ class Operation:
                     self._model_for_kernel.kernel += torch.matmul(batch_g, batch_g2.T)
                 else:
                     self._model_for_kernel.kernel += torch.matmul(batch_g[:n1], batch_g2[n1:].T)
-
             elif op_name == OP_SAVE_OUTGRADS:
                 self.accumulate_result(out_grads, OP_SAVE_OUTGRADS, concat=True)
-
-            else:
+            elif op_name in [OP_COV_DIAG, OP_BATCH_GRADS]:
                 if original_requires_grad(module, 'weight'):
                     rst = getattr(self,
                                   f'{op_name}_weight')(module, in_data, out_grads)
@@ -243,15 +243,8 @@ class Operation:
 
     @staticmethod
     def extend_in_data(in_data):
-        # Extend in_data with ones.
-        # linear: n x f_in
-        #      -> n x (f_in + 1)
-        # conv2d: n x (c_in)(kernel_size) x out_size
-        #      -> n x {(c_in)(kernel_size) + 1} x out_size
-        shape = list(in_data.shape)
-        shape[1] = 1
-        ones = in_data.new_ones(shape)
-        return torch.cat((in_data, ones), dim=1)
+        # no extension by default
+        return in_data
 
     @staticmethod
     def batch_grads_weight(module, in_data, out_grads):
@@ -432,8 +425,6 @@ class OperationContext:
 
     def calc_cov_kron(self, module):
         operation, in_data, out_grads = self.load_op_in_out(module)
-        if original_requires_grad(module, 'bias'):
-            in_data = Operation.extend_in_data(in_data)
         A = operation.cov_kron_A(module, in_data)
         B = operation.cov_kron_B(module, out_grads)
         self.accumulate_result(module, A, OP_COV_KRON, 'A')

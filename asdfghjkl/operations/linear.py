@@ -22,6 +22,16 @@ class Linear(Operation):
         return in_data
 
     @staticmethod
+    def extend_in_data(in_data):
+        # Extend in_data with ones.
+        # linear: n x f_in
+        #      -> n x (f_in + 1)
+        shape = list(in_data.shape)
+        shape[1] = 1
+        ones = in_data.new_ones(shape)
+        return torch.cat((in_data, ones), dim=1)
+
+    @staticmethod
     def preprocess_out_grads(module, out_grads):
         if out_grads.ndim > 2:
             # n x * x f_out -> n x f_out
