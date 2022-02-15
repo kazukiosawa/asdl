@@ -34,7 +34,7 @@ class Conv2d(Operation):
 
     @staticmethod
     def preprocess_out_grads(module, out_grads):
-        # n x c x h_out x w_out -> n x c(h_out)(w_out)
+        # n x c x h_out x w_out -> n x c x (h_out)(w_out)
         return out_grads.flatten(start_dim=2)
 
     @staticmethod
