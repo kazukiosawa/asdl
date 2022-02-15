@@ -142,8 +142,6 @@ class Operation:
             out_grads = self.preprocess_out_grads(module, out_grads)
         if any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names):
             in_data = self.preprocess_in_data(module, in_data, out_data)
-            if original_requires_grad(module, 'bias'):
-                in_data = self.extend_in_data(in_data)
 
         for op_name in op_names:
             if op_name not in BWD_OPS:
@@ -173,6 +171,8 @@ class Operation:
                 if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm)):
                     assert original_requires_grad(module, 'weight') and original_requires_grad(module, 'bias'), \
                         f'Both weight and bias have to require grad for {OP_COV_UNIT_WISE} (module: {module}).'
+                elif original_requires_grad(module, 'bias'):
+                    in_data = self.extend_in_data(in_data)
                 rst = self.cov_unit_wise(module, in_data, out_grads)
                 self.accumulate_result(rst, OP_COV_UNIT_WISE)
             elif op_name == OP_GRAM_HADAMARD:
