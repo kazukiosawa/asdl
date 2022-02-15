@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 
+from ..utils import im2col_2d
 from .operation import Operation
 
 
@@ -16,6 +17,16 @@ class Conv2d(Operation):
     kernel_size = (k_h)(k_w)
     out_size = output feature map size
     """
+    @staticmethod
+    def preprocess_in_data(module, in_data, out_data):
+        # n x c x h_in x w_in -> n x c(kh)(kw) x (h_out)(w_out)
+        return im2col_2d(in_data, module)
+
+    @staticmethod
+    def preprocess_out_grads(module, out_grads):
+        # n x c x h_out x w_out -> n x c(h_out)(w_out)
+        return out_grads.flatten(start_dim=2)
+
     @staticmethod
     def batch_grads_weight(
         module: nn.Module, in_data: torch.Tensor, out_grads: torch.Tensor

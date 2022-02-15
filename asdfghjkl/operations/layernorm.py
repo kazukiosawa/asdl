@@ -15,6 +15,27 @@ class LayerNorm(Operation):
 
     normalized_shape: f[0] x f[1] x ... x f[-1]
     """
+    @staticmethod
+    def preprocess_in_data(module, in_data, out_data):
+        # restore normalized input
+        in_data_norm = (out_data - module.bias).div(module.weight)
+        in_data = in_data_norm
+        # n x * x norm_shape -> n x norm_shape
+        norm_shape_len = len(module.weight.shape)
+        in_data_shape_len = len(in_data.shape)
+        if norm_shape_len < in_data_shape_len - 1:
+            in_data = in_data.flatten(end_dim=-norm_shape_len - 1)
+        return in_data
+
+    @staticmethod
+    def preprocess_out_grads(module, out_grads):
+        # n x * x norm_shape -> n x norm_shape
+        norm_shape_len = len(module.weight.shape)
+        out_grads_shape_len = len(out_grads.shape)
+        if norm_shape_len < out_grads_shape_len - 1:
+            out_grads = out_grads.flatten(end_dim=-norm_shape_len - 1)
+        return out_grads
+
     def __init__(self, module, op_names, model_for_kernel=None):
         if OP_COV_KRON in op_names:
             op_names = op_names.copy()

@@ -16,14 +16,11 @@ def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamV
 
     try:
         def forward_hook(module, in_data, out_data):
-            in_data = in_data[0].clone().detach()
-            in_data = _preprocess_in_data(module, in_data, out_data)
+            in_data = in_data[0]
             cxt.call_operations_in_forward(module, in_data, out_data)
 
             def backward_hook(out_grads):
-                out_grads = out_grads.clone().detach()
-                out_grads = _preprocess_out_grads(module, out_grads)
-                cxt.call_operations_in_backward(module, in_data, out_grads)
+                cxt.call_operations_in_backward(module, in_data, out_data, out_grads)
 
             if out_data.requires_grad:
                 handles.append(out_data.register_hook(backward_hook))
@@ -210,61 +207,3 @@ def modules_to_assign(model, value, *assign_rules, ignore_modules=None, named=Fa
 
 def named_modules_to_assign(value, *assign_rules):
     return modules_to_assign(value, *assign_rules, named=True)
-
-
-def _preprocess_in_data(module, in_data, out_data):
-    if isinstance(module, nn.Linear):
-        if in_data.ndim > 2:
-            # n x * x f_in -> n x f_in
-            in_data = in_data.flatten(end_dim=in_data.ndim-2)
-
-    if isinstance(module, nn.Conv2d):
-        # n x c x h_in x w_in -> n x c(kh)(kw) x (h_out)(w_out)
-        in_data = im2col_2d(in_data, module)
-
-    if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
-        bnorm = module
-        f = bnorm.num_features
-        if isinstance(module, nn.BatchNorm1d):
-            shape = (1, f)
-        elif isinstance(module, nn.BatchNorm2d):
-            shape = (1, f, 1, 1)
-        else:
-            shape = (1, f, 1, 1, 1)
-        # restore normalized input
-        in_data_norm = (out_data -
-                        bnorm.bias.view(shape)).div(bnorm.weight.view(shape))
-        in_data = in_data_norm
-
-    if isinstance(module, nn.LayerNorm):
-        layernorm = module
-        # restore normalized input
-        in_data_norm = (out_data - layernorm.bias).div(layernorm.weight)
-        in_data = in_data_norm
-        # n x * x norm_shape -> n x norm_shape
-        norm_shape_len = len(layernorm.weight.shape)
-        in_data_shape_len = len(in_data.shape)
-        if norm_shape_len < in_data_shape_len-1:
-            in_data = in_data.flatten(end_dim=-norm_shape_len-1)
-
-    return in_data
-
-
-def _preprocess_out_grads(module, out_grads):
-    if isinstance(module, nn.Linear):
-        if out_grads.ndim > 2:
-            # n x * x f_out -> n x f_out
-            out_grads = out_grads.flatten(end_dim=out_grads.ndim-2)
-
-    if isinstance(module, nn.Conv2d):
-        # n x c x h_out x w_out -> n x c(h_out)(w_out)
-        out_grads = out_grads.flatten(start_dim=2)
-    
-    if isinstance(module, nn.LayerNorm):
-        # n x * x norm_shape -> n x norm_shape
-        norm_shape_len = len(module.weight.shape)
-        out_grads_shape_len = len(out_grads.shape)
-        if norm_shape_len < out_grads_shape_len-1:
-            out_grads = out_grads.flatten(end_dim=-norm_shape_len-1)
-
-    return out_grads

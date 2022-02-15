@@ -2,7 +2,7 @@ from typing import Dict
 
 import torch
 import torch.nn as nn
-from ..utils import original_requires_grad
+from ..utils import original_requires_grad, im2col_2d
 from ..symmatrix import *
 from ..vector import ParamVector
 
@@ -94,14 +94,17 @@ class Operation:
     def clear_results(self):
         self._op_results = {}
 
+    @torch.no_grad()
     def forward_post_process(self, in_data: torch.Tensor, out_data: torch.Tensor):
         module = self._module
 
         if OP_SAVE_INPUTS in self._op_names:
+            in_data = self.preprocess_in_data(module, in_data, out_data)
             self.accumulate_result(in_data, OP_SAVE_INPUTS, concat=True)
 
         if set([OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX]) & self._op_names:
             assert original_requires_grad(module, 'weight'), f'weight.requires_grad has to be True (module: {module}).'
+            in_data = self.preprocess_in_data(module, in_data, out_data)
             if original_requires_grad(module, 'bias'):
                 in_data = self.extend_in_data(in_data)
 
@@ -127,8 +130,12 @@ class Operation:
                 out_data = out_data.clone().detach()
                 self.accumulate_result(self.rfim_softmax(module, in_data, out_data), OP_RFIM_SOFTMAX)
 
-    def backward_pre_process(self, in_data, out_grads, vector: torch.Tensor = None):
+    @torch.no_grad()
+    def backward_pre_process(self, in_data, out_data, out_grads, vector: torch.Tensor = None):
         module = self._module
+        in_data = self.preprocess_in_data(module, in_data, out_data)
+        out_grads = self.preprocess_out_grads(module, out_grads)
+
         for op_name in self._op_names:
             if op_name == OP_SAVE_INPUTS:
                 continue
@@ -207,6 +214,16 @@ class Operation:
                 if original_requires_grad(module, 'bias'):
                     rst = getattr(self, f'{op_name}_bias')(module, out_grads)
                     self.accumulate_result(rst, op_name, 'bias')
+
+    @staticmethod
+    def preprocess_in_data(module, in_data, out_data):
+        # no preprocess by default
+        return in_data
+
+    @staticmethod
+    def preprocess_out_grads(module, out_grads):
+        # no preprocess by default
+        return out_grads
 
     @torch.no_grad()
     def collect_batch_grads(self, in_data, out_grads):
@@ -322,9 +339,9 @@ class OperationContext:
     def call_operations_in_forward(self, module, in_data, out_data):
         self.get_operation(module).forward_post_process(in_data, out_data)
 
-    def call_operations_in_backward(self, module, in_data, out_grads):
+    def call_operations_in_backward(self, module, in_data, out_data, out_grads):
         vector = self.get_vectors_by_module(module, flatten=True)
-        self.get_operation(module).backward_pre_process(in_data, out_grads, vector)
+        self.get_operation(module).backward_pre_process(in_data, out_data, out_grads, vector)
 
     def get_result(self, module, *keys, default=None):
         try:

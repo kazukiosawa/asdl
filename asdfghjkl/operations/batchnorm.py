@@ -21,6 +21,18 @@ class _BatchNormNd(Operation):
         super().__init__(module, op_names, model_for_kernel)
 
     @staticmethod
+    def preprocess_in_data(module, in_data, out_data):
+        f = module.num_features
+        if isinstance(module, nn.BatchNorm1d):
+            shape = (1, f)
+        elif isinstance(module, nn.BatchNorm2d):
+            shape = (1, f, 1, 1)
+        else:
+            shape = (1, f, 1, 1, 1)
+        # restore normalized input
+        return (out_data - module.bias.view(shape)).div(module.weight.view(shape))
+
+    @staticmethod
     def _reduce(tensor: torch.Tensor):
         raise NotImplementedError
 

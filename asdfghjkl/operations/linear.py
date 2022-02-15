@@ -15,6 +15,20 @@ class Linear(Operation):
     out_grads: n x f_out
     """
     @staticmethod
+    def preprocess_in_data(module, in_data, out_data):
+        if in_data.ndim > 2:
+            # n x * x f_in -> n x f_in
+            in_data = in_data.flatten(end_dim=in_data.ndim - 2)
+        return in_data
+
+    @staticmethod
+    def preprocess_out_grads(module, out_grads):
+        if out_grads.ndim > 2:
+            # n x * x f_out -> n x f_out
+            out_grads = out_grads.flatten(end_dim=out_grads.ndim - 2)
+        return out_grads
+
+    @staticmethod
     def batch_grads_weight(
         module: nn.Module, in_data: torch.Tensor, out_grads: torch.Tensor
     ):
