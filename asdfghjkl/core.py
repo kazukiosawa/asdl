@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 
 import torch.nn as nn
-from .utils import im2col_2d, record_original_requires_grad
+from .utils import record_original_requires_grad
 from .operations import *
 from .matrices import *
 from .vector import ParamVector
