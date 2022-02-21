@@ -31,10 +31,9 @@ ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
            OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS,
            OP_SAVE_INPUTS, OP_SAVE_OUTGRADS]
 
-FWD_OPS = [OP_SAVE_INPUTS, OP_COV_KRON, OP_GRAM_HADAMARD,
-           OP_RFIM_RELU, OP_RFIM_SOFTMAX]
-BWD_OPS_WITH_INPUTS = [OP_COV, OP_CVP, OP_COV_DIAG, OP_COV_UNIT_WISE,
-                       OP_BATCH_GRADS, OP_GRAM_DIRECT]
+FWD_OPS = [OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX]
+BWD_OPS_WITH_INPUTS = [OP_SAVE_INPUTS, OP_COV, OP_CVP, OP_COV_DIAG,
+                       OP_COV_UNIT_WISE, OP_BATCH_GRADS, OP_GRAM_DIRECT]
 BWD_OPS = [OP_SAVE_OUTGRADS, OP_COV_KRON, OP_GRAM_HADAMARD,
            OP_RFIM_RELU, OP_RFIM_SOFTMAX] + BWD_OPS_WITH_INPUTS
 
@@ -114,9 +113,7 @@ class Operation:
         for op_name in op_names:
             if op_name not in FWD_OPS:
                 continue
-            if op_name == OP_SAVE_INPUTS:
-                self.accumulate_result(in_data, OP_SAVE_INPUTS, concat=True)
-            elif op_name == OP_COV_KRON:
+            if op_name == OP_COV_KRON:
                 A = self.cov_kron_A(module, in_data)
                 self.accumulate_result(A, OP_COV_KRON, 'A')
             elif op_name == OP_GRAM_HADAMARD:
@@ -204,6 +201,8 @@ class Operation:
                     self._model_for_kernel.kernel += torch.matmul(batch_g, batch_g2.T)
                 else:
                     self._model_for_kernel.kernel += torch.matmul(batch_g[:n1], batch_g2[n1:].T)
+            elif op_name == OP_SAVE_INPUTS:
+                self.accumulate_result(in_data, OP_SAVE_INPUTS, concat=True)
             elif op_name == OP_SAVE_OUTGRADS:
                 self.accumulate_result(out_grads, OP_SAVE_OUTGRADS, concat=True)
             elif op_name in [OP_COV_DIAG, OP_BATCH_GRADS]:
