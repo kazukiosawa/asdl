@@ -367,9 +367,17 @@ class OperationContext:
             assert scale.shape[0] == out_grads.shape[0]
             out_grads.mul_(scale.unsqueeze(-1))
         if original_requires_grad(module, 'weight'):
-            module.weight.grad.data.copy_(operation.grad_weight(module, in_data, out_grads))
+            grad = operation.grad_weight(module, in_data, out_grads)
+            if module.weight.grad is None:
+                module.weight.grad = grad
+            else:
+                module.weight.grad.data.copy_(grad)
         if original_requires_grad(module, 'bias'):
-            module.bias.grad.data.copy_(operation.grad_bias(module, out_grads))
+            grad = operation.grad_bias(module, out_grads)
+            if module.bias.grad is None:
+                module.bias.grad = grad
+            else:
+                module.bias.grad.data.copy_(grad)
 
     def calc_kernel(self):
         kernel = None
