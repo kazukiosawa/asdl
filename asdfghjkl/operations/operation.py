@@ -463,6 +463,8 @@ class OperationContext:
 
     def calc_cov_kron(self, module):
         operation, in_data, out_grads = self.load_op_in_out(module)
+        if original_requires_grad(module, 'bias'):
+            in_data = operation.extend_in_data(in_data)
         A = operation.cov_kron_A(module, in_data)
         B = operation.cov_kron_B(module, out_grads)
         self.accumulate_result(module, A, OP_COV_KRON, 'A')
