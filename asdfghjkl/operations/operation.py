@@ -377,6 +377,8 @@ class OperationContext:
             if original_requires_grad(module, 'weight') \
                     or original_requires_grad(module, 'bias'):
                 operation, in_data, out_grads = self.load_op_in_out(module)
+                if original_requires_grad(module, 'bias'):
+                    in_data = operation.extend_in_data(in_data)
                 A = operation.gram_A(module, in_data, in_data)
                 B = operation.gram_B(module, out_grads, out_grads)
                 if kernel is None:
