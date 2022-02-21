@@ -355,6 +355,31 @@ class OperationContext:
     def clear_result(self, module, *keys):
         return self.get_operation(module).clear_result(*keys)
 
+    def calc_grads(self, scale=None):
+        for module in self._operations.keys():
+            self.calc_grad(module, scale)
+
+    def calc_grad(self, module, scale=None):
+        operation, in_data, out_grads = self.load_op_in_out(module)
+        if scale is not None:
+            assert scale.shape[0] == out_grads.shape[0]
+            out_grads.mul_(scale.unsqueeze(-1))
+        if original_requires_grad(module, 'weight'):
+            module.weight.grad.data.copy_(operation.grad_weight(module, in_data, out_grads))
+        if original_requires_grad(module, 'bias'):
+            module.bias.grad.data.copy_(operation.grad_bias(module, out_grads))
+
+    def calc_kernel(self):
+        kernel = None
+        for module in self._operations.keys():
+            operation, in_data, out_grads = self.load_op_in_out(module)
+            A = operation.gram_A(module, in_data, in_data)
+            B = operation.gram_B(module, out_grads, out_grads)
+            if kernel is None:
+                kernel = torch.zeros_like(A)
+            kernel += A.mul(B)
+        return kernel
+
     def batch_grads(self, module, flatten=False):
         grads = self.get_result(module, OP_BATCH_GRADS)
         if grads is not None and flatten:
