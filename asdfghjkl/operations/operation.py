@@ -254,6 +254,14 @@ class Operation:
         raise NotImplementedError
 
     @staticmethod
+    def grad_weight(module, in_data, out_grads):
+        raise NotImplementedError
+
+    @staticmethod
+    def grad_bias(module, out_grads):
+        raise NotImplementedError
+
+    @staticmethod
     def cov_diag_weight(module, in_data, out_grads):
         raise NotImplementedError
 
@@ -404,7 +412,7 @@ class OperationContext:
         in_data = self.in_data(module)
         out_grads = self.out_grads(module)
         assert in_data is not None and out_grads is not None, \
-            "in_data and out_grads have not been saved."
+            f"in_data and out_grads have not been saved."
         return operation, in_data, out_grads
 
     def cov(self, module):

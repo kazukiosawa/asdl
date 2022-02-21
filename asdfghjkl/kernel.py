@@ -8,9 +8,10 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader, Subset, TensorDataset
 import torch.distributed as dist
 
-from .core import extend
+from .core import extend, save_inputs_outgrads
 from .operations import *
 from .precondition import NaturalGradient
+from .utils import skip_param_grad
 
 
 __all__ = [
@@ -27,7 +28,8 @@ __all__ = [
     'kernel_vector_product',
     'kernel_free_cross_entropy',
     'kernel_eigenvalues',
-    'empirical_natural_gradient'
+    'empirical_natural_gradient',
+    'empirical_natural_gradient2'
 ]
 
 
@@ -523,6 +525,34 @@ def empirical_natural_gradient(model, inputs, targets, loss_fn=F.cross_entropy, 
         return batch_loss.mean()
     else:
         return batch_loss.sum()
+
+
+def empirical_natural_gradient2(model, inputs, targets, loss_fn=F.cross_entropy, damping=1e-5, data_average=True):
+    """
+    Calculate natural gradient with full empirical Fisher by using the Woodbury matrix identity
+    """
+    n = inputs.shape[0]
+
+    with save_inputs_outgrads(model) as cxt:
+        outputs = model(inputs)
+        loss = loss_fn(outputs, targets, reduction='sum')
+        with skip_param_grad(model):
+            loss.backward()
+        UtU = cxt.calc_kernel()  # n x n
+        Utg = UtU.sum(dim=1)  # n
+        if data_average:
+            UtU.div_(n)
+        b = _cholesky_solve(UtU, Utg, damping)  # n
+        ones = torch.ones_like(b)  # n
+        if data_average:
+            b /= n ** 2
+            ones /= n
+        scale = (ones - b) / damping  # n
+        cxt.calc_grads(scale)
+    if data_average:
+        return loss / n
+    else:
+        return loss
 
 
 def kernel_free_cross_entropy(model,

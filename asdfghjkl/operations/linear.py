@@ -51,6 +51,14 @@ class Linear(Operation):
         return out_grads
 
     @staticmethod
+    def grad_weight(module: nn.Module, in_data: torch.Tensor, out_grads: torch.Tensor):
+        return torch.matmul(out_grads.T, in_data)
+
+    @staticmethod
+    def grad_bias(module: nn.Module, out_grads: torch.Tensor):
+        return torch.sum(out_grads, dim=0)
+
+    @staticmethod
     def cov_diag_weight(module, in_data, out_grads):
         in_in = in_data.mul(in_data)  # n x f_in
         grad_grad = out_grads.mul(out_grads)  # n x f_out
