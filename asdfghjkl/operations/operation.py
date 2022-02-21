@@ -2,7 +2,7 @@ from typing import Dict
 
 import torch
 import torch.nn as nn
-from ..utils import original_requires_grad, im2col_2d
+from ..utils import original_requires_grad
 from ..symmatrix import *
 from ..vector import ParamVector
 
