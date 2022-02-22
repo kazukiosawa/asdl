@@ -15,6 +15,21 @@ class LayerNorm(Operation):
 
     normalized_shape: f[0] x f[1] x ... x f[-1]
     """
+    def __init__(self, module, op_names, model_for_kernel=None):
+        if OP_COV_KRON in op_names:
+            op_names = op_names.copy()
+            # kron operation is not supported. unit_wise will be used instead.
+            op_names.remove(OP_COV_KRON)
+            op_names.append(OP_COV_UNIT_WISE)
+
+        if OP_GRAM_HADAMARD in op_names:
+            op_names = op_names.copy()
+            # gram hadamard operation is not supported. gram direct will be used instead.
+            op_names.remove(OP_GRAM_HADAMARD)
+            op_names.append(OP_GRAM_DIRECT)
+
+        super().__init__(module, op_names, model_for_kernel)
+
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):
         # restore normalized input
@@ -35,21 +50,6 @@ class LayerNorm(Operation):
         if norm_shape_len < out_grads_shape_len - 1:
             out_grads = out_grads.flatten(end_dim=-norm_shape_len - 1)
         return out_grads
-
-    def __init__(self, module, op_names, model_for_kernel=None):
-        if OP_COV_KRON in op_names:
-            op_names = op_names.copy()
-            # kron operation is not supported. unit_wise will be used instead.
-            op_names.remove(OP_COV_KRON)
-            op_names.append(OP_COV_UNIT_WISE)
-
-        if OP_GRAM_HADAMARD in op_names:
-            op_names = op_names.copy()
-            # gram hadamard operation is not supported. gram direct will be used instead.
-            op_names.remove(OP_GRAM_HADAMARD)
-            op_names.append(OP_GRAM_DIRECT)
-
-        super().__init__(module, op_names, model_for_kernel)
 
     @staticmethod
     def batch_grads_weight(
