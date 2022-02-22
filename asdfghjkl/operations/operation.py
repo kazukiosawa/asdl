@@ -382,16 +382,15 @@ class OperationContext:
     def calc_kernel(self):
         kernel = None
         for module in self._operations.keys():
-            if original_requires_grad(module, 'weight') \
-                    or original_requires_grad(module, 'bias'):
+            if original_requires_grad(module, 'weight'):
                 operation, in_data, out_grads = self.load_op_in_out(module)
-                if original_requires_grad(module, 'bias'):
-                    in_data = operation.extend_in_data(in_data)
                 A = operation.gram_A(module, in_data, in_data)
                 B = operation.gram_B(module, out_grads, out_grads)
                 if kernel is None:
                     kernel = torch.zeros_like(A)
                 kernel += A.mul(B)
+                if original_requires_grad(module, 'bias'):
+                    kernel += B
         return kernel
 
     def batch_grads(self, module, flatten=False):
