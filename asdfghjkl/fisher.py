@@ -455,8 +455,27 @@ def fisher_esd(
         is_distributed=False,
         **kwargs
 ):
-
-    # referenced from https://github.com/amirgholami/PyHessian/blob/master/density_plot.py
+    # Calculates Eigenvalue Spectral Density (ESD) for Fisher Information Matrix (FIM)
+    # using Stochastic Lanczos Quadrature (SLQ).
+    # Referenced from https://github.com/amirgholami/PyHessian/blob/master/density_plot.py.
+    # Args:
+    #     model: torch.nn.Module instance representing a neural network model to calculate FIM for.
+    #     fisher_type: string specifying which type of FIM to use. 
+    #                  Can be one of [FISHER_EXACT, FISHER_MC, FISHER_EMP].
+    #     fisher_shape: string specifying which shape approximation of FIM to use.
+    #                   Can be one of [SHAPE_FULL, SHAPE_LAYER_WISE].
+    #     loss_type: string specifying which loss function to use.
+    #                Can be one of [LOSS_CROSS_ENTROPY, LOSS_MSE].
+    #     inputs, targets: Single batch of inputs and targets to feed in to the model.
+    #                      targets will be used only for FISHER_EMP.
+    #     data_loader: torch.utils.data.DataLoader instance to feed in to the model.
+    #                  Either inputs or data_loader must be specified.
+    #     n_v: The number of SLQ runs.
+    #     num_iter: The number of iterations for Lanczos method in SLQ.
+    #     num_bins: The number of partitions between max and min eigenvalue for plotting.
+    #     sigma_squared: Variance of gaussian kernel.
+    #     overhead: Margin added to eigenvalue spectra.
+    #     is_distributed: When set to True, distributed computation is supported.
 
     def fvp_fn(vec: ParamVector) -> ParamVector:
         f = calculate_fisher(model,

@@ -77,7 +77,17 @@ def stochastic_lanczos_quadrature(mvp_fn: Callable[[ParamVector], ParamVector],
                                   num_iter=100,
                                   is_distributed=False,
                                   random_seed=None):
-    # referenced from https://github.com/amirgholami/PyHessian/blob/master/pyhessian/hessian.py
+    # Matrix-free algorithm to estimate weight-node pairs of Eigenvalue Spectral Density with
+    # Gaussian quadrature rule applied.
+    # referenced from https://github.com/amirgholami/PyHessian/blob/master/pyhessian/hessian.py.
+    # Args:
+    #     mvp_fn: Function to compute matrix vector product.
+    #     model: A neural network model of interest.
+    #     n_v: The number of runs the algorithm takes. The estimate of weight-node pair will be
+    #          computed for each run.
+    #     num_iter: The number of iterations for Lanczos method.
+    #     is_distributed: When set to True, distributed computation is supported.
+    #     random_seed: Sets seed for non-deterministic matrix (e.g. fisher_mc)
 
     assert n_v >= 1
     assert num_iter >= 1
