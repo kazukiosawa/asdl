@@ -60,7 +60,15 @@ class LayerNorm(Operation):
     @staticmethod
     def batch_grads_bias(module, out_grads):
         return out_grads
-    
+
+    @staticmethod
+    def grad_weight(module: nn.Module, in_data: torch.Tensor, out_grads: torch.Tensor):
+        return in_data.mul(out_grads).sum(dim=0)
+
+    @staticmethod
+    def grad_bias(module: nn.Module, out_grads: torch.Tensor):
+        return out_grads.sum(dim=0)
+
     @staticmethod
     def cov_diag_weight(module, in_data, out_grads):
         grads = in_data.mul(out_grads)
