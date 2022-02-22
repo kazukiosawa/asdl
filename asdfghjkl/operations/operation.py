@@ -31,9 +31,9 @@ ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
            OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS,
            OP_SAVE_INPUTS, OP_SAVE_OUTGRADS]
 
-FWD_OPS = [OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX]
+FWD_OPS = [OP_SAVE_INPUTS, OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX]
 BWD_OPS_WITH_INPUTS = [OP_COV, OP_CVP, OP_COV_DIAG, OP_COV_UNIT_WISE, OP_BATCH_GRADS, OP_GRAM_DIRECT]
-BWD_OPS = [OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX] + BWD_OPS_WITH_INPUTS
+BWD_OPS = [OP_SAVE_OUTGRADS, OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX] + BWD_OPS_WITH_INPUTS
 
 
 class Operation:
@@ -102,10 +102,10 @@ class Operation:
         module = self._module
         op_names = self._op_names
 
-        if OP_SAVE_INPUTS in op_names:
-            self.accumulate_result(in_data, OP_SAVE_INPUTS, concat=True)
         if any(op_name in FWD_OPS for op_name in op_names):
             in_data = self.preprocess_in_data(module, in_data, out_data)
+            if OP_SAVE_INPUTS in op_names:
+                self.accumulate_result(in_data, OP_SAVE_INPUTS, concat=True)
             if original_requires_grad(module, 'bias'):
                 in_data = self.extend_in_data(in_data)
 
@@ -133,10 +133,10 @@ class Operation:
         module = self._module
         op_names = self._op_names
 
-        if OP_SAVE_OUTGRADS in op_names:
-            self.accumulate_result(out_grads, OP_SAVE_OUTGRADS, concat=True)
         if any(op_name in BWD_OPS for op_name in op_names):
             out_grads = self.preprocess_out_grads(module, out_grads)
+            if OP_SAVE_OUTGRADS in op_names:
+                self.accumulate_result(out_grads, OP_SAVE_OUTGRADS, concat=True)
         if any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names):
             in_data = self.preprocess_in_data(module, in_data, out_data)
 
