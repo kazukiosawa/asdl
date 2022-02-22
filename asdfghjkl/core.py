@@ -17,10 +17,10 @@ def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamV
     try:
         def forward_hook(module, in_data, out_data):
             in_data = in_data[0]
-            cxt.call_operations_in_forward(module, in_data, out_data)
+            cxt.call_operations_in_forward(module, in_data.detach(), out_data.detach())
 
             def backward_hook(out_grads):
-                cxt.call_operations_in_backward(module, in_data, out_data, out_grads)
+                cxt.call_operations_in_backward(module, in_data.detach(), out_data.detach(), out_grads.detach())
 
             if out_data.requires_grad:
                 handles.append(out_data.register_hook(backward_hook))

@@ -98,7 +98,6 @@ class Operation:
     def clear_results(self):
         self._op_results = {}
 
-    @torch.no_grad()
     def forward_post_process(self, in_data: torch.Tensor, out_data: torch.Tensor):
         module = self._module
         op_names = self._op_names
@@ -130,7 +129,6 @@ class Operation:
             elif op_name == OP_RFIM_SOFTMAX:
                 self.accumulate_result(self.rfim_softmax(module, in_data, out_data), OP_RFIM_SOFTMAX)
 
-    @torch.no_grad()
     def backward_pre_process(self, in_data, out_data, out_grads, vector: torch.Tensor = None):
         module = self._module
         op_names = self._op_names
