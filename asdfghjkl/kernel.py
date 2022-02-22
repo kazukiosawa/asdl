@@ -29,7 +29,8 @@ __all__ = [
     'kernel_free_cross_entropy',
     'kernel_eigenvalues',
     'empirical_natural_gradient',
-    'empirical_natural_gradient2'
+    'empirical_natural_gradient2',
+    'empirical_natural_gradient_by_context'
 ]
 
 
@@ -535,24 +536,23 @@ def empirical_natural_gradient2(model, inputs, targets, loss_fn=F.cross_entropy,
 
     with save_inputs_outgrads(model) as cxt:
         outputs = model(inputs)
-        loss = loss_fn(outputs, targets, reduction='sum')
+        loss = loss_fn(outputs, targets, reduction='mean' if data_average else 'sum')
         with skip_param_grad(model):
             loss.backward()
-        UtU = cxt.calc_kernel()  # n x n
-        Utg = UtU.sum(dim=1)  # n
-        if data_average:
-            UtU.div_(n)
-        b = _cholesky_solve(UtU, Utg, damping)  # n
-        ones = torch.ones_like(b)  # n
-        if data_average:
-            b /= n ** 2
-            ones /= n
-        scale = (ones - b) / damping  # n
-        cxt.calc_grads(scale)
+        empirical_natural_gradient_by_context(cxt, damping)
     if data_average:
         return loss / n
     else:
         return loss
+
+
+def empirical_natural_gradient_by_context(cxt: OperationContext, damping=1e-5):
+    UtU = cxt.calc_kernel()  # n x n
+    Utg = UtU.sum(dim=1)  # n
+    b = _cholesky_solve(UtU, Utg, damping)  # n
+    ones = torch.ones_like(b)  # n
+    scale = (ones - b) / damping  # n
+    cxt.calc_grads(scale)
 
 
 def kernel_free_cross_entropy(model,
