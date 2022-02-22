@@ -32,10 +32,8 @@ ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
            OP_SAVE_INPUTS, OP_SAVE_OUTGRADS]
 
 FWD_OPS = [OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX]
-BWD_OPS_WITH_INPUTS = [OP_SAVE_INPUTS, OP_COV, OP_CVP, OP_COV_DIAG,
-                       OP_COV_UNIT_WISE, OP_BATCH_GRADS, OP_GRAM_DIRECT]
-BWD_OPS = [OP_SAVE_OUTGRADS, OP_COV_KRON, OP_GRAM_HADAMARD,
-           OP_RFIM_RELU, OP_RFIM_SOFTMAX] + BWD_OPS_WITH_INPUTS
+BWD_OPS_WITH_INPUTS = [OP_COV, OP_CVP, OP_COV_DIAG, OP_COV_UNIT_WISE, OP_BATCH_GRADS, OP_GRAM_DIRECT]
+BWD_OPS = [OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX] + BWD_OPS_WITH_INPUTS
 
 
 class Operation:
@@ -105,6 +103,8 @@ class Operation:
         module = self._module
         op_names = self._op_names
 
+        if OP_SAVE_INPUTS in op_names:
+            self.accumulate_result(in_data, OP_SAVE_INPUTS, concat=True)
         if any(op_name in FWD_OPS for op_name in op_names):
             in_data = self.preprocess_in_data(module, in_data, out_data)
             if original_requires_grad(module, 'bias'):
@@ -135,6 +135,8 @@ class Operation:
         module = self._module
         op_names = self._op_names
 
+        if OP_SAVE_OUTGRADS in op_names:
+            self.accumulate_result(out_grads, OP_SAVE_OUTGRADS, concat=True)
         if any(op_name in BWD_OPS for op_name in op_names):
             out_grads = self.preprocess_out_grads(module, out_grads)
         if any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names):
@@ -201,10 +203,6 @@ class Operation:
                     self._model_for_kernel.kernel += torch.matmul(batch_g, batch_g2.T)
                 else:
                     self._model_for_kernel.kernel += torch.matmul(batch_g[:n1], batch_g2[n1:].T)
-            elif op_name == OP_SAVE_INPUTS:
-                self.accumulate_result(in_data, OP_SAVE_INPUTS, concat=True)
-            elif op_name == OP_SAVE_OUTGRADS:
-                self.accumulate_result(out_grads, OP_SAVE_OUTGRADS, concat=True)
             elif op_name in [OP_COV_DIAG, OP_BATCH_GRADS]:
                 if original_requires_grad(module, 'weight'):
                     rst = getattr(self,
