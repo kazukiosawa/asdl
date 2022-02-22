@@ -2,7 +2,7 @@ from typing import Dict
 
 import torch
 import torch.nn as nn
-from ..utils import original_requires_grad, im2col_2d
+from ..utils import original_requires_grad
 from ..symmatrix import *
 from ..vector import ParamVector
 
@@ -31,12 +31,9 @@ ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
            OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS,
            OP_SAVE_INPUTS, OP_SAVE_OUTGRADS]
 
-FWD_OPS = [OP_SAVE_INPUTS, OP_COV_KRON, OP_GRAM_HADAMARD,
-           OP_RFIM_RELU, OP_RFIM_SOFTMAX]
-BWD_OPS_WITH_INPUTS = [OP_COV, OP_CVP, OP_COV_DIAG, OP_COV_UNIT_WISE,
-                       OP_BATCH_GRADS, OP_GRAM_DIRECT]
-BWD_OPS = [OP_SAVE_OUTGRADS, OP_COV_KRON, OP_GRAM_HADAMARD,
-           OP_RFIM_RELU, OP_RFIM_SOFTMAX] + BWD_OPS_WITH_INPUTS
+FWD_OPS = [OP_SAVE_INPUTS, OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX]
+BWD_OPS_WITH_INPUTS = [OP_COV, OP_CVP, OP_COV_DIAG, OP_COV_UNIT_WISE, OP_BATCH_GRADS, OP_GRAM_DIRECT]
+BWD_OPS = [OP_SAVE_OUTGRADS, OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX] + BWD_OPS_WITH_INPUTS
 
 
 class Operation:
@@ -101,22 +98,21 @@ class Operation:
     def clear_results(self):
         self._op_results = {}
 
-    @torch.no_grad()
     def forward_post_process(self, in_data: torch.Tensor, out_data: torch.Tensor):
         module = self._module
         op_names = self._op_names
 
         if any(op_name in FWD_OPS for op_name in op_names):
             in_data = self.preprocess_in_data(module, in_data, out_data)
+            if OP_SAVE_INPUTS in op_names:
+                self.accumulate_result(in_data, OP_SAVE_INPUTS, concat=True)
             if original_requires_grad(module, 'bias'):
                 in_data = self.extend_in_data(in_data)
 
         for op_name in op_names:
             if op_name not in FWD_OPS:
                 continue
-            if op_name == OP_SAVE_INPUTS:
-                self.accumulate_result(in_data, OP_SAVE_INPUTS, concat=True)
-            elif op_name == OP_COV_KRON:
+            if op_name == OP_COV_KRON:
                 A = self.cov_kron_A(module, in_data)
                 self.accumulate_result(A, OP_COV_KRON, 'A')
             elif op_name == OP_GRAM_HADAMARD:
@@ -133,13 +129,14 @@ class Operation:
             elif op_name == OP_RFIM_SOFTMAX:
                 self.accumulate_result(self.rfim_softmax(module, in_data, out_data), OP_RFIM_SOFTMAX)
 
-    @torch.no_grad()
     def backward_pre_process(self, in_data, out_data, out_grads, vector: torch.Tensor = None):
         module = self._module
         op_names = self._op_names
 
         if any(op_name in BWD_OPS for op_name in op_names):
             out_grads = self.preprocess_out_grads(module, out_grads)
+            if OP_SAVE_OUTGRADS in op_names:
+                self.accumulate_result(out_grads, OP_SAVE_OUTGRADS, concat=True)
         if any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names):
             in_data = self.preprocess_in_data(module, in_data, out_data)
 
@@ -204,8 +201,6 @@ class Operation:
                     self._model_for_kernel.kernel += torch.matmul(batch_g, batch_g2.T)
                 else:
                     self._model_for_kernel.kernel += torch.matmul(batch_g[:n1], batch_g2[n1:].T)
-            elif op_name == OP_SAVE_OUTGRADS:
-                self.accumulate_result(out_grads, OP_SAVE_OUTGRADS, concat=True)
             elif op_name in [OP_COV_DIAG, OP_BATCH_GRADS]:
                 if original_requires_grad(module, 'weight'):
                     rst = getattr(self,
@@ -252,6 +247,14 @@ class Operation:
 
     @staticmethod
     def batch_grads_bias(module, out_grads):
+        raise NotImplementedError
+
+    @staticmethod
+    def grad_weight(module, in_data, out_grads):
+        raise NotImplementedError
+
+    @staticmethod
+    def grad_bias(module, out_grads):
         raise NotImplementedError
 
     @staticmethod
@@ -348,6 +351,44 @@ class OperationContext:
     def clear_result(self, module, *keys):
         return self.get_operation(module).clear_result(*keys)
 
+    def calc_grads(self, scale=None):
+        for module in self._operations.keys():
+            if original_requires_grad(module, 'weight') \
+                    or original_requires_grad(module, 'bias'):
+                self.calc_grad(module, scale)
+
+    def calc_grad(self, module, scale=None):
+        operation, in_data, out_grads = self.load_op_in_out(module)
+        if scale is not None:
+            assert scale.shape[0] == out_grads.shape[0]
+            out_grads.mul_(scale.unsqueeze(-1))
+        if original_requires_grad(module, 'weight'):
+            grad = operation.grad_weight(module, in_data, out_grads)
+            if module.weight.grad is None:
+                module.weight.grad = grad
+            else:
+                module.weight.grad.data.copy_(grad)
+        if original_requires_grad(module, 'bias'):
+            grad = operation.grad_bias(module, out_grads)
+            if module.bias.grad is None:
+                module.bias.grad = grad
+            else:
+                module.bias.grad.data.copy_(grad)
+
+    def calc_kernel(self):
+        kernel = None
+        for module in self._operations.keys():
+            if original_requires_grad(module, 'weight'):
+                operation, in_data, out_grads = self.load_op_in_out(module)
+                A = operation.gram_A(module, in_data, in_data)
+                B = operation.gram_B(module, out_grads, out_grads)
+                if kernel is None:
+                    kernel = torch.zeros_like(A)
+                kernel += A.mul(B)
+                if original_requires_grad(module, 'bias'):
+                    kernel += B
+        return kernel
+
     def batch_grads(self, module, flatten=False):
         grads = self.get_result(module, OP_BATCH_GRADS)
         if grads is not None and flatten:
@@ -425,6 +466,8 @@ class OperationContext:
 
     def calc_cov_kron(self, module):
         operation, in_data, out_grads = self.load_op_in_out(module)
+        if original_requires_grad(module, 'bias'):
+            in_data = operation.extend_in_data(in_data)
         A = operation.cov_kron_A(module, in_data)
         B = operation.cov_kron_B(module, out_grads)
         self.accumulate_result(module, A, OP_COV_KRON, 'A')
