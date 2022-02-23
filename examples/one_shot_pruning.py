@@ -1,27 +1,26 @@
 import argparse
 from itertools import islice
+import io
+import urllib
 
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 import torchvision
+from torchvision.datasets import MNIST
 
 from asdfghjkl.vector import ParamVector
 from asdfghjkl import KFAC
 from asdfghjkl import SHAPE_KRON
 
+MODEL_URL = "https://github.com/Cecilwang/models/raw/main/net-mnist-0.9320"
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="prnning")
-    parser.add_argument("--dir", type=str, default="/tmp/")
     parser.add_argument("--device", type=str, default="cpu")
-
-    parser.add_argument('--skip-pretrain', action='store_true', default=False)
-
     parser.add_argument("--sparsity", type=float, default=0.8)
-    parser.add_argument("--n_recompute", type=int, default=16)
-    parser.add_argument("--n_recompute_samples", type=int, default=64)
-
     return parser.parse_args()
 
 
@@ -49,60 +48,24 @@ def to_vector(parameters):
     return nn.utils.parameters_to_vector(parameters)
 
 
-def train(model, loader, optimizer, criterion, args):
-    model.train()
-
-    n = torch.tensor([0]).to(args.device)
-    loss = torch.tensor([0.0]).to(args.device)
-    corrects = torch.tensor([0]).to(args.device)
-
-    m = len(loader)
-    for i, (inputs, labels) in enumerate(loader):
-        inputs = inputs.to(args.device)
-        labels = labels.to(args.device)
-
-        optimizer.zero_grad()
-
-        outputs = model(inputs)
-        batch_loss = criterion(outputs, labels)
-        batch_loss.backward()
-        optimizer.step()
-        _, preds = torch.max(outputs, 1)
-
-        n = n + inputs.size(0)
-        loss += batch_loss.item() * inputs.size(0)
-        corrects += torch.sum(preds == labels.data)
-
-    _loss = (loss / n).item()
-    _acc = (corrects / n).item()
-    print(f"Train Loss: {_loss:.4f} Acc: {_acc:.4f}")
-
-
-def test(model, loader, criterion, args, prefix=""):
+def test(model, loader, args, prefix=""):
     model.eval()
-
-    n = torch.tensor([0]).to(args.device)
-    loss = torch.tensor([0.0]).to(args.device)
-    corrects = torch.tensor([0]).to(args.device)
-
+    n = loss = corrects = 0.
     for i, (inputs, labels) in enumerate(loader):
         inputs = inputs.to(args.device)
         labels = labels.to(args.device)
 
         outputs = model(inputs)
-        batch_loss = criterion(outputs, labels)
+        batch_loss = nn.CrossEntropyLoss()(outputs, labels)
         _, preds = torch.max(outputs, 1)
 
-        n = n + inputs.size(0)
-        loss += batch_loss.item() * inputs.size(0)
-        corrects += torch.sum(preds == labels.data)
-
-    loss = (loss / n).item()
-    acc = (corrects.double() / n).item()
-    print(f"{prefix} Test Loss: {loss:.4f} Acc: {acc:.4f}")
+        n = n + inputs.shape[0]
+        loss += batch_loss.item() * inputs.shape[0]
+        corrects += torch.sum(preds == labels.data).item()
+    print(f"{prefix} Test Loss: {loss/n:.4f} Acc: {corrects/n:.4f}")
 
 
-def polynomial_schedule(start, end, i, n):
+def poly(start, end, i, n):
     scale = end - start
     progress = min(float(i) / n, 1.0)
     remaining_progress = (1.0 - progress)**2
@@ -112,130 +75,80 @@ def polynomial_schedule(start, end, i, n):
 def main():
     args = parse_args()
 
-    # model
-    model = Net()
-    model = model.to(args.device)
-
     # data
-    train_dataset = torchvision.datasets.MNIST(
-        args.dir,
-        train=True,
-        download=True,
-        transform=torchvision.transforms.Compose([
-            torchvision.transforms.RandomResizedCrop(32),
-            torchvision.transforms.RandomHorizontalFlip(),
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize((0.1307, ), (0.3081, ))
-        ]))
-    train_loader = torch.utils.data.DataLoader(train_dataset,
-                                               batch_size=512,
-                                               shuffle=True)
-    fisher_loader = torch.utils.data.DataLoader(train_dataset,
-                                                batch_size=32,
-                                                shuffle=True)
-    test_dataset = torchvision.datasets.MNIST(
-        args.dir,
-        train=False,
-        download=False,
-        transform=torchvision.transforms.Compose([
-            torchvision.transforms.CenterCrop(32),
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize((0.1307, ), (0.3081, ))
-        ]))
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=512)
+    transform = torchvision.transforms.Compose([
+        torchvision.transforms.CenterCrop(32),
+        torchvision.transforms.ToTensor(),
+        torchvision.transforms.Normalize((0.1307, ), (0.3081, ))
+    ])
+    dataset = MNIST("/tmp", train=True, download=True, transform=transform)
+    fisher_loader = DataLoader(dataset, batch_size=32, shuffle=True)
+    dataset = MNIST("/tmp", train=False, download=False, transform=transform)
+    test_loader = DataLoader(dataset, batch_size=512)
 
-    criterion = nn.CrossEntropyLoss()
-
-    # pretrain
-    if not args.skip_pretrain:
-        opt = torch.optim.SGD(model.parameters(),
-                              lr=0.01,
-                              momentum=0.9,
-                              weight_decay=1e-4)
-        for e in range(30):
-            print(f"Epoch {e}/30")
-            train(model, train_loader, opt, criterion, args)
-            test(model, test_loader, criterion, args)
-            if e == 19:
-                opt.param_groups[0]["lr"] /= 10.
-        torch.save(model, args.dir + "best")
-    else:
-        model = torch.load(args.dir + "best")
-    test(model, test_loader, criterion, args, "Pretrain")
+    # model
+    print("creating model")
+    model = Net()
+    model = torch.load(io.BytesIO(urllib.request.urlopen(MODEL_URL).read()))
+    model = model.to(args.device)
+    test(model, test_loader, args, "Pretrain")
 
     # pruning
     ng = KFAC(model, "fisher_emp")
 
     param_vector = [p for p in ng.parameters_for(SHAPE_KRON)]
     param_vector = ParamVector(param_vector, [x.data for x in param_vector])
+    mask = torch.ones(param_vector.numel())
 
-    # setup mask
-    mask_vector = []
-    for module in ng.modules_for(SHAPE_KRON):
-        module.register_buffer("weight_mask", torch.ones_like(module.weight))
-        module.weight.register_hook(lambda g: g * module.weight_mask)
-        module.register_buffer("bias_mask", torch.ones_like(module.bias))
-        module.bias.register_hook(lambda g: g * module.bias_mask)
-        mask_vector += [module.weight_mask, module.bias_mask]
-    mask_vector = ParamVector(mask_vector, [x.data for x in mask_vector])
-
+    pruning_itertaion = 16
     sparsity = 0.0
-    for i in range(1, args.n_recompute + 1):
+    for i in range(pruning_itertaion):
         # calculate inverse fisher
-        for j, (inputs, targets) in islice(enumerate(fisher_loader),
-                                           args.n_recompute_samples):
+        samples = 64
+        scale = 1. / samples
+        for j, (inputs, targets) in islice(enumerate(fisher_loader), samples):
             inputs = inputs.to(args.device)
             targets = targets.to(args.device)
-            ng.update_curvature(inputs,
-                                targets,
-                                accumulate=j > 0,
-                                scale=1. / args.n_recompute_samples)
+            ng.update_curvature(inputs, targets, accumulate=j > 0, scale=scale)
         ng.update_inv(1e-4)
 
-        # extract parameter, mask, and the diagonal of the inverse fisher
+        # construct parameter and the diagonal of the inverse fisher
         param = param_vector.get_flatten_vector()
-        mask = mask_vector.get_flatten_vector()
-        ifisher_diag = []
+        diag = []
         for module in ng.modules_for(SHAPE_KRON):
             kron = ng._get_module_fisher(module).kron
-            ifisher_diag.append(
-                torch.kron(kron.A_inv.diag(), kron.B_inv.diag()))
-        ifisher_diag = to_vector(ifisher_diag)
+            diag.append(torch.kron(kron.A_inv.diag(), kron.B_inv.diag()))
+        diag = to_vector(diag)
 
         # calculate optimal brain surgeon score
-        score = param.pow(2) / ifisher_diag
+        score = param.pow(2) / diag
         score = score.masked_fill(mask == 0.0, float("inf"))
 
         # get indices of minimum score
-        new_sparsity = polynomial_schedule(0.0, args.sparsity, i,
-                                           args.n_recompute)
+        new_sparsity = poly(0.0, args.sparsity, i + 1, pruning_itertaion)
         n_pruned = int((new_sparsity - sparsity) * torch.numel(score))
         sparsity = new_sparsity
         _, indices = torch.sort(score)
         indices = indices[:n_pruned]
 
         # calculate the prunig direction
-        pruning_direction = torch.zeros_like(param)
-        pruning_direction[indices] = -param[indices] / ifisher_diag[indices]
-        pruning_direction = ParamVector(param_vector.params(),
-                                        pruning_direction)
-        ng.precondition(pruning_direction)
-        pruning_direction = pruning_direction.get_flatten_vector()
+        direction = torch.zeros_like(param)
+        direction[indices] = -param[indices] / diag[indices]
+        direction = ParamVector(param_vector.params(), direction)
+        ng.precondition(direction)
+        direction = direction.get_flatten_vector()
 
         # add pruning direction and set mask
-        param += pruning_direction
+        param += direction
         mask[indices] = 0.0
         param *= mask
 
-        # store parameter and mask back
+        # write parameter back
         param_vector = ParamVector(param_vector.params(), param)
-        mask_vector = ParamVector(mask_vector.params(), mask)
         for p, v in zip(param_vector.params(), param_vector.values()):
             p.data = v
-        for p, v in zip(mask_vector.params(), mask_vector.values()):
-            p.data = v
 
-        test(model, test_loader, criterion, args, f"[sparsity={sparsity:.2f}]")
+        test(model, test_loader, args, f"[sparsity={sparsity:.2f}]")
 
 
 if __name__ == "__main__":
