@@ -1,77 +1,33 @@
-import time
-import torch
+import numpy as np
+import pytest
+from torch import torch, nn
+from asdfghjkl import stochastic_lanczos_quadrature as slq
+from asdfghjkl.vector import ParamVector
 
-bs = 32
-n_layers = 20
-d_in = 28 * 28
-d_hid = 128
-d_out = 10
-seed = 0
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-loop = 100
+@pytest.fixture
+def model():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return nn.Linear(10, 10, bias=False).to(device)
 
-print('bs', bs)
-print('n_layers', n_layers)
-print('d_in', d_in)
-print('d_hid', d_hid)
-print('d_out', d_out)
-print('device', device)
-print('-------------')
+@pytest.fixture
+def matrix(model):
+    num_params = 0
+    for p in model.parameters():
+        num_params += p.numel()
+    device = next(model.parameters()).device
+    m = torch.randn(num_params, num_params, device=device)
+    return m + m.T # make symmetric matrix
 
-torch.random.manual_seed(seed)
+def test_slq(matrix, model):
+    # vec_list in slq is needed to evaluate weight_list
+    eigvals_exact = torch.linalg.eigvalsh(matrix)
 
-modules = [torch.nn.Linear(d_in, d_hid), torch.nn.ReLU()]
-for i in range(n_layers - 2):
-    modules.extend([
-        torch.nn.Linear(d_hid, d_hid),
-        torch.nn.ReLU()
-    ])
-modules.append(torch.nn.Linear(d_hid, d_out, bias=False))
-model = torch.nn.Sequential(*modules).to(device)
-x = torch.randn(bs, d_in).to(device)
-targets = torch.zeros(bs).long()
-
-y = model(x)
-loss = y.sum()
-
-
-def ntk_vp(v):
-    v.requires_grad_(True)
-    vjp = torch.autograd.grad(y, list(model.parameters()), v, create_graph=True)
-    return torch.autograd.grad(vjp, v, grad_outputs=vjp, retain_graph=True)[0]
-
-
-dummy_v = torch.randn_like(y).requires_grad_(True)
-
-
-def ggn_vp(v):
-    for _v in v:
-        _v.requires_grad_(True)
-    vjp = torch.autograd.grad(y, list(model.parameters()), dummy_v, create_graph=True)
-    jvp = torch.autograd.grad(vjp, dummy_v, grad_outputs=v)
-    return torch.autograd.grad(y, list(model.parameters()), grad_outputs=jvp, retain_graph=True)
-
-
-def hvp(v):
-    grad = torch.autograd.grad(loss, list(model.parameters()), create_graph=True)
-    return torch.autograd.grad(grad, list(model.parameters()), grad_outputs=v, retain_graph=True)
-
-
-def timeit(func, v):
-    func(v)  # dummy run
-    start = time.time()
-    for _ in range(loop):
-        v = func(v)
-    elapsed = time.time() - start
-    f_name = func.__name__
-    print(f'{f_name}: {elapsed / loop * 1000:.3f}ms')
-
-
-v = torch.randn_like(y)
-timeit(ntk_vp, v)
-
-v = [torch.randn_like(p) for p in model.parameters()]
-timeit(ggn_vp, v)
-
-v = [torch.randn_like(p) for p in model.parameters()]
-timeit(hvp, v)
+    def mvp(vec):
+        mv = torch.matmul(matrix, vec.get_flatten_vector())
+        return ParamVector(vec.params(), mv)
+    num_params = 0
+    for p in model.parameters():
+        num_params += p.numel()
+    eigvals_slq, _ = slq(mvp, model, n_v=5, num_iter=num_params)
+    eigvals_slq = np.mean(eigvals_slq, axis=0)
+    np.testing.assert_allclose(eigvals_exact.tolist(), eigvals_slq, rtol=1e-04)
