@@ -155,7 +155,8 @@ class NaturalGradient:
                 else:
                     raise ValueError(f'Invalid shape: {shape}')
                 new_fisher = cxt.cov_symmatrix(module)
-                new_fisher.mul_(scale)
+                if scale != 1:
+                    new_fisher.mul_(scale)
                 dst_fisher = self._get_module_fisher(module)
                 if dst_fisher is None or not accumulate:
                     del dst_fisher
