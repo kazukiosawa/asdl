@@ -635,8 +635,8 @@ class UnitWise:
 
     def mvp(self, vec_weight, vec_bias, use_inv=False, inplace=False):
         mat = self.inv if use_inv else self.data  # (f, 2, 2) or (f_out, f_in+1, f_in+1)
-        if vec_weight.shape == vec_bias and vec_weight.shape[-1] == 2:
-            # for BatchNormNd
+        if vec_weight.shape == vec_bias.shape and mat.ndim == 3 and mat.shape[-1] == mat.shape[-2]:
+            # for BatchNormNd and LayerNorm
             v = torch.stack([vec_weight, vec_bias], dim=1)  # (f, 2)
             v = v.unsqueeze(2)  # (f, 2, 1)
             mvp_wb = torch.matmul(mat, v).squeeze(2)  # (f, 2)
