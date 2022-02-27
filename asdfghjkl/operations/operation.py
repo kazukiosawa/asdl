@@ -106,8 +106,6 @@ class Operation:
             in_data = self.preprocess_in_data(module, in_data, out_data)
             if OP_SAVE_INPUTS in op_names:
                 self.accumulate_result(in_data, OP_SAVE_INPUTS, concat=True)
-            if original_requires_grad(module, 'bias'):
-                in_data = self.extend_in_data(in_data)
 
         for op_name in op_names:
             if op_name not in FWD_OPS:
@@ -123,7 +121,8 @@ class Operation:
                     A = self.gram_A(module, in_data, in_data)
                 else:
                     A = self.gram_A(module, in_data[:n1], in_data[n1:])
-                self.accumulate_result(A, OP_GRAM_HADAMARD, 'A')
+                if original_requires_grad(module, 'bias'):
+                    A += 1.
             elif op_name == OP_RFIM_RELU:
                 self.accumulate_result(self.rfim_relu(module, in_data, out_data), OP_RFIM_RELU)
             elif op_name == OP_RFIM_SOFTMAX:
@@ -445,8 +444,6 @@ class OperationContext:
         operation = self.get_operation(module)
         in_data = self.in_data(module)
         out_grads = self.out_grads(module)
-        assert in_data is not None and out_grads is not None, \
-            "in_data and out_grads have not been saved."
         return operation, in_data, out_grads
 
     def cov(self, module):
