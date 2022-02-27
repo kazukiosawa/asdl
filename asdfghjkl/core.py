@@ -166,6 +166,8 @@ def module_wise_assignments(model, *assign_rules, ignore_modules=None, map_rule=
     for name, module in named_supported_modules(model):
         if module in ignore_modules:
             continue
+        if any(isinstance(module, cls) for cls in ignore_modules if isinstance(cls, type)):
+            continue
         if any(keyword in name for keyword in ignore_modules if isinstance(keyword, str)):
             continue
         module_info = (name, module) if named else (module,)
