@@ -463,12 +463,12 @@ class OperationContext:
 
     def calc_cov_kron(self, module):
         operation, in_data, out_grads = self.load_op_in_out(module)
-        if original_requires_grad(module, 'bias'):
-            in_data = operation.extend_in_data(in_data)
-        A = operation.cov_kron_A(module, in_data)
-        B = operation.cov_kron_B(module, out_grads)
-        self.accumulate_result(module, A, OP_COV_KRON, 'A')
-        self.accumulate_result(module, B, OP_COV_KRON, 'B')
+        if in_data is not None:
+            A = operation.cov_kron_A(module, in_data)
+            self.accumulate_result(module, A, OP_COV_KRON, 'A')
+        if out_grads is not None:
+            B = operation.cov_kron_B(module, out_grads)
+            self.accumulate_result(module, B, OP_COV_KRON, 'B')
 
     def cov_unit_wise(self, module):
         return self.get_result(module, OP_COV_UNIT_WISE)
