@@ -62,11 +62,7 @@ class _BatchNormNd(Operation):
         cov_ww = (grads_w ** 2).sum(0)  # f
         cov_bb = (grads_b ** 2).sum(0)  # f
         cov_wb = (grads_w * grads_b).sum(0)  # f
-        blocks = torch.zeros(n_features, 2, 2).to(in_data.device)
-        for i in range(n_features):
-            blocks[i][0][0] = cov_ww[i]
-            blocks[i][1][1] = cov_bb[i]
-            blocks[i][0][1] = blocks[i][1][0] = cov_wb[i]
+        blocks = torch.vstack([cov_ww, cov_wb, cov_wb, cov_bb]).reshape(2, 2, n_features).transpose(0, 2)
         return blocks  # f x 2 x 2
 
     @staticmethod
