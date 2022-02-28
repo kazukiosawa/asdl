@@ -35,6 +35,9 @@ __all__ = [
     'OP_SAVE_INPUTS',
     'OP_SAVE_OUTGRADS',
     'ALL_OPS',
+    'FWD_OPS',
+    'BWD_OPS',
+    'BWD_OPS_WITH_INPUTS',
     'OperationContext'
 ]
 
