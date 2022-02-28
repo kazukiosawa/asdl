@@ -55,7 +55,7 @@ class Operation:
         self._op_names = op_names
         self._op_results = {}
 
-    def accumulate_result(self, value, *keys, concat=False, concat_dim=0):
+    def accumulate_result(self, value, *keys, extend=False):
         """
         Examples:
              accumulate_result(data, OP_COV_UNIT_WISE)
@@ -71,8 +71,8 @@ class Operation:
         key = keys[-1]
         if results.get(key, None) is None:
             results[key] = value
-        elif concat:
-            results[key] = torch.cat([results[key], value], dim=concat_dim)
+        elif extend:
+            results[key].extend(value)
         else:
             results[key] += value
 
@@ -105,7 +105,7 @@ class Operation:
         if any(op_name in FWD_OPS for op_name in op_names):
             in_data = self.preprocess_in_data(module, in_data, out_data)
             if OP_SAVE_INPUTS in op_names:
-                self.accumulate_result(in_data, OP_SAVE_INPUTS, concat=True)
+                self.accumulate_result([in_data], OP_SAVE_INPUTS, extend=True)
 
         for op_name in op_names:
             if op_name not in FWD_OPS:
@@ -135,7 +135,7 @@ class Operation:
         if any(op_name in BWD_OPS for op_name in op_names):
             out_grads = self.preprocess_out_grads(module, out_grads)
             if OP_SAVE_OUTGRADS in op_names:
-                self.accumulate_result(out_grads, OP_SAVE_OUTGRADS, concat=True)
+                self.accumulate_result([out_grads], OP_SAVE_OUTGRADS, extend=True)
         if any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names):
             in_data = self.preprocess_in_data(module, in_data, out_data)
 
