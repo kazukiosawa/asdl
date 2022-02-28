@@ -1,6 +1,6 @@
 from .utils import *
 from .operations import *
-from .core import extend, supported_modules, save_inputs_outgrads
+from .core import *
 from .symmatrix import *
 from .matrices import *
 from .vector import *

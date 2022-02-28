@@ -9,6 +9,9 @@ from .vector import ParamVector
 _supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d, nn.LayerNorm, nn.Embedding, Bias, Scale)
 
 
+__all__ = ['extend', 'no_centered_cov', 'save_inputs_outgrads', 'save_inputs', 'save_outgrads']
+
+
 @contextmanager
 def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamVector = None) -> OperationContext:
     handles = []
@@ -65,6 +68,22 @@ def save_inputs_outgrads(model: nn.Module, targets=None, ignore_modules=None) ->
         assign_rules = [(t, OP_SAVE_INPUTS, OP_SAVE_OUTGRADS) for t in targets]
     else:
         assign_rules = [OP_SAVE_INPUTS, OP_SAVE_OUTGRADS]
+    return extend(model, *assign_rules, ignore_modules=ignore_modules)
+
+
+def save_inputs(model: nn.Module, targets=None, ignore_modules=None) -> OperationContext:
+    if targets is not None:
+        assign_rules = [(t, OP_SAVE_INPUTS) for t in targets]
+    else:
+        assign_rules = [OP_SAVE_INPUTS]
+    return extend(model, *assign_rules, ignore_modules=ignore_modules)
+
+
+def save_outgrads(model: nn.Module, targets=None, ignore_modules=None) -> OperationContext:
+    if targets is not None:
+        assign_rules = [(t, OP_SAVE_OUTGRADS) for t in targets]
+    else:
+        assign_rules = [OP_SAVE_OUTGRADS]
     return extend(model, *assign_rules, ignore_modules=ignore_modules)
 
 
