@@ -464,19 +464,22 @@ class OperationContext:
     def calc_cov_kron(self, module):
         operation, in_data, out_grads = self.load_op_in_out(module)
         if in_data is not None:
-            A = operation.cov_kron_A(module, in_data)
-            self.accumulate_result(module, A, OP_COV_KRON, 'A')
+            for tensor in in_data:
+                A = operation.cov_kron_A(module, tensor)
+                self.accumulate_result(module, A, OP_COV_KRON, 'A')
         if out_grads is not None:
-            B = operation.cov_kron_B(module, out_grads)
-            self.accumulate_result(module, B, OP_COV_KRON, 'B')
+            for tensor in out_grads:
+                B = operation.cov_kron_B(module, tensor)
+                self.accumulate_result(module, B, OP_COV_KRON, 'B')
 
     def cov_unit_wise(self, module):
         return self.get_result(module, OP_COV_UNIT_WISE)
 
     def calc_cov_unit_wise(self, module):
         operation, in_data, out_grads = self.load_op_in_out(module)
-        unit = operation.cov_unit_wise(module, in_data, out_grads)
-        self.accumulate_result(module, unit, OP_COV_UNIT_WISE)
+        for tensor1, tensor2 in zip(in_data, out_grads):
+            unit = operation.cov_unit_wise(module, tensor1, tensor2)
+            self.accumulate_result(module, unit, OP_COV_UNIT_WISE)
 
     def cov_diag(self, module):
         return self.get_result(module, OP_COV_DIAG)
