@@ -2,7 +2,7 @@ import os
 from operator import iadd
 import numpy as np
 import torch
-from .utils import add_value_to_diagonal, cholesky_inv
+from .utils import cholesky_inv
 from .vector import ParamVector
 
 __all__ = [
@@ -246,7 +246,7 @@ class SymMatrix:
 
     def update_inv(self, damping=_default_damping):
         if self.has_data:
-            self.inv = cholesky_inv(add_value_to_diagonal(self.data, damping))
+            self.inv = cholesky_inv(self.data, damping)
         if self.has_kron:
             self.kron.update_inv(damping)
         if self.has_diag:
@@ -407,8 +407,8 @@ class Kron:
         pi = torch.sqrt(A_eig_mean / B_eig_mean)
         r = damping**0.5
 
-        self.A_inv = cholesky_inv(add_value_to_diagonal(A, max(r * pi, eps)))
-        self.B_inv = cholesky_inv(add_value_to_diagonal(B, max(r / pi, eps)))
+        self.A_inv = cholesky_inv(A, max(r * pi, eps))
+        self.B_inv = cholesky_inv(B, max(r / pi, eps))
 
     def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
         mat_A = self.A_inv if use_inv else self.A
@@ -624,9 +624,10 @@ class UnitWise:
     def update_inv(self, damping=_default_damping):
         assert self.has_data
         data = self.data
-        f, w, h = data.shape[0], data.shape[1], data.shape[2]
-        dmp = torch.eye(w, h, device=data.device, dtype=data.dtype).repeat(f, 1, 1) * damping
-        self.inv = torch.inverse(data + dmp)
+        diag = torch.diagonal(data, dim1=1, dim2=2)
+        diag += damping
+        self.inv = torch.inverse(data)
+        diag -= damping
 
     def mvp(self, vec_weight, vec_bias, use_inv=False, inplace=False):
         mat = self.inv if use_inv else self.data  # (f, 2, 2) or (f_out, f_in+1, f_in+1)

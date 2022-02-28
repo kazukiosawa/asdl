@@ -10,8 +10,7 @@ _REQUIRES_GRAD_ATTR = '_original_requires_grad'
 __all__ = [
     'original_requires_grad', 'record_original_requires_grad',
     'restore_original_requires_grad', 'skip_param_grad', 'im2col_2d',
-    'im2col_2d_slow', 'add_value_to_diagonal', 'cholesky_inv',
-    'PseudoBatchLoaderGenerator'
+    'im2col_2d_slow', 'cholesky_inv', 'PseudoBatchLoaderGenerator'
 ]
 
 
@@ -78,18 +77,11 @@ def im2col_2d_slow(x: torch.Tensor, conv2d: nn.Module):
     return Mx
 
 
-def add_value_to_diagonal(x: torch.Tensor, value):
-    ndim = x.ndim
-    assert ndim >= 2
-    eye = torch.eye(x.shape[-1], device=x.device)
-    if ndim > 2:
-        shape = tuple(x.shape[:-2]) + (1, 1)
-        eye = eye.repeat(*shape)
-    return x.add(eye, alpha=value)
-
-
-def cholesky_inv(X):
+def cholesky_inv(X, damping=1e-7):
+    diag = torch.diagonal(X)
+    diag += damping
     u = torch.linalg.cholesky(X)
+    diag -= damping
     return torch.cholesky_inverse(u)
 
 
