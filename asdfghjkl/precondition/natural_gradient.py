@@ -240,20 +240,23 @@ class NaturalGradient:
         if fisher is not None:
             fisher.update_inv(damping)
 
-    def precondition(self, vectors: ParamVector = None):
+    def precondition(self, vectors: ParamVector = None, grad_scale=1.):
         for shape in _module_level_shapes:
             for module in self.modules_for(shape):
-                self.precondition_module(module, shape, vectors)
+                self.precondition_module(module, shape, vectors, grad_scale=grad_scale)
         params = [p for p in self.parameters_for(SHAPE_FULL)]
         if len(params) > 0:
             fisher = self._get_full_fisher()
             assert fisher is not None, f'Fisher of shape {SHAPE_FULL} has not been calculated.'
             if vectors is None:
                 vectors = ParamVector(params, [p.grad for p in params])
+            assert vectors is not None, 'gradient has not been calculated.'
+            if grad_scale != 1:
+                vectors.mul_(grad_scale)
             fisher.mvp(vectors=vectors, use_inv=True, inplace=True)
 
     def precondition_module(self, module, shape=None, vectors: ParamVector = None,
-                            vec_weight: torch.Tensor = None, vec_bias: torch.Tensor = None):
+                            vec_weight: torch.Tensor = None, vec_bias: torch.Tensor = None, grad_scale=1.):
         if shape is None:
             for s in _module_level_shapes:
                 if module in self.modules_for(s):
@@ -267,8 +270,14 @@ class NaturalGradient:
         assert matrix is not None, f'Matrix of shape {shape} for module {module} has not been calculated.'
         if vec_weight is None and module.weight.requires_grad:
             vec_weight = module.weight.grad
-        if vec_bias is None and _bias_requires_grad(module):
-            vec_bias = module.bias.grad
+        assert vec_weight is not None, 'gradient has not been calculated.'
+        if _bias_requires_grad(module):
+            if vec_bias is None:
+                vec_bias = module.bias.grad
+            assert vec_bias is not None, 'gradient has not been calculated.'
+        if grad_scale != 1:
+            vec_weight.data.mul_(grad_scale)
+            vec_bias.data.mul_(grad_scale)
         matrix.mvp(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=True, inplace=True)
 
 
