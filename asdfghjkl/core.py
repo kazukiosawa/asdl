@@ -17,22 +17,8 @@ __all__ = ['extend', 'no_centered_cov', 'save_inputs_outgrads', 'save_inputs', '
 def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamVector = None) -> OperationContext:
     handles = []
     cxt = OperationContext(vectors=vectors)
-    has_fwd_op = any(op_name in FWD_OPS for op_name in op_names)
-    has_bwd_op = any(op_name in BWD_OPS for op_name in op_names)
-    has_bwd_op_with_inputs = any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names)
 
     try:
-        def forward_hook(_module, in_data, out_data):
-            cxt.call_operations_in_forward(_module, in_data[0].detach(), out_data.detach())
-
-            if has_bwd_op_with_inputs and out_data.requires_grad:
-                def _backward_hook(out_grads):
-                    cxt.call_operations_in_backward(_module, in_data[0].detach(), out_data.detach(), out_grads.detach())
-                handles.append(out_data.register_hook(_backward_hook))
-
-        def backward_hook(_module, unused, out_grads):
-            cxt.call_operations_in_backward(_module, None, None, out_grads[0].detach())
-
         for module, op_names in module_wise_assignments(model, *op_names, ignore_modules=ignore_modules, map_rule=map_rule):
             if len(op_names) == 0:
                 # no operation is assigned
@@ -40,10 +26,27 @@ def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamV
             op_class = get_op_class(module)
             if op_class is None:
                 continue
+            has_fwd_op = any(op_name in FWD_OPS for op_name in op_names)
+            has_bwd_op = any(op_name in BWD_OPS for op_name in op_names)
+            has_bwd_op_with_inputs = any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names)
+
             # register hooks and operations for child modules
             if has_fwd_op or has_bwd_op_with_inputs:
+                if has_bwd_op_with_inputs:
+                    def forward_hook(_module, in_data, out_data):
+                        cxt.call_operations_in_forward(_module, in_data[0].detach(), out_data.detach())
+                        if out_data.requires_grad:
+                            def _backward_hook(out_grads):
+                                cxt.call_operations_in_backward(_module, in_data[0].detach(), out_data.detach(), out_grads.detach())
+                            handles.append(out_data.register_hook(_backward_hook))
+                else:
+                    def forward_hook(_module, in_data, out_data):
+                        cxt.call_operations_in_forward(_module, in_data[0].detach(), out_data.detach())
                 handles.append(module.register_forward_hook(forward_hook))
             if (not has_bwd_op_with_inputs) and has_bwd_op:
+                def backward_hook(_module, unused, out_grads):
+                    cxt.call_operations_in_backward(_module, None, None, out_grads[0].detach())
+
                 handles.append(module.register_full_backward_hook(backward_hook))
             cxt.register_operation(module, op_class(module, op_names, model_for_kernel=model))
         if not cxt.is_operation_registered(model):
