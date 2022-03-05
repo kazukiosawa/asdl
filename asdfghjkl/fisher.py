@@ -35,7 +35,9 @@ __all__ = [
     'fisher_quadratic_form_for_cross_entropy',
     'fisher_quadratic_form_for_mse',
     'LOSS_CROSS_ENTROPY',
-    'LOSS_MSE'
+    'LOSS_MSE',
+    'FisherManager',
+    'get_fisher_class',
 ]
 
 _supported_types = [FISHER_EXACT, FISHER_MC, FISHER_EMP]
@@ -43,13 +45,10 @@ _supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, 
 _supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_LAYER_WISE]
 
 
-class _FisherBase(MatrixManager):
-    def __init__(self, model, **kwargs):
-        super().__init__(model, self.fisher_type)
-
-    @property
-    def fisher_type(self):
-        raise NotImplementedError
+class FisherManager(MatrixManager):
+    def __init__(self, model, fisher_type):
+        super().__init__(model, fisher_type)
+        self.fisher_type = fisher_type
 
     @property
     def is_fisher_emp(self):
@@ -122,13 +121,7 @@ class _FisherBase(MatrixManager):
 
                 y = model(x)
                 self._fisher_core(closure, y, t)
-                for module in model.modules():
-                    # accumulate layer-wise fisher/fvp
-                    self._accumulate_fisher(module, cxt.cov_symmatrix(module), scale)
-                    self._accumulate_fvp(module, cxt.cvp_paramvector(module), scale)
-                # accumulate full fisher/fvp
-                self._accumulate_fisher(model, cxt.full_cov_symmatrix(model), scale)
-                self._accumulate_fvp(model, cxt.full_cvp_paramvector(model), scale)
+                self.accumulate(cxt, scale)
 
             if calc_emp_loss_grad_after_fisher:
                 assert t is not None
@@ -168,6 +161,16 @@ class _FisherBase(MatrixManager):
 
     def _fisher_core(self, closure, outputs, targets):
         raise NotImplementedError
+
+    def accumulate(self, cxt, scale=1.):
+        model = self._model
+        for module in model.modules():
+            # accumulate layer-wise fisher/fvp
+            self._accumulate_fisher(module, cxt.cov_symmatrix(module), scale)
+            self._accumulate_fvp(module, cxt.cvp_paramvector(module), scale)
+        # accumulate full fisher/fvp
+        self._accumulate_fisher(model, cxt.full_cov_symmatrix(model), scale)
+        self._accumulate_fvp(model, cxt.full_cvp_paramvector(model), scale)
 
     def _accumulate_fisher(self, module: nn.Module, new_fisher, scale=1., fvp=False):
         if new_fisher is None:
@@ -219,16 +222,15 @@ class _FisherBase(MatrixManager):
             return rst
 
 
-class _FisherCrossEntropy(_FisherBase):
+class _FisherCrossEntropy(FisherManager):
     @property
     def loss_fn(self):
         return partial(F.cross_entropy, reduction='sum')
 
 
 class FisherExactCrossEntropy(_FisherCrossEntropy):
-    @property
-    def fisher_type(self):
-        return FISHER_EXACT
+    def __init__(self, model):
+        super().__init__(model, FISHER_EXACT)
 
     def _fisher_core(self, closure, outputs, unused):
         log_probs = F.log_softmax(outputs, dim=1)
@@ -246,12 +248,8 @@ class FisherExactCrossEntropy(_FisherCrossEntropy):
 
 class FisherMCCrossEntropy(_FisherCrossEntropy):
     def __init__(self, model, n_mc_samples=1):
-        super().__init__(model)
+        super().__init__(model, FISHER_MC)
         self.n_mc_samples = n_mc_samples
-
-    @property
-    def fisher_type(self):
-        return FISHER_MC
 
     def _fisher_core(self, closure, outputs, unused):
         probs = F.softmax(outputs, dim=1)
@@ -265,9 +263,8 @@ class FisherMCCrossEntropy(_FisherCrossEntropy):
 
 
 class FisherEmpCrossEntropy(_FisherCrossEntropy):
-    @property
-    def fisher_type(self):
-        return FISHER_EMP
+    def __init__(self, model):
+        super().__init__(model, FISHER_EMP)
 
     def _fisher_core(self, closure, outputs, targets):
         log_probs = F.log_softmax(outputs, dim=1)
@@ -275,16 +272,15 @@ class FisherEmpCrossEntropy(_FisherCrossEntropy):
                 retain_graph=False)
 
 
-class _FisherMSE(_FisherBase):
+class _FisherMSE(FisherManager):
     @property
     def loss_fn(self):
         return lambda x, y: 0.5 * (x - y).norm(dim=1).sum()
 
 
 class FisherExactMSE(_FisherMSE):
-    @property
-    def fisher_type(self):
-        return FISHER_EXACT
+    def __init__(self, model):
+        super().__init__(model, FISHER_EXACT)
 
     def _fisher_core(self, closure, outputs, unused):
         _, n_dims = outputs.shape
@@ -294,13 +290,9 @@ class FisherExactMSE(_FisherMSE):
 
 class FisherMCMSE(_FisherMSE):
     def __init__(self, model, n_mc_samples=1, var=0.5):
-        super().__init__(model)
+        super().__init__(model, FISHER_MC)
         self.n_mc_samples = n_mc_samples
         self.var = var
-
-    @property
-    def fisher_type(self):
-        return FISHER_MC
 
     def _fisher_core(self, closure, outputs, unused):
         dist = torch.distributions.normal.Normal(outputs, scale=np.sqrt(self.var))
@@ -312,13 +304,31 @@ class FisherMCMSE(_FisherMSE):
 
 
 class FisherEmpMSE(_FisherMSE):
-    @property
-    def fisher_type(self):
-        return FISHER_EMP
+    def __init__(self, model):
+        super().__init__(model, FISHER_EMP)
 
     def _fisher_core(self, closure, outputs, targets):
         closure(lambda: 0.5 * F.mse_loss(outputs, targets, reduction='sum'),
                 retain_graph=False)
+
+
+def get_fisher_class(fisher_type, loss_type):
+    assert fisher_type in _supported_types
+    assert loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]
+    if loss_type == LOSS_CROSS_ENTROPY:
+        if fisher_type == FISHER_EXACT:
+            return FisherExactCrossEntropy
+        elif fisher_type == FISHER_MC:
+            return FisherMCCrossEntropy
+        else:
+            return FisherEmpCrossEntropy
+    else:
+        if fisher_type == FISHER_EXACT:
+            return FisherExactMSE
+        elif fisher_type == FISHER_MC:
+            return FisherMCMSE
+        else:
+            return FisherEmpMSE
 
 
 def calculate_fisher(
@@ -342,23 +352,7 @@ def calculate_fisher(
         scale=1.,
         **kwargs
 ):
-    assert fisher_type in _supported_types
-    assert loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]
-    if loss_type == LOSS_CROSS_ENTROPY:
-        if fisher_type == FISHER_EXACT:
-            fisher_cls = FisherExactCrossEntropy
-        elif fisher_type == FISHER_MC:
-            fisher_cls = FisherMCCrossEntropy
-        else:
-            fisher_cls = FisherEmpCrossEntropy
-    else:
-        if fisher_type == FISHER_EXACT:
-            fisher_cls = FisherExactMSE
-        elif fisher_type == FISHER_MC:
-            fisher_cls = FisherMCMSE
-        else:
-            fisher_cls = FisherEmpMSE
-
+    fisher_cls = get_fisher_class(fisher_type, loss_type)
     f = fisher_cls(model, **kwargs)
     loss, outputs = f.calculate_fisher(
         fisher_shapes,
