@@ -9,7 +9,8 @@ from .vector import ParamVector
 _supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d, nn.LayerNorm, nn.Embedding, Bias, Scale)
 
 
-__all__ = ['extend', 'no_centered_cov', 'save_inputs_outgrads', 'save_inputs', 'save_outgrads']
+__all__ = ['extend', 'no_centered_cov', 'save_inputs_outgrads', 'save_inputs', 'save_outgrads',
+           'module_wise_assignments', 'modules_to_assign']
 
 
 @contextmanager
