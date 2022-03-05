@@ -1,6 +1,9 @@
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
+import torch.cuda
 import torch.nn as nn
+from torch.cuda import Stream
+
 from .utils import record_original_requires_grad
 from .operations import *
 from .matrices import *
@@ -14,9 +17,13 @@ __all__ = ['extend', 'no_centered_cov', 'save_inputs_outgrads', 'save_inputs', '
 
 
 @contextmanager
-def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamVector = None) -> OperationContext:
+def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamVector = None, stream: Stream = None) -> OperationContext:
     handles = []
     cxt = OperationContext(vectors=vectors)
+    if torch.cuda.is_available() and stream is not None:
+        stream_cxt = torch.cuda.stream(stream)
+    else:
+        stream_cxt = nullcontext()
 
     try:
         for module, op_names in module_wise_assignments(model, *op_names, ignore_modules=ignore_modules, map_rule=map_rule):
@@ -34,18 +41,22 @@ def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamV
             if has_fwd_op or has_bwd_op_with_inputs:
                 if has_bwd_op_with_inputs:
                     def forward_hook(_module, in_data, out_data):
-                        cxt.call_operations_in_forward(_module, in_data[0].detach(), out_data.detach())
+                        with stream_cxt:
+                            cxt.call_operations_in_forward(_module, in_data[0].detach(), out_data.detach())
                         if out_data.requires_grad:
                             def _backward_hook(out_grads):
-                                cxt.call_operations_in_backward(_module, in_data[0].detach(), out_data.detach(), out_grads.detach())
+                                with stream_cxt:
+                                    cxt.call_operations_in_backward(_module, in_data[0].detach(), out_data.detach(), out_grads.detach())
                             handles.append(out_data.register_hook(_backward_hook))
                 else:
                     def forward_hook(_module, in_data, out_data):
-                        cxt.call_operations_in_forward(_module, in_data[0].detach(), out_data.detach())
+                        with stream_cxt:
+                            cxt.call_operations_in_forward(_module, in_data[0].detach(), out_data.detach())
                 handles.append(module.register_forward_hook(forward_hook))
             if (not has_bwd_op_with_inputs) and has_bwd_op:
                 def backward_hook(_module, unused, out_grads):
-                    cxt.call_operations_in_backward(_module, None, None, out_grads[0].detach())
+                    with stream_cxt:
+                        cxt.call_operations_in_backward(_module, None, None, out_grads[0].detach())
 
                 handles.append(module.register_full_backward_hook(backward_hook))
             cxt.register_operation(module, op_class(module, op_names, model_for_kernel=model))
@@ -63,7 +74,7 @@ def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamV
         del cxt
 
 
-def no_centered_cov(model: nn.Module, shapes, ignore_modules=None, cvp=False, vectors: ParamVector = None) -> OperationContext:
+def no_centered_cov(model: nn.Module, shapes, ignore_modules=None, cvp=False, vectors: ParamVector = None, stream: Stream = None) -> OperationContext:
     shape_to_op = {
         SHAPE_FULL: OP_BATCH_GRADS,  # full
         SHAPE_LAYER_WISE: OP_CVP if cvp else OP_COV,  # layer-wise block-diagonal
@@ -71,7 +82,7 @@ def no_centered_cov(model: nn.Module, shapes, ignore_modules=None, cvp=False, ve
         SHAPE_UNIT_WISE: OP_COV_UNIT_WISE,  # unit-wise block-diagonal
         SHAPE_DIAG: OP_COV_DIAG,  # diagonal
     }
-    return extend(model, *shapes, ignore_modules=ignore_modules, map_rule=lambda s: shape_to_op[s], vectors=vectors)
+    return extend(model, *shapes, ignore_modules=ignore_modules, map_rule=lambda s: shape_to_op[s], vectors=vectors, stream=stream)
 
 
 def save_inputs_outgrads(model: nn.Module, targets=None, ignore_modules=None) -> OperationContext:

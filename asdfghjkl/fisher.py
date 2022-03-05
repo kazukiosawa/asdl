@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.cuda import Stream
 from .core import no_centered_cov
 from .utils import skip_param_grad
 from .matrices import *
@@ -83,7 +84,8 @@ class FisherManager(MatrixManager):
                          accumulate=False,
                          calc_emp_loss_grad=False,
                          seed=None,
-                         scale=1.):
+                         scale=1.,
+                         stream: Stream = None):
         model = self._model
         device = self._device
         if isinstance(fisher_shapes, str):
@@ -104,7 +106,7 @@ class FisherManager(MatrixManager):
             if seed:
                 torch.random.manual_seed(seed)
 
-            with no_centered_cov(model, fisher_shapes, cvp=fvp, vectors=vec) as cxt:
+            with no_centered_cov(model, fisher_shapes, cvp=fvp, vectors=vec, stream=stream) as cxt:
                 def closure(loss_expr, retain_graph=False):
                     cxt.clear_batch_grads()
                     loss = loss_expr()

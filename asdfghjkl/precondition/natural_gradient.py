@@ -3,6 +3,7 @@ from typing import Callable
 
 import torch
 from torch import nn
+from torch.cuda import Stream
 
 from ..core import module_wise_assignments, modules_to_assign, no_centered_cov
 from ..operations import OperationContext
@@ -132,7 +133,8 @@ class NaturalGradient:
                          data_average=True,
                          calc_emp_loss_grad=False,
                          seed=None,
-                         scale=1):
+                         scale=1,
+                         stream: Stream = None):
         if ema_decay is None:
             ema_decay = self.ema_decay
         if ema_decay != _invalid_ema_decay:
@@ -146,7 +148,7 @@ class NaturalGradient:
             if not accumulate:
                 self.fisher_manager.zero_fisher()
             if cxt is None:
-                with no_centered_cov(self.model, self.fisher_shape, ignore_modules=self.ignore_modules) as cxt:
+                with no_centered_cov(self.model, self.fisher_shape, ignore_modules=self.ignore_modules, stream=stream) as cxt:
                     closure()
                     self.fisher_manager.accumulate(cxt, scale)
             else:
@@ -163,7 +165,8 @@ class NaturalGradient:
                                                        data_average=data_average,
                                                        calc_emp_loss_grad=calc_emp_loss_grad,
                                                        seed=seed,
-                                                       scale=scale)
+                                                       scale=scale,
+                                                       stream=stream)
             return rst[0], rst[1]  # loss and outputs
 
     def accumulate_curvature(self,
@@ -176,7 +179,8 @@ class NaturalGradient:
                              data_average=True,
                              calc_emp_loss_grad=False,
                              seed=None,
-                             scale=1):
+                             scale=1,
+                             stream: Stream = None):
         return self.update_curvature(inputs=inputs,
                                      targets=targets,
                                      data_loader=data_loader,
@@ -187,7 +191,8 @@ class NaturalGradient:
                                      data_average=data_average,
                                      calc_emp_loss_grad=calc_emp_loss_grad,
                                      seed=seed,
-                                     scale=scale)
+                                     scale=scale,
+                                     stream=stream)
 
     def refresh_curvature(self,
                           inputs=None,
@@ -198,7 +203,8 @@ class NaturalGradient:
                           data_average=True,
                           calc_emp_loss_grad=False,
                           seed=None,
-                          scale=1):
+                          scale=1,
+                          stream: Stream = None):
         if self.ema_decay != _invalid_ema_decay:
             warnings.warn(f'ema_decay ({self.ema_decay}) will be ignored.')
         return self.update_curvature(inputs=inputs,
@@ -211,7 +217,8 @@ class NaturalGradient:
                                      data_average=data_average,
                                      calc_emp_loss_grad=calc_emp_loss_grad,
                                      seed=seed,
-                                     scale=scale)
+                                     scale=scale,
+                                     stream=stream)
 
     def reduce_curvature(self, all_reduce=True):
         self.fisher_manager.reduce_matrices(all_reduce=all_reduce)
