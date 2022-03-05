@@ -239,6 +239,7 @@ class FisherExactCrossEntropy(_FisherCrossEntropy):
             sqrt_probs = torch.sqrt(probs)
         for i in range(n_classes):
             targets = torch.tensor([i] * n, device=outputs.device)
+
             def loss_expr():
                 loss = F.nll_loss(log_probs, targets, reduction='none')
                 return loss.mul(sqrt_probs[:, i]).sum()
