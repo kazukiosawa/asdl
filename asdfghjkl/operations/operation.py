@@ -3,6 +3,7 @@ from typing import Dict
 import torch
 import torch.nn as nn
 from ..utils import original_requires_grad
+from ..matrices import *
 from ..symmatrix import *
 from ..vector import ParamVector
 
@@ -452,11 +453,18 @@ class OperationContext:
     def cvp(self, module):
         return self.get_result(module, OP_CVP)
 
-    def calc_cov(self, module):
-        operation, in_data, out_grads = self.load_op_in_out(module)
-        _, _, batch_g = operation.collect_batch_grads(in_data, out_grads)
-        cov = torch.matmul(batch_g.T, batch_g)
-        self.accumulate_result(module, cov, OP_COV)
+    def calc_cov(self, module, shape=SHAPE_LAYER_WISE):
+        if shape == SHAPE_LAYER_WISE:
+            operation, in_data, out_grads = self.load_op_in_out(module)
+            _, _, batch_g = operation.collect_batch_grads(in_data, out_grads)
+            cov = torch.matmul(batch_g.T, batch_g)
+            self.accumulate_result(module, cov, OP_COV)
+        elif shape == SHAPE_KRON:
+            self.calc_cov_kron(module)
+        elif shape == SHAPE_UNIT_WISE:
+            self.calc_cov_unit_wise(module)
+        elif shape == SHAPE_DIAG:
+            self.calc_cov_diag(module)
 
     def cov_kron(self, module):
         return self.get_result(module, OP_COV_KRON)
