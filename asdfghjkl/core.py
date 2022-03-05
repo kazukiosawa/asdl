@@ -60,7 +60,7 @@ def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamV
         del cxt
 
 
-def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = None) -> OperationContext:
+def no_centered_cov(model: nn.Module, shapes, ignore_modules=None, cvp=False, vectors: ParamVector = None) -> OperationContext:
     shape_to_op = {
         SHAPE_FULL: OP_BATCH_GRADS,  # full
         SHAPE_LAYER_WISE: OP_CVP if cvp else OP_COV,  # layer-wise block-diagonal
@@ -68,7 +68,7 @@ def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = 
         SHAPE_UNIT_WISE: OP_COV_UNIT_WISE,  # unit-wise block-diagonal
         SHAPE_DIAG: OP_COV_DIAG,  # diagonal
     }
-    return extend(model, *shapes, map_rule=lambda s: shape_to_op[s], vectors=vectors)
+    return extend(model, *shapes, ignore_modules=ignore_modules, map_rule=lambda s: shape_to_op[s], vectors=vectors)
 
 
 def save_inputs_outgrads(model: nn.Module, targets=None, ignore_modules=None) -> OperationContext:
