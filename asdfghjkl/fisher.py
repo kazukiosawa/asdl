@@ -69,9 +69,8 @@ class FisherManager(MatrixManager):
     def zero_fisher(self, fvp=False):
         attr = self.fvp_attr if fvp else self.fisher_attr
         for module in self._model.modules():
-            f = getattr(module, attr, None)
-            if f is not None:
-                f.mul_(0)
+            if hasattr(module, attr):
+                delattr(module, attr)
 
     def calculate_fisher(self,
                          fisher_shapes,
