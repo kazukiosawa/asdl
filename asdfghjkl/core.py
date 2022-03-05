@@ -20,10 +20,7 @@ __all__ = ['extend', 'no_centered_cov', 'save_inputs_outgrads', 'save_inputs', '
 def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamVector = None, stream: Stream = None) -> OperationContext:
     handles = []
     cxt = OperationContext(vectors=vectors)
-    if torch.cuda.is_available() and stream is not None:
-        stream_cxt = torch.cuda.stream(stream)
-    else:
-        stream_cxt = nullcontext()
+    stream_cxt = torch.cuda.stream(stream) if torch.cuda.is_available() and stream is not None else nullcontext()
 
     try:
         for module, op_names in module_wise_assignments(model, *op_names, ignore_modules=ignore_modules, map_rule=map_rule):

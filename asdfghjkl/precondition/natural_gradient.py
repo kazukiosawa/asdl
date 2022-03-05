@@ -1,5 +1,6 @@
 import warnings
 from typing import Callable
+from contextlib import nullcontext
 
 import torch
 from torch import nn
@@ -152,10 +153,12 @@ class NaturalGradient:
                     closure()
                     self.fisher_manager.accumulate(cxt, scale)
             else:
-                for shape in _module_level_shapes:
-                    for module in self.modules_for(shape):
-                        cxt.calc_cov(module, shape)
-                self.fisher_manager.accumulate(cxt, scale)
+                stream_cxt = torch.cuda.stream(stream) if stream is not None else nullcontext()
+                with stream_cxt:
+                    for shape in _module_level_shapes:
+                        for module in self.modules_for(shape):
+                            cxt.calc_cov(module, shape)
+                    self.fisher_manager.accumulate(cxt, scale)
         else:
             rst = self.fisher_manager.calculate_fisher(self.fisher_shape,
                                                        inputs=inputs,
