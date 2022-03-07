@@ -111,7 +111,7 @@ class _FisherBase(MatrixManager):
                     cxt.clear_batch_grads()
                     loss = loss_expr()
                     with skip_param_grad(model, disable=calc_emp_loss_grad_with_fisher):
-                        loss.backward(retain_graph=retain_graph or calc_emp_loss_grad_after_fisher)
+                        loss.backward(retain_graph=(retain_graph or calc_emp_loss_grad_after_fisher))
                     if fvp:
                         cxt.calc_full_cvp(model)
                     else:
