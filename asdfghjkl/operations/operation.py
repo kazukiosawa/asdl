@@ -453,7 +453,7 @@ class OperationContext:
     def cvp(self, module):
         return self.get_result(module, OP_CVP)
 
-    def calc_cov(self, module, shape=SHAPE_LAYER_WISE):
+    def calc_cov(self, module, shape=SHAPE_LAYER_WISE, clear_in_out=False):
         if shape == SHAPE_LAYER_WISE:
             operation, in_data, out_grads = self.load_op_in_out(module)
             _, _, batch_g = operation.collect_batch_grads(in_data, out_grads)
@@ -465,6 +465,9 @@ class OperationContext:
             self.calc_cov_unit_wise(module)
         elif shape == SHAPE_DIAG:
             self.calc_cov_diag(module)
+        if clear_in_out:
+            self.clear_result(module, OP_SAVE_INPUTS)
+            self.clear_result(module, OP_SAVE_OUTGRADS)
 
     def cov_kron(self, module):
         return self.get_result(module, OP_COV_KRON)

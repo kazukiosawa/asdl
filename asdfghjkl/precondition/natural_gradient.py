@@ -168,7 +168,7 @@ class NaturalGradient:
                 with stream_cxt:
                     for shape in _module_level_shapes:
                         for module in self.modules_for(shape):
-                            cxt.calc_cov(module, shape)
+                            cxt.calc_cov(module, shape, clear_in_out=True)
                     self.fisher_manager.accumulate(cxt, scale)
         else:
             rst = self.fisher_manager.calculate_fisher(self.fisher_shape,
