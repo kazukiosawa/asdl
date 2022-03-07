@@ -1,10 +1,13 @@
 from functools import partial
+from typing import List
 import numpy as np
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.cuda import Stream
+import torch.distributed as dist
+
 from .core import no_centered_cov
 from .utils import skip_param_grad
 from .matrices import *
@@ -188,6 +191,44 @@ class FisherManager(MatrixManager):
 
     def _accumulate_fvp(self, module: nn.Module, new_fisher, scale=1.):
         self._accumulate_fisher(module, new_fisher, scale, fvp=True)
+
+    def reduce_scatter_fisher(self,
+                              module_partitions: List[List[torch.nn.Module]],
+                              *keys,
+                              with_grad=False,
+                              group: dist.ProcessGroup = None):
+        assert dist.is_initialized()
+        assert torch.cuda.is_available()
+        assert dist.get_backend(group) == dist.Backend.NCCL
+        world_size = dist.get_world_size(group)
+        assert len(module_partitions) == world_size
+        assert all(len(module_partitions[0]) == len(module_partitions[i]) for i in range(1, world_size))
+        tensor_partitions = []
+        for module_list in module_partitions:
+            tensor_list = []
+            for module in module_list:
+                fisher = getattr(module, self.fisher_attr, None)
+                if fisher is None:
+                    continue
+                data = fisher
+                for key in keys:
+                    data = getattr(data, key, None)
+                if data is None:
+                    continue
+                assert isinstance(data, torch.Tensor)
+                assert data.is_cuda
+                tensor_list.append(data)
+                if with_grad:
+                    for p in module.parameters():
+                        if p.requires_grad and p.grad is not None:
+                            tensor_list.append(p.grad)
+            tensor_partitions.append(tensor_list)
+        num_tensors_per_partition = len(tensor_partitions[0])
+        assert all(len(tensor_partitions[i]) == num_tensors_per_partition for i in range(1, world_size))
+        for i in range(num_tensors_per_partition):
+            input_list = [tensor_list[i] for tensor_list in tensor_partitions]
+            output = input_list[dist.get_rank(group)]
+            dist.reduce_scatter(output, input_list, group=group)
 
     def reduce_fisher(self, is_master=True, all_reduce=False):
         self.reduce_matrices(is_master=is_master, all_reduce=all_reduce)

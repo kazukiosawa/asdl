@@ -1,10 +1,12 @@
 import warnings
-from typing import Callable
+from typing import Callable, List
 from contextlib import nullcontext
 
 import torch
 from torch import nn
 from torch.cuda import Stream
+import torch.distributed as dist
+from torch.nn.utils import parameters_to_vector, vector_to_parameters
 
 from ..core import module_wise_assignments, modules_to_assign, no_centered_cov
 from ..operations import OperationContext
@@ -38,6 +40,8 @@ class NaturalGradient:
         damping=1e-5,
         ema_decay=_invalid_ema_decay,
         ignore_modules=None,
+        sync_group: dist.ProcessGroup = None,
+        module_partitions_for_inv: List[List[nn.Module]] = None,
         **kwargs
     ):
         from torch.nn.parallel import DistributedDataParallel as DDP
@@ -61,6 +65,13 @@ class NaturalGradient:
         self._modules_for = {}
         fisher_cls = get_fisher_class(fisher_type, loss_type)
         self.fisher_manager = fisher_cls(model, **kwargs)
+        self.sync_group = sync_group
+        if module_partitions_for_inv is not None:
+            assert dist.is_initialized(), 'torch.distributed has to be initialized ' \
+                                          'when module_partitions_for_inv is specified.'
+            world_size = dist.get_world_size(sync_group)
+            assert all(len(module_partitions_for_inv[0]) == len(module_partitions_for_inv[i]) for i in range(1, world_size))
+        self.module_partitions_for_inv = module_partitions_for_inv
 
     def modules_for(self, shape):
         if shape not in self._modules_for:
@@ -231,6 +242,8 @@ class NaturalGradient:
             damping = self.damping
         for shape in _module_level_shapes:
             for module in self.modules_for(shape):
+                if not self.is_module_for_inv(module):
+                    continue
                 matrix = self._get_module_symmatrix(module, shape)
                 if matrix is None:
                     continue
@@ -242,6 +255,8 @@ class NaturalGradient:
     def precondition(self, vectors: ParamVector = None, grad_scale=1.):
         for shape in _module_level_shapes:
             for module in self.modules_for(shape):
+                if not self.is_module_for_inv(module):
+                    continue
                 self.precondition_module(module, shape, vectors, grad_scale=grad_scale)
         params = [p for p in self.parameters_for(SHAPE_FULL)]
         if len(params) > 0:
@@ -278,6 +293,41 @@ class NaturalGradient:
             vec_weight.data.mul_(grad_scale)
             vec_bias.data.mul_(grad_scale)
         matrix.mvp(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=True, inplace=True)
+
+    def is_module_for_inv(self, module: nn.Module):
+        if self.module_partitions_for_inv is None:
+            return True
+        else:
+            rank = dist.get_rank(self.sync_group)
+            return module in self.module_partitions_for_inv[rank]
+
+    def reduce_scatter_fisher(self, *keys, with_grad=False):
+        module_partitions = self.module_partitions_for_inv
+        assert module_partitions is not None, 'module_partitions_for_inv is not specified.'
+        self.fisher_manager.reduce_scatter_fisher(module_partitions,
+                                                  *keys,
+                                                  with_grad=with_grad,
+                                                  group=self.sync_group)
+
+    def all_gather_grad(self):
+        assert dist.is_initialized()
+        group = self.sync_group
+        world_size = dist.get_world_size(group)
+        rank = dist.get_rank(group)
+        module_partitions = self.module_partitions_for_inv
+        assert module_partitions is not None, 'module_partitions_for_inv is not specified.'
+        assert len(module_partitions) == world_size
+        num_modules_per_partition = len(module_partitions[0])
+        for i in range(num_modules_per_partition):
+            tensor_list = []
+            grads_list = []
+            for j in range(world_size):
+                grads = [p.grad for p in module_partitions[j][i].parameters() if p.requires_grad and p.grad is not None]
+                grads_list.append(grads)
+                tensor_list.append(parameters_to_vector(grads))
+            dist.all_gather(tensor_list, tensor_list[rank], group=group)
+            for j in range(world_size):
+                vector_to_parameters(tensor_list[j], grads_list[j])
 
 
 class FullNaturalGradient(NaturalGradient):
