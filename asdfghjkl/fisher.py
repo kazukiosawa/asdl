@@ -476,7 +476,7 @@ def fisher_esd(
                              all_reduce=True,
                              **kwargs)
         return f.load_fvp(fisher_shape)
-    
+
     # for making MC samplings at each iteration deterministic
     random_seed = torch.rand(1) * 100 if fisher_type == FISHER_MC else None
 
@@ -487,17 +487,17 @@ def fisher_esd(
                                                      is_distributed=is_distributed,
                                                      random_seed=random_seed
                                                      )
-    
+
     eigvals = np.array(eigvals)
     weights = np.array(weights)
 
     lambda_max = np.mean(np.max(eigvals, axis=1), axis=0)
     lambda_min = np.mean(np.min(eigvals, axis=1), axis=0)
-    
+
     sigma_squared = sigma_squared * max(1, (lambda_max - lambda_min))
     if overhead is None:
         overhead = np.sqrt(sigma_squared)
-    
+
     range_max = lambda_max + overhead
     range_min = np.maximum(0., lambda_min - overhead)
 
