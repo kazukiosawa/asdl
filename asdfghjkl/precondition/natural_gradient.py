@@ -177,7 +177,8 @@ class NaturalGradient:
                                    return_loss=True,
                                    seed=seed,
                                    scale=scale,
-                                   n_mc_samples=self.n_mc_samples)
+                                   n_mc_samples=self.n_mc_samples,
+                                   ignore_modules=self.ignore_modules)
             self.fisher_manager = rst[0]
             return rst[1], rst[2]  # loss and outputs
 
