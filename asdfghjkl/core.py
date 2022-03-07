@@ -16,9 +16,6 @@ __all__ = ['extend', 'no_centered_cov', 'save_inputs_outgrads', 'save_inputs', '
 def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamVector = None) -> OperationContext:
     handles = []
     cxt = OperationContext(vectors=vectors)
-    has_fwd_op = any(op_name in FWD_OPS for op_name in op_names)
-    has_bwd_op = any(op_name in BWD_OPS for op_name in op_names)
-    has_bwd_op_with_inputs = any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names)
 
     try:
         def forward_hook(_module, in_data, out_data):
@@ -39,6 +36,9 @@ def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamV
             op_class = get_op_class(module)
             if op_class is None:
                 continue
+            has_fwd_op = any(op_name in FWD_OPS for op_name in op_names)
+            has_bwd_op = any(op_name in BWD_OPS for op_name in op_names)
+            has_bwd_op_with_inputs = any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names)
             # register hooks and operations for child modules
             if has_fwd_op or has_bwd_op_with_inputs:
                 handles.append(module.register_forward_hook(forward_hook))
@@ -59,7 +59,7 @@ def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamV
         del cxt
 
 
-def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = None) -> OperationContext:
+def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = None, ignore_modules=None) -> OperationContext:
     shape_to_op = {
         SHAPE_FULL: OP_BATCH_GRADS,  # full
         SHAPE_LAYER_WISE: OP_CVP if cvp else OP_COV,  # layer-wise block-diagonal
@@ -67,7 +67,7 @@ def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = 
         SHAPE_UNIT_WISE: OP_COV_UNIT_WISE,  # unit-wise block-diagonal
         SHAPE_DIAG: OP_COV_DIAG,  # diagonal
     }
-    return extend(model, *shapes, map_rule=lambda s: shape_to_op[s], vectors=vectors)
+    return extend(model, *shapes, map_rule=lambda s: shape_to_op[s], vectors=vectors, ignore_modules=ignore_modules)
 
 
 def save_inputs_outgrads(model: nn.Module, targets=None, ignore_modules=None) -> OperationContext:

@@ -85,7 +85,8 @@ class _FisherBase(MatrixManager):
                          accumulate=False,
                          calc_emp_loss_grad=False,
                          seed=None,
-                         scale=1.):
+                         scale=1.,
+                         ignore_modules=None):
         model = self._model
         device = self._device
         if isinstance(fisher_shapes, str):
@@ -106,7 +107,7 @@ class _FisherBase(MatrixManager):
             if seed:
                 torch.random.manual_seed(seed)
 
-            with no_centered_cov(model, fisher_shapes, cvp=fvp, vectors=vec) as cxt:
+            with no_centered_cov(model, fisher_shapes, cvp=fvp, vectors=vec, ignore_modules=ignore_modules) as cxt:
                 def closure(loss_expr, retain_graph=False):
                     cxt.clear_batch_grads()
                     loss = loss_expr()
@@ -340,6 +341,7 @@ def calculate_fisher(
         return_loss=False,
         seed=None,
         scale=1.,
+        ignore_modules=None,
         **kwargs
 ):
     assert fisher_type in _supported_types
@@ -371,7 +373,8 @@ def calculate_fisher(
         data_average=data_average,
         calc_emp_loss_grad=calc_emp_loss_grad,
         seed=seed,
-        scale=scale)
+        scale=scale,
+        ignore_modules=ignore_modules)
     if is_distributed:
         if fvp:
             f.reduce_fvp(is_master, all_reduce)
@@ -473,7 +476,7 @@ def fisher_esd(
                              all_reduce=True,
                              **kwargs)
         return f.load_fvp(fisher_shape)
-    
+
     # for making MC samplings at each iteration deterministic
     random_seed = torch.rand(1) * 100 if fisher_type == FISHER_MC else None
 
@@ -484,17 +487,17 @@ def fisher_esd(
                                                      is_distributed=is_distributed,
                                                      random_seed=random_seed
                                                      )
-    
+
     eigvals = np.array(eigvals)
     weights = np.array(weights)
 
     lambda_max = np.mean(np.max(eigvals, axis=1), axis=0)
     lambda_min = np.mean(np.min(eigvals, axis=1), axis=0)
-    
+
     sigma_squared = sigma_squared * max(1, (lambda_max - lambda_min))
     if overhead is None:
         overhead = np.sqrt(sigma_squared)
-    
+
     range_max = lambda_max + overhead
     range_min = np.maximum(0., lambda_min - overhead)
 

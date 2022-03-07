@@ -61,7 +61,7 @@ def test(model, loader, args, prefix=""):
 
         n = n + inputs.shape[0]
         loss += batch_loss.item() * inputs.shape[0]
-        corrects += torch.sum(preds == labels.data).item()
+        corrects += torch.sum(preds == labels).item()
     print(f"{prefix} Test Loss: {loss/n:.4f} Acc: {corrects/n:.4f}")
 
 
