@@ -309,7 +309,13 @@ class NaturalGradient:
                                                   with_grad=with_grad,
                                                   group=self.sync_group)
 
+    def reduce_scatter_grad(self):
+        self._sync_grad(reduce_scatter=True)
+
     def all_gather_grad(self):
+        self._sync_grad(reduce_scatter=False)
+
+    def _sync_grad(self, reduce_scatter=True):
         assert dist.is_initialized()
         group = self.sync_group
         world_size = dist.get_world_size(group)
@@ -318,6 +324,7 @@ class NaturalGradient:
         assert module_partitions is not None, 'module_partitions_for_inv is not specified.'
         assert len(module_partitions) == world_size
         num_modules_per_partition = len(module_partitions[0])
+        assert all(len(module_partitions[i]) == num_modules_per_partition for i in range(1, world_size))
         for i in range(num_modules_per_partition):
             tensor_list = []
             grads_list = []
@@ -325,9 +332,13 @@ class NaturalGradient:
                 grads = [p.grad for p in module_partitions[j][i].parameters() if p.requires_grad and p.grad is not None]
                 grads_list.append(grads)
                 tensor_list.append(parameters_to_vector(grads))
-            dist.all_gather(tensor_list, tensor_list[rank], group=group)
-            for j in range(world_size):
-                vector_to_parameters(tensor_list[j], grads_list[j])
+            if reduce_scatter:
+                dist.reduce_scatter(tensor_list[rank], tensor_list, group=group)
+                vector_to_parameters(tensor_list[rank], grads_list[rank])
+            else:
+                dist.all_gather(tensor_list, tensor_list[rank], group=group)
+                for j in range(world_size):
+                    vector_to_parameters(tensor_list[j], grads_list[j])
 
 
 class FullNaturalGradient(NaturalGradient):
