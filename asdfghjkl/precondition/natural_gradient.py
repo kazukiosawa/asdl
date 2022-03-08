@@ -237,7 +237,7 @@ class NaturalGradient:
     def reduce_curvature(self, all_reduce=True):
         self.fisher_manager.reduce_matrices(all_reduce=all_reduce)
 
-    def update_inv(self, damping=None):
+    def update_inv(self, damping=None, kron_targets=['A','B']):
         if damping is None:
             damping = self.damping
         for shape in _module_level_shapes:
@@ -247,7 +247,12 @@ class NaturalGradient:
                 matrix = self._get_module_symmatrix(module, shape)
                 if matrix is None:
                     continue
-                matrix.update_inv(damping)
+                if shape == SHAPE_KRON:
+                    matrix.update_inv(damping,
+                                      calc_A_inv='A' in kron_targets,
+                                      calc_B_inv='B' in kron_targets)
+                else:
+                    matrix.update_inv(damping)
         fisher = self._get_full_fisher()
         if fisher is not None:
             fisher.update_inv(damping)

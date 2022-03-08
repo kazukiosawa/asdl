@@ -310,23 +310,29 @@ class Kron:
         # NOTE: inv will not be preserved
         if not other.has_data:
             return self
-        if self.has_data:
-            A = self.A.add(other.A)
-            B = self.B.add(other.B)
+        if other.has_A:
+            A = self.A.add(other.A) if self.has_A else other.A
         else:
-            A = other.A
-            B = other.B
+            A = self.A
+        if other.has_B:
+            B = self.B.add(other.B) if self.has_B else other.B
+        else:
+            B = self.B
         return Kron(A, B)
 
     def __iadd__(self, other):
         if not other.has_data:
             return self
-        if self.has_data:
-            self.A.add_(other.A)
-            self.B.add_(other.B)
-        else:
-            self.A = other.A
-            self.B = other.B
+        if other.has_A:
+            if self.has_A:
+                self.A.add_(other.A)
+            else:
+                self.A = other.A
+        if other.has_B:
+            if self.has_B:
+                self.B.add_(other.B)
+            else:
+                self.B = other.B
         return self
 
     @property
@@ -335,7 +341,15 @@ class Kron:
 
     @property
     def has_data(self):
-        return self.A is not None and self.B is not None
+        return self.has_A or self.has_B
+
+    @property
+    def has_A(self):
+        return self.A is not None
+
+    @property
+    def has_B(self):
+        return self.B is not None
 
     @property
     def A_dim(self):
@@ -350,8 +364,10 @@ class Kron:
         return self._B_dim
 
     def mul_(self, value):
-        self.A.mul_(value)
-        self.B.mul_(value)
+        if self.has_A:
+            self.A.mul_(value)
+        if self.has_B:
+            self.B.mul_(value)
         return self
 
     def eigenvalues(self):
@@ -398,17 +414,24 @@ class Kron:
         pointer = unflatten(self.B, pointer)
         return pointer
 
-    def update_inv(self, damping=_default_damping, eps=1e-7):
+    def update_inv(self, damping=_default_damping, calc_A_inv=True, calc_B_inv=True, eps=1e-7):
         assert self.has_data
-        A = self.A
-        B = self.B
-        A_eig_mean = A.trace() / A.shape[0]
-        B_eig_mean = B.trace() / B.shape[0]
-        pi = torch.sqrt(A_eig_mean / B_eig_mean)
-        r = damping**0.5
+        if self.has_A and self.has_B:
+            A_eig_mean = self.A.trace() / self.A_dim
+            B_eig_mean = self.B.trace() / self.B_dim
+            pi = torch.sqrt(A_eig_mean / B_eig_mean)
+            r = damping**0.5
+            damping_A = max(r * pi, eps)
+            damping_B = max(r / pi, eps)
+        else:
+            damping_A = damping_B = damping
 
-        self.A_inv = cholesky_inv(A, max(r * pi, eps))
-        self.B_inv = cholesky_inv(B, max(r / pi, eps))
+        if calc_A_inv:
+            assert self.has_A
+            self.A_inv = cholesky_inv(self.A, damping_A)
+        if calc_B_inv:
+            assert self.has_B
+            self.B_inv = cholesky_inv(self.B, damping_B)
 
     def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
         mat_A = self.A_inv if use_inv else self.A

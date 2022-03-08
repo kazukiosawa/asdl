@@ -508,8 +508,8 @@ class OperationContext:
         kwargs = dict(data=self.cov(module), unit_data=self.cov_unit_wise(module))
         cov_kron = self.cov_kron(module)
         if cov_kron is not None:
-            kwargs['kron_A'] = cov_kron['A']
-            kwargs['kron_B'] = cov_kron['B']
+            kwargs['kron_A'] = cov_kron.get('A', None)
+            kwargs['kron_B'] = cov_kron.get('B', None)
         cov_diag = self.cov_diag(module)
         if cov_diag is not None:
             if original_requires_grad(module, 'weight'):
