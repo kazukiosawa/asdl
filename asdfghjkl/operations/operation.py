@@ -94,7 +94,8 @@ class Operation:
             for key in keys[:-1]:
                 results = results[key]
         key = keys[-1]
-        del results[key]
+        if key in results:
+            del results[key]
 
     def clear_results(self):
         self._op_results = {}
