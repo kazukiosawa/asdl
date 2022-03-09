@@ -237,7 +237,9 @@ class NaturalGradient:
     def reduce_curvature(self, all_reduce=True):
         self.fisher_manager.reduce_matrices(all_reduce=all_reduce)
 
-    def update_inv(self, damping=None, kron_targets=['A','B']):
+    def update_inv(self, damping=None, kron_targets=None):
+        if kron_targets is None:
+            kron_targets = ['A', 'B']
         if damping is None:
             damping = self.damping
         for shape in _module_level_shapes:
