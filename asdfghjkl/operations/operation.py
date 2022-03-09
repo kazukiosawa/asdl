@@ -96,8 +96,7 @@ class Operation:
             for key in keys[:-1]:
                 results = results[key]
         key = keys[-1]
-        if key in results:
-            del results[key]
+        results.pop(key, None)
 
     def clear_results(self):
         self._op_results = {}
