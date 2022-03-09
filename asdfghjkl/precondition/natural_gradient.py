@@ -345,6 +345,26 @@ class NaturalGradient:
                 for j in range(world_size):
                     vector_to_parameters(tensor_list[j], grads_list[j])
 
+    def all_reduce_no_precondition_grad(self):
+        assert dist.is_initialized()
+        group = self.sync_group
+        module_partitions = self.module_partitions_for_inv
+        if module_partitions:
+            no_sync_modules = [m for partition in module_partitions for m in partition]
+        else:
+            no_sync_modules = []
+        grads = []
+        for module in self.model.modules():
+            if module in no_sync_modules:
+                continue
+            for p in module.parameters():
+                if p.grad is not None:
+                    grads.append(p.grad)
+
+        packed_tensor = parameters_to_vector(grads)
+        dist.all_reduce(packed_tensor)
+        vector_to_parameters(packed_tensor, grads)
+
 
 class FullNaturalGradient(NaturalGradient):
     def __init__(self,
