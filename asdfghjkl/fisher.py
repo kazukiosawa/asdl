@@ -170,11 +170,11 @@ class FisherManager(MatrixManager):
         model = self._model
         for module in model.modules():
             # accumulate layer-wise fisher/fvp
-            self._accumulate_fisher(module, cxt.cov_symmatrix(module), scale)
-            self._accumulate_fvp(module, cxt.cvp_paramvector(module), scale)
+            self._accumulate_fisher(module, cxt.cov_symmatrix(module, pop=True), scale)
+            self._accumulate_fvp(module, cxt.cvp_paramvector(module, pop=True), scale)
         # accumulate full fisher/fvp
-        self._accumulate_fisher(model, cxt.full_cov_symmatrix(model), scale)
-        self._accumulate_fvp(model, cxt.full_cvp_paramvector(model), scale)
+        self._accumulate_fisher(model, cxt.full_cov_symmatrix(model, pop=True), scale)
+        self._accumulate_fvp(model, cxt.full_cvp_paramvector(model, pop=True), scale)
 
     def _accumulate_fisher(self, module: nn.Module, new_fisher, scale=1., fvp=False):
         if new_fisher is None:

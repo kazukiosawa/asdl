@@ -77,7 +77,7 @@ class Operation:
         else:
             results[key] += value
 
-    def get_result(self, *keys, default=None):
+    def get_result(self, *keys, pop=False, default=None):
         results = self._op_results
         if len(keys) > 1:
             for key in keys[:-1]:
@@ -86,6 +86,8 @@ class Operation:
                 except KeyError:
                     return None
         key = keys[-1]
+        if pop:
+            return results.pop(key, default)
         return results.get(key, default)
 
     def clear_result(self, *keys):
@@ -340,9 +342,9 @@ class OperationContext:
         vector = self.get_vectors_by_module(module, flatten=True)
         self.get_operation(module).backward_pre_process(in_data, out_data, out_grads, vector)
 
-    def get_result(self, module, *keys, default=None):
+    def get_result(self, module, *keys, pop=False, default=None):
         try:
-            return self.get_operation(module).get_result(*keys, default=default)
+            return self.get_operation(module).get_result(*keys, pop=pop, default=default)
         except KeyError:
             return default
 
@@ -504,13 +506,14 @@ class OperationContext:
             diag_b = operation.cov_diag_bias(module, out_grads)
             self.accumulate_result(module, diag_b, OP_COV_DIAG, 'bias')
 
-    def cov_symmatrix(self, module):
-        kwargs = dict(data=self.cov(module), unit_data=self.cov_unit_wise(module))
-        cov_kron = self.cov_kron(module)
+    def cov_symmatrix(self, module, pop=False):
+        kwargs = dict(data=self.get_result(module, OP_COV, pop=pop),
+                      unit_data=self.get_result(module, OP_COV_UNIT_WISE, pop=pop))
+        cov_kron = self.get_result(module, OP_COV_KRON, pop=pop)
         if cov_kron is not None:
             kwargs['kron_A'] = cov_kron.get('A', None)
             kwargs['kron_B'] = cov_kron.get('B', None)
-        cov_diag = self.cov_diag(module)
+        cov_diag = self.get_result(module, OP_COV_DIAG, pop=pop)
         if cov_diag is not None:
             if original_requires_grad(module, 'weight'):
                 kwargs['diag_weight'] = cov_diag['weight']
@@ -520,14 +523,14 @@ class OperationContext:
             return None
         return SymMatrix(**kwargs)
 
-    def full_cov_symmatrix(self, module):
-        cov = self.full_cov(module)
+    def full_cov_symmatrix(self, module, pop=False):
+        cov = self.get_result(module, OP_FULL_COV, pop=pop)
         if cov is None:
             return
         return SymMatrix(data=cov)
 
-    def cvp_paramvector(self, module):
-        cvp = self.cvp(module)
+    def cvp_paramvector(self, module, pop=False):
+        cvp = self.get_result(module, OP_CVP, pop=pop)
         if cvp is None:
             return None
         params = []
@@ -540,8 +543,8 @@ class OperationContext:
             vectors.append(cvp['bias'])
         return ParamVector(params, vectors)
 
-    def full_cvp_paramvector(self, module):
-        cvp = self.full_cvp(module)
+    def full_cvp_paramvector(self, module, pop=False):
+        cvp = self.get_result(module, OP_FULL_CVP, pop=pop)
         if cvp is None:
             return None
         params = [p for p in module.parameters() if original_requires_grad(param=p)]
