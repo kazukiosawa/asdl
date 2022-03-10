@@ -370,7 +370,7 @@ class NaturalGradient:
                     grads.append(p.grad)
 
         packed_tensor = parameters_to_vector(grads)
-        dist.all_reduce(packed_tensor)
+        dist.all_reduce(packed_tensor, group=group)
         vector_to_parameters(packed_tensor, grads)
 
 
