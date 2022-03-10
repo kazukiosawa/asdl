@@ -2,6 +2,7 @@ import os
 from operator import iadd
 import numpy as np
 import torch
+from torch.cuda import nvtx
 from .utils import cholesky_inv
 from .vector import ParamVector
 
@@ -246,7 +247,8 @@ class SymMatrix:
 
     def update_inv(self, damping=_default_damping):
         if self.has_data:
-            self.inv = cholesky_inv(self.data, damping)
+            with nvtx.range('inv_layer_wise'):
+                self.inv = cholesky_inv(self.data, damping)
         if self.has_kron:
             self.kron.update_inv(damping)
         if self.has_diag:
@@ -414,6 +416,7 @@ class Kron:
         pointer = unflatten(self.B, pointer)
         return pointer
 
+    @nvtx.range('inv_kron')
     def update_inv(self, damping=_default_damping, calc_A_inv=True, calc_B_inv=True, eps=1e-7):
         assert self.has_data
         if self.has_A and self.has_B:
@@ -428,10 +431,12 @@ class Kron:
 
         if calc_A_inv:
             assert self.has_A
-            self.A_inv = cholesky_inv(self.A, damping_A)
+            with nvtx.range('inv_kron_A'):
+                self.A_inv = cholesky_inv(self.A, damping_A)
         if calc_B_inv:
             assert self.has_B
-            self.B_inv = cholesky_inv(self.B, damping_B)
+            with nvtx.range('inv_kron_B'):
+                self.B_inv = cholesky_inv(self.B, damping_B)
 
     def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
         mat_A = self.A_inv if use_inv else self.A
@@ -556,6 +561,7 @@ class Diag:
             pointer = unflatten(self.bias, pointer)
         return pointer
 
+    @nvtx.range('inv_diag')
     def update_inv(self, damping=_default_damping):
         if self.has_weight:
             self.weight_inv = 1 / (self.weight + damping)
@@ -644,6 +650,7 @@ class UnitWise:
             pointer = unflatten(self.data, pointer)
         return pointer
 
+    @nvtx.range('inv_unit_wise')
     def update_inv(self, damping=_default_damping):
         assert self.has_data
         data = self.data
