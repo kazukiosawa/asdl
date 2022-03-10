@@ -455,55 +455,60 @@ class OperationContext:
     def cvp(self, module):
         return self.get_result(module, OP_CVP)
 
-    def calc_cov(self, module, shape=SHAPE_LAYER_WISE, clear_in_out=False):
-        if shape == SHAPE_LAYER_WISE:
-            operation, in_data, out_grads = self.load_op_in_out(module)
-            _, _, batch_g = operation.collect_batch_grads(in_data, out_grads)
-            cov = torch.matmul(batch_g.T, batch_g)
-            self.accumulate_result(module, cov, OP_COV)
-        elif shape == SHAPE_KRON:
-            self.calc_cov_kron(module)
-        elif shape == SHAPE_UNIT_WISE:
-            self.calc_cov_unit_wise(module)
-        elif shape == SHAPE_DIAG:
-            self.calc_cov_diag(module)
-        if clear_in_out:
-            self.clear_result(module, OP_SAVE_INPUTS)
-            self.clear_result(module, OP_SAVE_OUTGRADS)
-
     def cov_kron(self, module):
         return self.get_result(module, OP_COV_KRON)
-
-    def calc_cov_kron(self, module):
-        operation, in_data, out_grads = self.load_op_in_out(module)
-        if in_data is not None:
-            for tensor in in_data:
-                A = operation.cov_kron_A(module, tensor)
-                self.accumulate_result(module, A, OP_COV_KRON, 'A')
-        if out_grads is not None:
-            for tensor in out_grads:
-                B = operation.cov_kron_B(module, tensor)
-                self.accumulate_result(module, B, OP_COV_KRON, 'B')
 
     def cov_unit_wise(self, module):
         return self.get_result(module, OP_COV_UNIT_WISE)
 
-    def calc_cov_unit_wise(self, module):
-        operation, in_data, out_grads = self.load_op_in_out(module)
-        for tensor1, tensor2 in zip(in_data, out_grads):
-            unit = operation.cov_unit_wise(module, tensor1, tensor2)
-            self.accumulate_result(module, unit, OP_COV_UNIT_WISE)
-
     def cov_diag(self, module):
         return self.get_result(module, OP_COV_DIAG)
 
-    def calc_cov_diag(self, module):
+    def calc_cov(self, module, shape=SHAPE_LAYER_WISE, clear_in_out=False):
         operation, in_data, out_grads = self.load_op_in_out(module)
-        diag_w = operation.cov_diag_weight(module, in_data, out_grads)
-        self.accumulate_result(module, diag_w, OP_COV_DIAG, 'weight')
-        if original_requires_grad(module, 'bias'):
-            diag_b = operation.cov_diag_bias(module, out_grads)
-            self.accumulate_result(module, diag_b, OP_COV_DIAG, 'bias')
+        if shape == SHAPE_KRON:
+            if in_data is not None:
+                for tensor in in_data:
+                    A = operation.cov_kron_A(module, tensor)
+                    self.accumulate_result(module, A, OP_COV_KRON, 'A')
+                if clear_in_out:
+                    self.clear_result(module, OP_SAVE_INPUTS)
+            if out_grads is not None:
+                for tensor in out_grads:
+                    B = operation.cov_kron_B(module, tensor)
+                    self.accumulate_result(module, B, OP_COV_KRON, 'B')
+                if clear_in_out:
+                    self.clear_result(module, OP_SAVE_OUTGRADS)
+        else:
+            if in_data is None or out_grads is None:
+                return
+            min_len = min(len(in_data), len(out_grads))
+            for tensor1, tensor2 in zip(in_data[:min_len], out_grads[:min_len]):
+                if shape == SHAPE_LAYER_WISE:
+                    _, _, batch_g = operation.collect_batch_grads(tensor1, tensor2)
+                    cov = torch.matmul(batch_g.T, batch_g)
+                    self.accumulate_result(module, cov, OP_COV)
+                elif shape == SHAPE_UNIT_WISE:
+                    unit = operation.cov_unit_wise(module, tensor1, tensor2)
+                    self.accumulate_result(module, unit, OP_COV_UNIT_WISE)
+                elif shape == SHAPE_DIAG:
+                    diag_w = operation.cov_diag_weight(module, tensor1, tensor2)
+                    self.accumulate_result(module, diag_w, OP_COV_DIAG, 'weight')
+                    if original_requires_grad(module, 'bias'):
+                        diag_b = operation.cov_diag_bias(module, tensor2)
+                        self.accumulate_result(module, diag_b, OP_COV_DIAG, 'bias')
+                if clear_in_out:
+                    in_data.remove(tensor1)
+                    out_grads.remove(tensor2)
+
+    def calc_cov_kron(self, module, clear_in_out=False):
+        self.calc_cov(module, SHAPE_KRON, clear_in_out)
+
+    def calc_cov_unit_wise(self, module, clear_in_out=False):
+        self.calc_cov(module, SHAPE_UNIT_WISE, clear_in_out)
+
+    def calc_cov_diag(self, module, clear_in_out=False):
+        self.calc_cov(module, SHAPE_DIAG, clear_in_out)
 
     def cov_symmatrix(self, module, pop=False):
         kwargs = dict(data=self.get_result(module, OP_COV, pop=pop),
