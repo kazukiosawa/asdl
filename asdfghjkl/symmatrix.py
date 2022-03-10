@@ -416,7 +416,6 @@ class Kron:
         pointer = unflatten(self.B, pointer)
         return pointer
 
-    @nvtx.range('inv_kron')
     def update_inv(self, damping=_default_damping, calc_A_inv=True, calc_B_inv=True, eps=1e-7):
         assert self.has_data
         if self.has_A and self.has_B:
