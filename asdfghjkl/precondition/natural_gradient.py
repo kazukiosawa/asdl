@@ -4,7 +4,7 @@ from contextlib import nullcontext
 
 import torch
 from torch import nn
-from torch.cuda import Stream
+from torch.cuda import Stream, nvtx
 import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 
@@ -134,6 +134,7 @@ class NaturalGradient:
         if fisher is not None:
             fisher.mul_(scale)
 
+    @nvtx.range('update_curvature')
     def update_curvature(self,
                          inputs=None,
                          targets=None,
@@ -237,6 +238,7 @@ class NaturalGradient:
     def reduce_curvature(self, all_reduce=True):
         self.fisher_manager.reduce_matrices(all_reduce=all_reduce)
 
+    @nvtx.range('update_inv')
     def update_inv(self, damping=None, kron_targets=None):
         if kron_targets is None:
             kron_targets = ['A', 'B']
@@ -259,6 +261,7 @@ class NaturalGradient:
         if fisher is not None:
             fisher.update_inv(damping)
 
+    @nvtx.range('precondition')
     def precondition(self, vectors: ParamVector = None, grad_scale=1.):
         for shape in _module_level_shapes:
             for module in self.modules_for(shape):
@@ -308,6 +311,7 @@ class NaturalGradient:
             rank = dist.get_rank(self.sync_group)
             return module in self.module_partitions_for_inv[rank]
 
+    @nvtx.range('reduce_scatter_fisher')
     def reduce_scatter_fisher(self, *keys, with_grad=False):
         module_partitions = self.module_partitions_for_inv
         assert module_partitions is not None, 'module_partitions_for_inv is not specified.'
@@ -316,9 +320,11 @@ class NaturalGradient:
                                                   with_grad=with_grad,
                                                   group=self.sync_group)
 
+    @nvtx.range('reduce_scatter_grad')
     def reduce_scatter_grad(self):
         self._sync_grad(reduce_scatter=True)
 
+    @nvtx.range('all_gather_grad')
     def all_gather_grad(self):
         self._sync_grad(reduce_scatter=False)
 
