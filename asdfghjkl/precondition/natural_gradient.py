@@ -41,7 +41,7 @@ class NaturalGradient:
         ema_decay=_invalid_ema_decay,
         ignore_modules=None,
         sync_group: dist.ProcessGroup = None,
-        module_partitions_for_inv: List[List[nn.Module]] = None,
+        module_partitions: List[List[nn.Module]] = None,
         **kwargs
     ):
         from torch.nn.parallel import DistributedDataParallel as DDP
@@ -54,24 +54,31 @@ class NaturalGradient:
         self.ema_decay = ema_decay
         if isinstance(fisher_shape, str):
             fisher_shape = [fisher_shape]
+        self.modules_for_curvature = []
         for name, module, shapes in module_wise_assignments(model,
                                                             *fisher_shape,
                                                             ignore_modules=ignore_modules,
                                                             named=True):
             assert len(shapes) == 1, f'Each module has to be assigned one Fisher shape. ' \
                                      f'{name} is assigned {len(shapes)} shapes.'
-        self.fisher_shape = fisher_shape
+            self.modules_for_curvature.append(module)
         self.ignore_modules = ignore_modules
         self._modules_for = {}
+        if module_partitions is not None:
+            assert dist.is_initialized(), 'torch.distributed has to be initialized ' \
+                                          'when module_partitions is specified.'
+            world_size = dist.get_world_size(sync_group)
+            assert all(len(module_partitions[0]) == len(module_partitions[i]) for i in range(1, world_size))
+            self.partitioned_modules = [m for partition in module_partitions for m in partition]
+        else:
+            self.partitioned_modules = []
+        self.module_partitions = module_partitions
+
+        self.fisher_shape = fisher_shape
         fisher_cls = get_fisher_class(fisher_type, loss_type)
         self.fisher_manager = fisher_cls(model, **kwargs)
+
         self.sync_group = sync_group
-        if module_partitions_for_inv is not None:
-            assert dist.is_initialized(), 'torch.distributed has to be initialized ' \
-                                          'when module_partitions_for_inv is specified.'
-            world_size = dist.get_world_size(sync_group)
-            assert all(len(module_partitions_for_inv[0]) == len(module_partitions_for_inv[i]) for i in range(1, world_size))
-        self.module_partitions_for_inv = module_partitions_for_inv
 
     def modules_for(self, shape):
         if shape not in self._modules_for:
@@ -235,26 +242,21 @@ class NaturalGradient:
                                      scale=scale,
                                      stream=stream)
 
-    def reduce_curvature(self, all_reduce=True):
-        self.fisher_manager.reduce_matrices(all_reduce=all_reduce)
-
     @nvtx.range('update_inv')
-    def update_inv(self, damping=None, kron_targets=None):
-        if kron_targets is None:
-            kron_targets = ['A', 'B']
+    def update_inv(self, damping=None, kron=None):
+        if kron is None:
+            kron = ['A', 'B']
         if damping is None:
             damping = self.damping
         for shape in _module_level_shapes:
             for module in self.modules_for(shape):
-                if not self.is_module_for_inv(module):
+                if not self.is_module_for_inv_and_precondition(module):
                     continue
                 matrix = self._get_module_symmatrix(module, shape)
                 if matrix is None:
                     continue
                 if shape == SHAPE_KRON:
-                    matrix.update_inv(damping,
-                                      calc_A_inv='A' in kron_targets,
-                                      calc_B_inv='B' in kron_targets)
+                    matrix.update_inv(damping, calc_A_inv='A' in kron, calc_B_inv='B' in kron)
                 else:
                     matrix.update_inv(damping)
         fisher = self._get_full_fisher()
@@ -265,7 +267,7 @@ class NaturalGradient:
     def precondition(self, vectors: ParamVector = None, grad_scale=1.):
         for shape in _module_level_shapes:
             for module in self.modules_for(shape):
-                if not self.is_module_for_inv(module):
+                if not self.is_module_for_inv_and_precondition(module):
                     continue
                 self.precondition_module(module, shape, vectors, grad_scale=grad_scale)
         params = [p for p in self.parameters_for(SHAPE_FULL)]
@@ -304,17 +306,22 @@ class NaturalGradient:
             vec_bias.data.mul_(grad_scale)
         matrix.mvp(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=True, inplace=True)
 
-    def is_module_for_inv(self, module: nn.Module):
-        if self.module_partitions_for_inv is None:
+    def is_module_for_inv_and_precondition(self, module: nn.Module):
+        module_partitions = self.module_partitions
+        if module not in self.modules_for_curvature:
+            return False
+        if module_partitions is None:
+            return True
+        if module not in self.partitioned_modules:
             return True
         else:
             rank = dist.get_rank(self.sync_group)
-            return module in self.module_partitions_for_inv[rank]
+            return module in module_partitions[rank]
 
-    @nvtx.range('reduce_scatter_fisher')
-    def reduce_scatter_fisher(self, *keys, with_grad=False):
-        module_partitions = self.module_partitions_for_inv
-        assert module_partitions is not None, 'module_partitions_for_inv is not specified.'
+    @nvtx.range('reduce_scatter_curvature')
+    def reduce_scatter_curvature(self, *keys, with_grad=False):
+        module_partitions = self.module_partitions
+        assert module_partitions is not None, 'module_partitions is not specified.'
         self.fisher_manager.reduce_scatter_fisher(module_partitions,
                                                   *keys,
                                                   with_grad=with_grad,
@@ -322,19 +329,19 @@ class NaturalGradient:
 
     @nvtx.range('reduce_scatter_grad')
     def reduce_scatter_grad(self):
-        self._sync_grad(reduce_scatter=True)
+        self._scatter_or_gather_grad('scatter')
 
     @nvtx.range('all_gather_grad')
     def all_gather_grad(self):
-        self._sync_grad(reduce_scatter=False)
+        self._scatter_or_gather_grad('gather')
 
-    def _sync_grad(self, reduce_scatter=True):
+    def _scatter_or_gather_grad(self, scatter_or_gather):
         assert dist.is_initialized()
         group = self.sync_group
         world_size = dist.get_world_size(group)
         rank = dist.get_rank(group)
-        module_partitions = self.module_partitions_for_inv
-        assert module_partitions is not None, 'module_partitions_for_inv is not specified.'
+        module_partitions = self.module_partitions
+        assert module_partitions is not None, 'module_partitions is not specified.'
         assert len(module_partitions) == world_size
         num_modules_per_partition = len(module_partitions[0])
         assert all(len(module_partitions[i]) == num_modules_per_partition for i in range(1, world_size))
@@ -345,7 +352,7 @@ class NaturalGradient:
                 grads = [p.grad for p in module_partitions[j][i].parameters() if p.requires_grad and p.grad is not None]
                 grads_list.append(grads)
                 tensor_list.append(parameters_to_vector(grads))
-            if reduce_scatter:
+            if scatter_or_gather == 'scatter':
                 dist.reduce_scatter(tensor_list[rank], tensor_list, group=group)
                 vector_to_parameters(tensor_list[rank], grads_list[rank])
             else:
@@ -353,25 +360,34 @@ class NaturalGradient:
                 for j in range(world_size):
                     vector_to_parameters(tensor_list[j], grads_list[j])
 
-    def all_reduce_no_precondition_grad(self):
-        assert dist.is_initialized()
-        group = self.sync_group
-        module_partitions = self.module_partitions_for_inv
-        if module_partitions:
-            no_sync_modules = [m for partition in module_partitions for m in partition]
-        else:
-            no_sync_modules = []
-        grads = []
-        for module in self.model.modules():
-            if module in no_sync_modules:
-                continue
-            for p in module.parameters():
-                if p.grad is not None:
-                    grads.append(p.grad)
+    @nvtx.range('all_reduce_undivided_curvature')
+    def all_reduce_undivided_curvature(self, *keys, all_reduce=True, with_grad=False):
+        modules = [m for m in self.modules_for_curvature if m not in self.partitioned_modules]
+        self.fisher_manager.reduce_fisher(modules,
+                                          *keys,
+                                          all_reduce=all_reduce,
+                                          with_grad=with_grad,
+                                          group=self.sync_group)
 
-        packed_tensor = parameters_to_vector(grads)
-        dist.all_reduce(packed_tensor, group=group)
-        vector_to_parameters(packed_tensor, grads)
+    @nvtx.range('all_reduce_undivided_grad')
+    def all_reduce_undivided_grad(self):
+        assert dist.is_initialized()
+        modules = [m for m in self.modules_for_curvature if m not in self.partitioned_modules]
+        self._all_reduce_grad(modules)
+
+    @nvtx.range('all_reduce_no_curvature_grad')
+    def all_reduce_no_curvature_grad(self):
+        modules = [m for m in self.model.modules() if m not in self.modules_for_curvature]
+        self._all_reduce_grad(modules)
+
+    def _all_reduce_grad(self, modules):
+        for module in modules:
+            grads = [p.grad for p in module.parameters() if p.grad is not None]
+            if len(grads) == 0:
+                continue
+            packed_tensor = parameters_to_vector(grads)
+            dist.all_reduce(packed_tensor, group=self.sync_group)
+            vector_to_parameters(packed_tensor, grads)
 
 
 class FullNaturalGradient(NaturalGradient):
@@ -442,13 +458,19 @@ class EmpiricalNaturalGradient(NaturalGradient):
                  fisher_shape=SHAPE_FULL,
                  damping=1e-5,
                  ema_decay=_invalid_ema_decay,
-                 ignore_modules=None):
+                 ignore_modules=None,
+                 sync_group: dist.ProcessGroup = None,
+                 module_partitions: List[List[nn.Module]] = None,
+                 **kwargs):
         super().__init__(model,
                          fisher_type=FISHER_EMP,
                          fisher_shape=fisher_shape,
                          damping=damping,
                          ema_decay=ema_decay,
-                         ignore_modules=ignore_modules)
+                         ignore_modules=ignore_modules,
+                         sync_group=sync_group,
+                         module_partitions=module_partitions,
+                         **kwargs)
 
 
 def _bias_requires_grad(module):
