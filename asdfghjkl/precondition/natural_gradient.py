@@ -318,6 +318,24 @@ class NaturalGradient:
             rank = dist.get_rank(self.sync_group)
             return module in module_partitions[rank]
 
+    def sync_curvature(self, *keys, with_grad=False, enabled=True):
+        if not enabled:
+            return
+        self.reduce_scatter_curvature(*keys, with_grad=with_grad)
+        self.all_reduce_undivided_curvature(*keys, with_grad=with_grad)
+
+    def sync_grad_pre_precondition(self, enabled=True):
+        if not enabled:
+            return
+        self.reduce_scatter_grad()
+        self.all_reduce_undivided_grad()
+
+    def sync_grad_post_precondition(self, enabled=True):
+        if not enabled:
+            return
+        self.all_gather_grad()
+        self.all_reduce_no_curvature_grad()
+
     @nvtx.range('reduce_scatter_curvature')
     def reduce_scatter_curvature(self, *keys, with_grad=False):
         module_partitions = self.module_partitions
