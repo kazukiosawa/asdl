@@ -1,5 +1,5 @@
 from functools import partial
-from typing import List
+from typing import List, Union
 import numpy as np
 
 import torch
@@ -192,6 +192,17 @@ class FisherManager(MatrixManager):
     def _accumulate_fvp(self, module: nn.Module, new_fisher, scale=1.):
         self._accumulate_fisher(module, new_fisher, scale, fvp=True)
 
+    def get_fisher_tensor(self, module: nn.Module, *keys) -> Union[torch.Tensor, None]:
+        fisher = getattr(module, self.fisher_attr, None)
+        if fisher is None:
+            return None
+        data = fisher
+        for key in keys:
+            data = getattr(data, key, None)
+        if data is not None:
+            assert isinstance(data, torch.Tensor)
+        return data
+
     def reduce_scatter_fisher(self,
                               module_partitions: List[List[torch.nn.Module]],
                               *keys,
@@ -207,17 +218,11 @@ class FisherManager(MatrixManager):
         for module_list in module_partitions:
             tensor_list = []
             for module in module_list:
-                fisher = getattr(module, self.fisher_attr, None)
-                if fisher is None:
+                tensor = self.get_fisher_tensor(module, *keys)
+                if tensor is None:
                     continue
-                data = fisher
-                for key in keys:
-                    data = getattr(data, key, None)
-                if data is None:
-                    continue
-                assert isinstance(data, torch.Tensor)
-                assert data.is_cuda
-                tensor_list.append(data)
+                assert tensor.is_cuda
+                tensor_list.append(tensor)
                 if with_grad:
                     for p in module.parameters():
                         if p.requires_grad and p.grad is not None:
@@ -230,8 +235,28 @@ class FisherManager(MatrixManager):
             output = input_list[dist.get_rank(group)]
             dist.reduce_scatter(output, input_list, group=group)
 
-    def reduce_fisher(self, is_master=True, all_reduce=False):
-        self.reduce_matrices(is_master=is_master, all_reduce=all_reduce)
+    def reduce_fisher(self,
+                      modules,
+                      *keys,
+                      all_reduce=True,
+                      with_grad=False,
+                      group: dist.ProcessGroup = None):
+        assert dist.is_initialized()
+        tensor_list = []
+        for module in modules:
+            tensor = self.get_fisher_tensor(module, *keys)
+            if tensor is None:
+                continue
+            tensor_list.append(tensor)
+            if with_grad:
+                for p in module.parameters():
+                    if p.requires_grad and p.grad is not None:
+                        tensor_list.append(p.grad)
+        for tensor in tensor_list:
+            if all_reduce:
+                dist.all_reduce(tensor, group=group)
+            else:
+                dist.reduce(tensor, dst=0, group=group)
 
     def reduce_fvp(self, fisher_shape, is_master=True, all_reduce=False):
         v = self.load_fvp(fisher_shape)
