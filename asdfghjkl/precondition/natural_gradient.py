@@ -372,22 +372,20 @@ class NaturalGradient:
     @nvtx.range('all_reduce_undivided_grad')
     def all_reduce_undivided_grad(self):
         assert dist.is_initialized()
-        modules = [m for m in self.modules_for_curvature if m not in self.partitioned_modules]
-        self._all_reduce_grad(modules)
+        module_list = nn.ModuleList([m for m in self.modules_for_curvature if m not in self.partitioned_modules])
+        self._all_reduce_grad(module_list)
 
     @nvtx.range('all_reduce_no_curvature_grad')
     def all_reduce_no_curvature_grad(self):
-        modules = [m for m in self.model.modules() if m not in self.modules_for_curvature]
-        self._all_reduce_grad(modules)
+        module_list = nn.ModuleList([m for m in self.model.modules() if m not in self.modules_for_curvature])
+        self._all_reduce_grad(module_list)
 
-    def _all_reduce_grad(self, modules):
-        for module in modules:
-            grads = [p.grad for p in module.parameters() if p.grad is not None]
-            if len(grads) == 0:
-                continue
-            packed_tensor = parameters_to_vector(grads)
-            dist.all_reduce(packed_tensor, group=self.sync_group)
-            vector_to_parameters(packed_tensor, grads)
+    def _all_reduce_grad(self, module: nn.Module):
+        grads = [p.grad for p in module.parameters() if p.grad is not None]
+        assert len(grads) > 0
+        packed_tensor = parameters_to_vector(grads)
+        dist.all_reduce(packed_tensor, group=self.sync_group)
+        vector_to_parameters(packed_tensor, grads)
 
 
 class FullNaturalGradient(NaturalGradient):
