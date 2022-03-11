@@ -307,9 +307,9 @@ class NaturalGradient:
         matrix.mvp(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=True, inplace=True)
 
     def is_module_for_inv_and_precondition(self, module: nn.Module):
-        module_partitions = self.module_partitions
         if module not in self.modules_for_curvature:
             return False
+        module_partitions = self.module_partitions
         if module_partitions is None:
             return True
         if module not in self.partitioned_modules:
