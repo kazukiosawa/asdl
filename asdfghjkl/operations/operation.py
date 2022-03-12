@@ -469,15 +469,15 @@ class OperationContext:
         operation, in_data, out_grads = self.load_op_in_out(module)
         if shape == SHAPE_KRON:
             if in_data is not None:
-                for tensor in in_data:
-                    with nvtx.range('cov_kron_A'):
+                with nvtx.range('cov_kron_A'):
+                    for tensor in in_data:
                         A = operation.cov_kron_A(module, tensor)
                         self.accumulate_result(module, A, OP_COV_KRON, 'A')
                 if clear_in_out:
                     self.clear_result(module, OP_SAVE_INPUTS)
             if out_grads is not None:
-                for tensor in out_grads:
-                    with nvtx.range('cov_kron_B'):
+                with nvtx.range('cov_kron_B'):
+                    for tensor in out_grads:
                         B = operation.cov_kron_B(module, tensor)
                         self.accumulate_result(module, B, OP_COV_KRON, 'B')
                 if clear_in_out:
@@ -486,8 +486,8 @@ class OperationContext:
             if in_data is None or out_grads is None:
                 return
             min_len = min(len(in_data), len(out_grads))
-            for tensor1, tensor2 in zip(in_data[:min_len], out_grads[:min_len]):
-                with nvtx.range(f'cov_{shape}'):
+            with nvtx.range(f'cov_{shape}'):
+                for tensor1, tensor2 in zip(in_data[:min_len], out_grads[:min_len]):
                     if shape == SHAPE_LAYER_WISE:
                         _, _, batch_g = operation.collect_batch_grads(tensor1, tensor2)
                         cov = torch.matmul(batch_g.T, batch_g)
