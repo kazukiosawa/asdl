@@ -63,7 +63,7 @@ class NaturalGradient:
                                      f'{name} is assigned {len(shapes)} shapes.'
             self.modules_for_curvature.append(module)
         self.ignore_modules = ignore_modules
-        self._modules_for = {}
+        self._named_modules_for = {}
         if module_partitions is not None:
             assert dist.is_initialized(), 'torch.distributed has to be initialized ' \
                                           'when module_partitions is specified.'
@@ -80,13 +80,17 @@ class NaturalGradient:
 
         self.sync_group = sync_group
 
+    def named_modules_for(self, shape):
+        if shape not in self._named_modules_for:
+            self._named_modules_for[shape] = list(modules_to_assign(self.model,
+                                                                    shape,
+                                                                    *self.fisher_shape,
+                                                                    ignore_modules=self.ignore_modules,
+                                                                    named=True))
+        return self._named_modules_for[shape]
+
     def modules_for(self, shape):
-        if shape not in self._modules_for:
-            self._modules_for[shape] = list(modules_to_assign(self.model,
-                                                              shape,
-                                                              *self.fisher_shape,
-                                                              ignore_modules=self.ignore_modules))
-        return self._modules_for[shape]
+        return [m for _, m in self.named_modules_for(shape)]
 
     def parameters_for(self, shape):
         for module in self.modules_for(shape):
@@ -175,8 +179,8 @@ class NaturalGradient:
                 stream_cxt = torch.cuda.stream(stream) if stream is not None else nullcontext()
                 with stream_cxt:
                     for shape in _module_level_shapes:
-                        for module in self.modules_for(shape):
-                            cxt.calc_cov(module, shape, clear_in_out=True)
+                        for name, module in self.named_modules_for(shape):
+                            cxt.calc_cov(module, shape, clear_in_out=True, tag=f'_{name}')
                     self.fisher_manager.accumulate(cxt, scale)
         else:
             rst = self.fisher_manager.calculate_fisher(self.fisher_shape,
@@ -249,16 +253,16 @@ class NaturalGradient:
         if damping is None:
             damping = self.damping
         for shape in _module_level_shapes:
-            for module in self.modules_for(shape):
+            for name, module in self.named_modules_for(shape):
                 if not self.is_module_for_inv_and_precondition(module):
                     continue
                 matrix = self._get_module_symmatrix(module, shape)
                 if matrix is None:
                     continue
                 if shape == SHAPE_KRON:
-                    matrix.update_inv(damping, calc_A_inv='A' in kron, calc_B_inv='B' in kron)
+                    matrix.update_inv(damping, calc_A_inv='A' in kron, calc_B_inv='B' in kron, tag=f'_{name}')
                 else:
-                    matrix.update_inv(damping)
+                    matrix.update_inv(damping, tag=f'_{name}')
         fisher = self._get_full_fisher()
         if fisher is not None:
             fisher.update_inv(damping)

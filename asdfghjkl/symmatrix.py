@@ -245,16 +245,16 @@ class SymMatrix:
 
         return pointer
 
-    def update_inv(self, damping=_default_damping):
+    def update_inv(self, damping=_default_damping, tag=''):
         if self.has_data:
-            with nvtx.range('inv_layer_wise'):
+            with nvtx.range('inv_layer_wise' + tag):
                 self.inv = cholesky_inv(self.data, damping)
         if self.has_kron:
-            self.kron.update_inv(damping)
+            self.kron.update_inv(damping, tag=tag)
         if self.has_diag:
-            self.diag.update_inv(damping)
+            self.diag.update_inv(damping, tag=tag)
         if self.has_unit:
-            self.unit.update_inv(damping)
+            self.unit.update_inv(damping, tag=tag)
 
     def mvp(self, vectors: ParamVector = None,
             vec_weight: torch.Tensor = None, vec_bias: torch.Tensor = None,
@@ -416,7 +416,7 @@ class Kron:
         pointer = unflatten(self.B, pointer)
         return pointer
 
-    def update_inv(self, damping=_default_damping, calc_A_inv=True, calc_B_inv=True, eps=1e-7):
+    def update_inv(self, damping=_default_damping, calc_A_inv=True, calc_B_inv=True, eps=1e-7, tag=''):
         assert self.has_data
         if self.has_A and self.has_B:
             A_eig_mean = self.A.trace() / self.A_dim
@@ -430,11 +430,11 @@ class Kron:
 
         if calc_A_inv:
             assert self.has_A
-            with nvtx.range('inv_kron_A'):
+            with nvtx.range('inv_kron_A' + tag):
                 self.A_inv = cholesky_inv(self.A, damping_A)
         if calc_B_inv:
             assert self.has_B
-            with nvtx.range('inv_kron_B'):
+            with nvtx.range('inv_kron_B' + tag):
                 self.B_inv = cholesky_inv(self.B, damping_B)
 
     def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
@@ -560,12 +560,12 @@ class Diag:
             pointer = unflatten(self.bias, pointer)
         return pointer
 
-    @nvtx.range('inv_diag')
-    def update_inv(self, damping=_default_damping):
-        if self.has_weight:
-            self.weight_inv = 1 / (self.weight + damping)
-        if self.has_bias:
-            self.bias_inv = 1 / (self.bias + damping)
+    def update_inv(self, damping=_default_damping, tag=''):
+        with nvtx.range('inv_diag' + tag):
+            if self.has_weight:
+                self.weight_inv = 1 / (self.weight + damping)
+            if self.has_bias:
+                self.bias_inv = 1 / (self.bias + damping)
 
     def mvp(self, vec_weight=None, vec_bias=None, use_inv=False, inplace=False):
         assert vec_weight is not None or vec_bias is not None
@@ -649,14 +649,14 @@ class UnitWise:
             pointer = unflatten(self.data, pointer)
         return pointer
 
-    @nvtx.range('inv_unit_wise')
-    def update_inv(self, damping=_default_damping):
-        assert self.has_data
-        data = self.data
-        diag = torch.diagonal(data, dim1=1, dim2=2)
-        diag += damping
-        self.inv = torch.inverse(data)
-        diag -= damping
+    def update_inv(self, damping=_default_damping, tag=''):
+        with nvtx.range('inv_unit_wise' + tag):
+            assert self.has_data
+            data = self.data
+            diag = torch.diagonal(data, dim1=1, dim2=2)
+            diag += damping
+            self.inv = torch.inverse(data)
+            diag -= damping
 
     def mvp(self, vec_weight, vec_bias, use_inv=False, inplace=False):
         mat = self.inv if use_inv else self.data  # (f, 2, 2) or (f_out, f_in+1, f_in+1)
