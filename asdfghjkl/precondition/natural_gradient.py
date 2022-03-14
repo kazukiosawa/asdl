@@ -165,7 +165,11 @@ class NaturalGradient:
                          calc_emp_loss_grad=False,
                          seed=None,
                          scale=1,
-                         stream: Stream = None):
+                         stream: Stream = None,
+                         module_name=None,
+                         num_batches=None,
+                         kron=None,
+                         no_save=False):
         if ema_decay is None:
             ema_decay = self.ema_decay
         if ema_decay != _invalid_ema_decay:
@@ -181,14 +185,23 @@ class NaturalGradient:
             if cxt is None:
                 with no_centered_cov(self.model, self.fisher_shape, ignore_modules=self.ignore_modules, stream=stream) as cxt:
                     closure()
-                    self.fisher_manager.accumulate(cxt, scale)
+                    if not no_save:
+                        self.save_curvature(cxt, scale)
             else:
                 stream_cxt = torch.cuda.stream(stream) if stream is not None else nullcontext()
                 with stream_cxt:
                     for shape in _module_level_shapes:
                         for name, module in self.named_modules_for(shape):
-                            cxt.calc_cov(module, shape, clear_in_out=True, tag=f'_{name}')
-                    self.fisher_manager.accumulate(cxt, scale)
+                            if module_name is not None and name != module_name:
+                                continue
+                            cxt.calc_cov(module,
+                                         shape,
+                                         clear_in_out=True,
+                                         kron=kron,
+                                         tag=f'_{name}' if self.record_mode else '',
+                                         num_batches=num_batches)
+                            if not no_save:
+                                self.save_curvature(cxt, scale, module=module)
         else:
             rst = self.fisher_manager.calculate_fisher(self.fisher_shape,
                                                        inputs=inputs,
@@ -202,6 +215,9 @@ class NaturalGradient:
                                                        stream=stream)
             return rst[0], rst[1]  # loss and outputs
 
+    def save_curvature(self, cxt, scale=1., module=None, module_name=None):
+        self.fisher_manager.accumulate(cxt, scale, target_module=module, target_module_name=module_name)
+
     def accumulate_curvature(self,
                              inputs=None,
                              targets=None,
@@ -213,7 +229,11 @@ class NaturalGradient:
                              calc_emp_loss_grad=False,
                              seed=None,
                              scale=1,
-                             stream: Stream = None):
+                             stream: Stream = None,
+                             module_name=None,
+                             num_batches=None,
+                             kron=None,
+                             no_save=False):
         return self.update_curvature(inputs=inputs,
                                      targets=targets,
                                      data_loader=data_loader,
@@ -225,7 +245,11 @@ class NaturalGradient:
                                      calc_emp_loss_grad=calc_emp_loss_grad,
                                      seed=seed,
                                      scale=scale,
-                                     stream=stream)
+                                     stream=stream,
+                                     module_name=module_name,
+                                     num_batches=num_batches,
+                                     kron=kron,
+                                     no_save=no_save)
 
     def refresh_curvature(self,
                           inputs=None,
@@ -237,7 +261,11 @@ class NaturalGradient:
                           calc_emp_loss_grad=False,
                           seed=None,
                           scale=1,
-                          stream: Stream = None):
+                          stream: Stream = None,
+                          module_name=None,
+                          num_batches=None,
+                          kron=None,
+                          no_save=False):
         if self.ema_decay != _invalid_ema_decay:
             warnings.warn(f'ema_decay ({self.ema_decay}) will be ignored.')
         return self.update_curvature(inputs=inputs,
@@ -251,7 +279,11 @@ class NaturalGradient:
                                      calc_emp_loss_grad=calc_emp_loss_grad,
                                      seed=seed,
                                      scale=scale,
-                                     stream=stream)
+                                     stream=stream,
+                                     module_name=module_name,
+                                     num_batches=num_batches,
+                                     kron=kron,
+                                     no_save=no_save)
 
     @nvtx.range('update_inv')
     def update_inv(self, damping=None, kron=None):
