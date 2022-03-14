@@ -286,7 +286,7 @@ class NaturalGradient:
                                      no_save=no_save)
 
     @nvtx.range('update_inv')
-    def update_inv(self, damping=None, kron=None):
+    def update_inv(self, damping=None, module_name=None, kron=None, zero_curvature=False):
         if kron is None:
             kron = ['A', 'B']
         if damping is None:
@@ -295,16 +295,27 @@ class NaturalGradient:
             for name, module in self.named_modules_for(shape):
                 if not self.is_module_for_inv_and_precondition(module):
                     continue
+                if module_name is not None and name != module_name:
+                    continue
                 matrix = self._get_module_symmatrix(module, shape)
                 if matrix is None:
                     continue
                 if shape == SHAPE_KRON:
-                    matrix.update_inv(damping, calc_A_inv='A' in kron, calc_B_inv='B' in kron, tag=f'_{name}')
+                    matrix.update_inv(damping,
+                                      calc_A_inv='A' in kron,
+                                      calc_B_inv='B' in kron,
+                                      tag=f'_{name}' if self.record_mode else '')
                 else:
-                    matrix.update_inv(damping, tag=f'_{name}')
+                    matrix.update_inv(damping, tag=f'_{name}' if self.record_mode else '')
+                if zero_curvature:
+                    with torch.no_grad():
+                        self._get_module_fisher(module).mul_(0)
         fisher = self._get_full_fisher()
         if fisher is not None:
             fisher.update_inv(damping)
+            if zero_curvature:
+                with torch.no_grad():
+                    fisher.mul_(0)
 
     @nvtx.range('precondition')
     def precondition(self, vectors: ParamVector = None, grad_scale=1.):
