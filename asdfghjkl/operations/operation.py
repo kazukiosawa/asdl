@@ -489,29 +489,45 @@ class OperationContext:
     def cov_diag(self, module):
         return self.get_result(module, OP_COV_DIAG)
 
-    def calc_cov(self, module, shape=SHAPE_LAYER_WISE, clear_in_out=False, tag=''):
+    def calc_cov(self, module, shape=SHAPE_LAYER_WISE, kron=None, clear_in_out=False, num_batches=None, tag=''):
         operation, in_data, out_grads = self.load_op_in_out(module)
         if shape == SHAPE_KRON:
-            if in_data is not None:
+            if kron is None:
+                kron = ['A', 'B']
+            if 'A' in kron and in_data is not None:
+                max_len = len(in_data) if num_batches is None else min(len(in_data), num_batches)
                 with nvtx.range('cov_kron_A' + tag):
-                    for tensor in in_data:
+                    for i in range(max_len):
+                        if clear_in_out:
+                            tensor = in_data.pop(0)
+                        else:
+                            tensor = in_data[i]
                         A = operation.cov_kron_A(module, tensor)
                         self.accumulate_result(module, A, OP_COV_KRON, 'A')
-                if clear_in_out:
-                    self.clear_result(module, OP_SAVE_INPUTS)
-            if out_grads is not None:
+            if 'B' in kron and out_grads is not None:
+                max_len = len(out_grads) if num_batches is None else min(len(out_grads), num_batches)
                 with nvtx.range('cov_kron_B' + tag):
-                    for tensor in out_grads:
+                    for i in range(max_len):
+                        if clear_in_out:
+                            tensor = out_grads.pop(0)
+                        else:
+                            tensor = out_grads[i]
                         B = operation.cov_kron_B(module, tensor)
                         self.accumulate_result(module, B, OP_COV_KRON, 'B')
-                if clear_in_out:
-                    self.clear_result(module, OP_SAVE_OUTGRADS)
         else:
             if in_data is None or out_grads is None:
                 return
-            min_len = min(len(in_data), len(out_grads))
+            max_len = min(len(in_data), len(out_grads))
+            if num_batches is not None:
+                max_len = min(max_len, num_batches)
             with nvtx.range(f'cov_{shape}' + tag):
-                for tensor1, tensor2 in zip(in_data[:min_len], out_grads[:min_len]):
+                for i in range(max_len):
+                    if clear_in_out:
+                        tensor1 = in_data.pop(0)
+                        tensor2 = out_grads.pop(0)
+                    else:
+                        tensor1 = in_data[i]
+                        tensor2 = out_grads[i]
                     if shape == SHAPE_LAYER_WISE:
                         _, _, batch_g = operation.collect_batch_grads(tensor1, tensor2)
                         cov = torch.matmul(batch_g.T, batch_g)
@@ -525,9 +541,6 @@ class OperationContext:
                         if original_requires_grad(module, 'bias'):
                             diag_b = operation.cov_diag_bias(module, tensor2)
                             self.accumulate_result(module, diag_b, OP_COV_DIAG, 'bias')
-                    if clear_in_out:
-                        in_data.remove(tensor1)
-                        out_grads.remove(tensor2)
 
     def calc_cov_kron(self, module, clear_in_out=False):
         self.calc_cov(module, SHAPE_KRON, clear_in_out)
