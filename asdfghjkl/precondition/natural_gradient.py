@@ -55,7 +55,9 @@ class NaturalGradient:
         self.ema_decay = ema_decay
         if isinstance(fisher_shape, str):
             fisher_shape = [fisher_shape]
+        self.named_modules_for_curvature = []
         self.modules_for_curvature = []
+        self.shape_for = {}
         for name, module, shapes in module_wise_assignments(model,
                                                             *fisher_shape,
                                                             ignore_modules=ignore_modules,
@@ -63,6 +65,9 @@ class NaturalGradient:
             assert len(shapes) == 1, f'Each module has to be assigned one Fisher shape. ' \
                                      f'{name} is assigned {len(shapes)} shapes.'
             self.modules_for_curvature.append(module)
+            self.named_modules_for_curvature.append((name, module))
+            self.shape_for[module] = shapes[0]
+            self.shape_for[name] = shapes[0]
         self.ignore_modules = ignore_modules
         self._named_modules_for = {}
         if module_partitions is not None:
