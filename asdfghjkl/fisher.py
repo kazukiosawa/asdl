@@ -476,6 +476,14 @@ def fisher_esd(
     #     sigma_squared: Variance of gaussian kernel.
     #     overhead: Margin added to eigenvalue spectra.
     #     is_distributed: When set to True, distributed computation is supported.
+    # Examples::
+    #     >>> model = torch.nn.Linear(100, 10)
+    #     >>> x = torch.randn(32, 100)
+    #     >>> y = torch.tensor([0]*32, dtype=torch.long)
+    #     >>> density, grids = asdl.fisher_esd_for_cross_entropy(
+    #     ...                           model, asdl.FISHER_EXACT, asdl.SHAPE_FULL, inputs=x, targets=y)
+    #     >>> matplotlib.pyplot.semilogy(grids, density+1e-07)
+    #     >>> matplotlib.pyplot.show()
 
     def fvp_fn(vec: ParamVector) -> ParamVector:
         f = calculate_fisher(model,
