@@ -102,6 +102,14 @@ class Operation:
     def clear_results(self):
         self._op_results = {}
 
+    def add_op_name(self, op_name):
+        if op_name not in self._op_names:
+            self._op_names.add(op_name)
+
+    def remove_op_name(self, op_name):
+        while op_name in self._op_names:
+            self._op_names.remove(op_name)
+
     def forward_post_process(self, in_data: torch.Tensor, out_data: torch.Tensor):
         module = self._module
         op_names = self._op_names
@@ -353,6 +361,22 @@ class OperationContext:
 
     def clear_result(self, module, *keys):
         return self.get_operation(module).clear_result(*keys)
+
+    def turn_on_op(self, op_name):
+        for operation in self._operations.values():
+            operation.add_op_name(op_name)
+
+    def turn_off_op(self, op_name):
+        for operation in self._operations.values():
+            operation.remove_op_name(op_name)
+
+    def turn_on_save_inputs_outgrads(self):
+        self.turn_on_op(OP_SAVE_INPUTS)
+        self.turn_on_op(OP_SAVE_OUTGRADS)
+
+    def turn_off_save_inputs_outgrads(self):
+        self.turn_off_op(OP_SAVE_INPUTS)
+        self.turn_off_op(OP_SAVE_OUTGRADS)
 
     def calc_grads(self, scale=None):
         for module in self._operations.keys():
