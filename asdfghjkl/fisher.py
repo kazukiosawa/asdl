@@ -166,15 +166,20 @@ class FisherManager(MatrixManager):
     def _fisher_core(self, closure, outputs, targets):
         raise NotImplementedError
 
-    def accumulate(self, cxt, scale=1.):
+    def accumulate(self, cxt, scale=1., target_module=None, target_module_name=None):
         model = self._model
-        for module in model.modules():
+        for name, module in model.named_modules():
+            if target_module is not None and module != target_module:
+                continue
+            if target_module_name is not None and name != target_module_name:
+                continue
             # accumulate layer-wise fisher/fvp
             self._accumulate_fisher(module, cxt.cov_symmatrix(module, pop=True), scale)
             self._accumulate_fvp(module, cxt.cvp_paramvector(module, pop=True), scale)
-        # accumulate full fisher/fvp
-        self._accumulate_fisher(model, cxt.full_cov_symmatrix(model, pop=True), scale)
-        self._accumulate_fvp(model, cxt.full_cvp_paramvector(model, pop=True), scale)
+        if target_module is None or model == target_module:
+            # accumulate full fisher/fvp
+            self._accumulate_fisher(model, cxt.full_cov_symmatrix(model, pop=True), scale)
+            self._accumulate_fvp(model, cxt.full_cvp_paramvector(model, pop=True), scale)
 
     def _accumulate_fisher(self, module: nn.Module, new_fisher, scale=1., fvp=False):
         if new_fisher is None:
