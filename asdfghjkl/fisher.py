@@ -240,6 +240,7 @@ class FisherManager(MatrixManager):
                       *keys,
                       all_reduce=True,
                       with_grad=False,
+                      dst=0,
                       group: dist.ProcessGroup = None):
         assert dist.is_initialized()
         tensor_list = []
@@ -256,7 +257,7 @@ class FisherManager(MatrixManager):
             if all_reduce:
                 dist.all_reduce(tensor, group=group)
             else:
-                dist.reduce(tensor, dst=0, group=group)
+                dist.reduce(tensor, dst=dst, group=group)
 
     def reduce_fvp(self, fisher_shape, is_master=True, all_reduce=False):
         v = self.load_fvp(fisher_shape)
