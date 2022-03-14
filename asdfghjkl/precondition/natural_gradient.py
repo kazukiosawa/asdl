@@ -361,11 +361,14 @@ class NaturalGradient:
             rank = dist.get_rank(self.sync_group)
             return module in module_partitions[rank]
 
-    def sync_curvature(self, *keys, with_grad=False, enabled=True):
+    def sync_curvature(self, module_name=None, kron=None, diag=None, with_grad=False, enabled=True):
         if not enabled:
             return
-        self.reduce_scatter_curvature(*keys, with_grad=with_grad)
-        self.all_reduce_undivided_curvature(*keys, with_grad=with_grad)
+        if module_name is not None:
+            self.reduce_curvature(module_name, kron=kron, diag=diag, with_grad=with_grad)
+        else:
+            self.reduce_scatter_curvature(kron=kron, diag=diag, with_grad=with_grad)
+        self.all_reduce_undivided_curvature(module_name=module_name, with_grad=with_grad)
 
     def sync_grad_pre_precondition(self, enabled=True):
         if not enabled:
@@ -380,13 +383,68 @@ class NaturalGradient:
         self.all_reduce_no_curvature_grad()
 
     @nvtx.range('reduce_scatter_curvature')
-    def reduce_scatter_curvature(self, *keys, with_grad=False):
+    def reduce_scatter_curvature(self, kron=None, diag=None, with_grad=False):
         module_partitions = self.module_partitions
         assert module_partitions is not None, 'module_partitions is not specified.'
-        self.fisher_manager.reduce_scatter_fisher(module_partitions,
+        for shape in _module_level_shapes:
+            keys_list = self._keys_list_from_shape(shape, kron=kron, diag=diag)
+            for keys in keys_list:
+                self.fisher_manager.reduce_scatter_fisher(module_partitions,
+                                                          *keys,
+                                                          with_grad=with_grad,
+                                                          group=self.sync_group)
+
+    @nvtx.range('reduce_curvature')
+    def reduce_curvature(self, module_name, kron=None, diag=None, with_grad=False):
+        module_partitions = self.module_partitions
+        assert module_partitions is not None, 'module_partitions is not specified.'
+        module = next(m for name, m in self.named_modules_for_curvature if name == module_name)
+        dst = next(i for i, partition in enumerate(module_partitions) if module in partition)
+        keys_list = self._keys_list_from_shape(self.shape_for[module], kron=kron, diag=diag)
+        for keys in keys_list:
+            self.fisher_manager.reduce_fisher([module],
+                                              *keys,
+                                              all_reduce=False,
+                                              dst=dst,
+                                              with_grad=with_grad,
+                                              group=self.sync_group)
+
+    @nvtx.range('all_reduce_undivided_curvature')
+    def all_reduce_undivided_curvature(self, module_name=None, kron=None, diag=None, with_grad=False):
+        modules = []
+        for name, module in self.named_modules_for_curvature:
+            if module in self.partitioned_modules:
+                continue
+            if module_name is not None and name != module_name:
+                continue
+            modules.append(module)
+        for shape in _module_level_shapes:
+            keys_list = self._keys_list_from_shape(shape, kron=kron, diag=diag)
+            for keys in keys_list:
+                self.fisher_manager.reduce_fisher(modules,
                                                   *keys,
+                                                  all_reduce=True,
                                                   with_grad=with_grad,
                                                   group=self.sync_group)
+
+    @staticmethod
+    def _keys_list_from_shape(shape, kron=None, diag=None):
+        if shape == SHAPE_FULL:
+            return [['data']]
+        elif shape == SHAPE_LAYER_WISE:
+            return [['data']]
+        elif shape == SHAPE_KRON:
+            if kron is None:
+                kron = ['A', 'B']
+            assert all(A_or_B in ['A', 'B'] for A_or_B in kron)
+            return [['kron', A_or_B] for A_or_B in kron]
+        elif shape == SHAPE_UNIT_WISE:
+            return [['unit', 'data']]
+        elif shape == SHAPE_DIAG:
+            if diag is None:
+                diag = ['weight', 'bias']
+            assert all(w_or_b in ['weight', 'bias'] for w_or_b in diag)
+            return [['diag', w_or_b] for w_or_b in diag]
 
     @nvtx.range('reduce_scatter_grad')
     def reduce_scatter_grad(self):
@@ -420,15 +478,6 @@ class NaturalGradient:
                 dist.all_gather(tensor_list, tensor_list[rank], group=group)
                 for j in range(world_size):
                     vector_to_parameters(tensor_list[j], grads_list[j])
-
-    @nvtx.range('all_reduce_undivided_curvature')
-    def all_reduce_undivided_curvature(self, *keys, all_reduce=True, with_grad=False):
-        modules = [m for m in self.modules_for_curvature if m not in self.partitioned_modules]
-        self.fisher_manager.reduce_fisher(modules,
-                                          *keys,
-                                          all_reduce=all_reduce,
-                                          with_grad=with_grad,
-                                          group=self.sync_group)
 
     @nvtx.range('all_reduce_undivided_grad')
     def all_reduce_undivided_grad(self):
