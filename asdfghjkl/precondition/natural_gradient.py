@@ -42,6 +42,7 @@ class NaturalGradient:
         ignore_modules=None,
         sync_group: dist.ProcessGroup = None,
         module_partitions: List[List[nn.Module]] = None,
+        record_mode=False,
         **kwargs
     ):
         from torch.nn.parallel import DistributedDataParallel as DDP
@@ -79,6 +80,7 @@ class NaturalGradient:
         self.fisher_manager = fisher_cls(model, **kwargs)
 
         self.sync_group = sync_group
+        self.record_mode = record_mode
 
     def named_modules_for(self, shape):
         if shape not in self._named_modules_for:
@@ -481,6 +483,7 @@ class EmpiricalNaturalGradient(NaturalGradient):
                  ignore_modules=None,
                  sync_group: dist.ProcessGroup = None,
                  module_partitions: List[List[nn.Module]] = None,
+                 record_mode=False,
                  **kwargs):
         super().__init__(model,
                          fisher_type=FISHER_EMP,
@@ -490,6 +493,7 @@ class EmpiricalNaturalGradient(NaturalGradient):
                          ignore_modules=ignore_modules,
                          sync_group=sync_group,
                          module_partitions=module_partitions,
+                         record_mode=record_mode,
                          **kwargs)
 
 
