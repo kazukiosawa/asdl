@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, List
 
 import torch
 import torch.nn as nn
@@ -468,7 +468,7 @@ class OperationContext:
         cvp = torch.einsum('ni,n->i', bg, bgtv)
         self.accumulate_result(module, cvp, OP_FULL_CVP)
 
-    def load_op_in_out(self, module):
+    def load_op_in_out(self, module) -> (Operation, List[torch.Tensor], List[torch.Tensor]):
         operation = self.get_operation(module)
         in_data = self.in_data(module)
         out_grads = self.out_grads(module)
