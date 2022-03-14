@@ -43,6 +43,7 @@ class NaturalGradient:
         sync_group: dist.ProcessGroup = None,
         module_partitions: List[List[nn.Module]] = None,
         record_mode=False,
+        nvtx_tag='',
         **kwargs
     ):
         from torch.nn.parallel import DistributedDataParallel as DDP
@@ -86,6 +87,7 @@ class NaturalGradient:
 
         self.sync_group = sync_group
         self.record_mode = record_mode
+        self._nvtx_tag = nvtx_tag
 
     def named_modules_for(self, shape):
         if shape not in self._named_modules_for:
@@ -152,6 +154,12 @@ class NaturalGradient:
         if fisher is not None:
             fisher.mul_(scale)
 
+    def nvtx_tag(self, keyword):
+        if self.record_mode:
+            return f':{keyword}' + self._nvtx_tag
+        else:
+            return '' + self._nvtx_tag
+
     @nvtx.range('update_curvature')
     def update_curvature(self,
                          inputs=None,
@@ -198,7 +206,7 @@ class NaturalGradient:
                                          shape,
                                          clear_in_out=True,
                                          kron=kron,
-                                         tag=f'_{name}' if self.record_mode else '',
+                                         tag=self.nvtx_tag(name),
                                          num_batches=num_batches)
                             if not no_save:
                                 self.save_curvature(cxt, scale, module=module)
@@ -304,9 +312,9 @@ class NaturalGradient:
                     matrix.update_inv(damping,
                                       calc_A_inv='A' in kron,
                                       calc_B_inv='B' in kron,
-                                      tag=f'_{name}' if self.record_mode else '')
+                                      tag=self.nvtx_tag(name))
                 else:
-                    matrix.update_inv(damping, tag=f'_{name}' if self.record_mode else '')
+                    matrix.update_inv(damping, tag=self.nvtx_tag(name))
                 if zero_curvature:
                     with torch.no_grad():
                         self._get_module_fisher(module).mul_(0)
@@ -581,6 +589,7 @@ class EmpiricalNaturalGradient(NaturalGradient):
                  sync_group: dist.ProcessGroup = None,
                  module_partitions: List[List[nn.Module]] = None,
                  record_mode=False,
+                 nvtx_tag='',
                  **kwargs):
         super().__init__(model,
                          fisher_type=FISHER_EMP,
@@ -591,6 +600,7 @@ class EmpiricalNaturalGradient(NaturalGradient):
                          sync_group=sync_group,
                          module_partitions=module_partitions,
                          record_mode=record_mode,
+                         nvtx_tag=nvtx_tag,
                          **kwargs)
 
 
