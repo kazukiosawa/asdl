@@ -511,7 +511,8 @@ class NaturalGradient:
 
     def _all_reduce_grad(self, module: nn.Module):
         grads = [p.grad for p in module.parameters() if p.grad is not None]
-        assert len(grads) > 0
+        if len(grads) == 0:
+            return
         packed_tensor = parameters_to_vector(grads)
         dist.all_reduce(packed_tensor, group=self.sync_group)
         vector_to_parameters(packed_tensor, grads)
