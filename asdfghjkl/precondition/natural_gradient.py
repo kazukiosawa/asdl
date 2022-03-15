@@ -328,7 +328,13 @@ class NaturalGradient:
 
                 if zero_curvature:
                     with torch.no_grad():
-                        self._get_module_fisher(module).mul_(0)
+                        if shape == SHAPE_KRON:
+                            if 'A' in kron:
+                                matrix.A.mul_(0)
+                            if 'B' in kron:
+                                matrix.B.mul_(0)
+                        else:
+                            matrix.mul_(0)
 
                 nvtx.range_pop()
 
