@@ -306,23 +306,32 @@ class NaturalGradient:
             damping = self.damping
         for shape in _module_level_shapes:
             for name, module in self.named_modules_for(shape):
-                if not self.is_module_for_inv_and_precondition(module):
-                    continue
                 if module_name is not None and name != module_name:
                     continue
                 matrix = self._get_module_symmatrix(module, shape)
                 if matrix is None:
                     continue
+
+                event = f'inv_{shape}'
                 if shape == SHAPE_KRON:
-                    matrix.update_inv(damping,
-                                      calc_A_inv='A' in kron,
-                                      calc_B_inv='B' in kron,
-                                      tag=self.nvtx_tag(name))
-                else:
-                    matrix.update_inv(damping, tag=self.nvtx_tag(name))
+                    for A_or_B in kron:
+                        event += f'_{A_or_B}'
+                nvtx.range_push(event + self.nvtx_tag(name))
+
+                if self.is_module_for_inv_and_precondition(module):
+                    if shape == SHAPE_KRON:
+                        matrix.update_inv(damping,
+                                          calc_A_inv='A' in kron,
+                                          calc_B_inv='B' in kron)
+                    else:
+                        matrix.update_inv(damping)
+
                 if zero_curvature:
                     with torch.no_grad():
                         self._get_module_fisher(module).mul_(0)
+
+                nvtx.range_pop()
+
         fisher = self._get_full_fisher()
         if fisher is not None:
             fisher.update_inv(damping)
@@ -385,6 +394,7 @@ class NaturalGradient:
             rank = dist.get_rank(self.sync_group)
             return module in module_partitions[rank]
 
+    @nvtx.range('sync_curvature')
     def sync_curvature(self, module_name=None, kron=None, diag=None, with_grad=False, enabled=True, async_op=False):
         if not enabled:
             return
