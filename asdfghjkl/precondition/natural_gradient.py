@@ -89,6 +89,7 @@ class NaturalGradient:
         self.record_mode = record_mode
         self._nvtx_tag = nvtx_tag
 
+        self.curvature_sync_handles = []
         self.grad_sync_handles = []
         self.grads = []
         self.packed_grads = []
@@ -394,7 +395,7 @@ class NaturalGradient:
             handles += self.reduce_scatter_curvature(kron=kron, diag=diag, with_grad=with_grad)
         handles += self.all_reduce_undivided_curvature(module_name=module_name, with_grad=with_grad)
         if async_op:
-            return handles
+            self.curvature_sync_handles += handles
         else:
             for handle in handles:
                 handle.wait()
@@ -550,6 +551,10 @@ class NaturalGradient:
             self.packed_grads.append(packed_tensor)
         else:
             vector_to_parameters(packed_tensor, grads)
+
+    def wait_all_curvature_sync(self):
+        for _ in range(len(self.curvature_sync_handles)):
+            self.curvature_sync_handles.pop(0).wait()
 
     def wait_all_grad_sync(self):
         for _ in range(len(self.grad_sync_handles)):
