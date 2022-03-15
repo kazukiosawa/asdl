@@ -89,6 +89,10 @@ class NaturalGradient:
         self.record_mode = record_mode
         self._nvtx_tag = nvtx_tag
 
+        self.grad_sync_handles = []
+        self.grads = []
+        self.packed_grads = []
+
     def named_modules_for(self, shape):
         if shape not in self._named_modules_for:
             self._named_modules_for[shape] = list(modules_to_assign(self.model,
@@ -380,38 +384,47 @@ class NaturalGradient:
             rank = dist.get_rank(self.sync_group)
             return module in module_partitions[rank]
 
-    def sync_curvature(self, module_name=None, kron=None, diag=None, with_grad=False, enabled=True):
+    def sync_curvature(self, module_name=None, kron=None, diag=None, with_grad=False, enabled=True, async_op=False):
         if not enabled:
             return
+        handles = []
         if module_name is not None:
-            self.reduce_curvature(module_name, kron=kron, diag=diag, with_grad=with_grad)
+            handles += self.reduce_curvature(module_name, kron=kron, diag=diag, with_grad=with_grad)
         else:
-            self.reduce_scatter_curvature(kron=kron, diag=diag, with_grad=with_grad)
-        self.all_reduce_undivided_curvature(module_name=module_name, with_grad=with_grad)
+            handles += self.reduce_scatter_curvature(kron=kron, diag=diag, with_grad=with_grad)
+        handles += self.all_reduce_undivided_curvature(module_name=module_name, with_grad=with_grad)
+        if async_op:
+            return handles
+        else:
+            for handle in handles:
+                handle.wait()
 
-    def sync_grad_pre_precondition(self, enabled=True):
+    def sync_grad_pre_precondition(self, enabled=True, async_op=False):
         if not enabled:
             return
-        self.reduce_scatter_grad()
-        self.all_reduce_undivided_grad()
+        self.reduce_scatter_grad(async_op=async_op)
+        self.all_reduce_undivided_grad(async_op=async_op)
 
-    def sync_grad_post_precondition(self, enabled=True):
+    def sync_grad_post_precondition(self, enabled=True, async_op=False):
         if not enabled:
             return
-        self.all_gather_grad()
-        self.all_reduce_no_curvature_grad()
+        self.all_gather_grad(async_op=async_op)
+        self.all_reduce_no_curvature_grad(async_op=async_op)
 
     @nvtx.range('reduce_scatter_curvature')
     def reduce_scatter_curvature(self, kron=None, diag=None, with_grad=False):
         module_partitions = self.module_partitions
         assert module_partitions is not None, 'module_partitions is not specified.'
+        handles = []
         for shape in _module_level_shapes:
             keys_list = self._keys_list_from_shape(shape, kron=kron, diag=diag)
             for keys in keys_list:
-                self.fisher_manager.reduce_scatter_fisher(module_partitions,
-                                                          *keys,
-                                                          with_grad=with_grad,
-                                                          group=self.sync_group)
+                handles += self.fisher_manager.reduce_scatter_fisher(module_partitions,
+                                                                     *keys,
+                                                                     with_grad=with_grad,
+                                                                     group=self.sync_group,
+                                                                     async_op=True)
+        return handles
 
     @nvtx.range('reduce_curvature')
     def reduce_curvature(self, module_name, kron=None, diag=None, with_grad=False):
@@ -420,13 +433,16 @@ class NaturalGradient:
         module = next(m for name, m in self.named_modules_for_curvature if name == module_name)
         dst = next(i for i, partition in enumerate(module_partitions) if module in partition)
         keys_list = self._keys_list_from_shape(self.shape_for[module], kron=kron, diag=diag)
+        handles = []
         for keys in keys_list:
-            self.fisher_manager.reduce_fisher([module],
-                                              *keys,
-                                              all_reduce=False,
-                                              dst=dst,
-                                              with_grad=with_grad,
-                                              group=self.sync_group)
+            handles += self.fisher_manager.reduce_fisher([module],
+                                                         *keys,
+                                                         all_reduce=False,
+                                                         dst=dst,
+                                                         with_grad=with_grad,
+                                                         group=self.sync_group,
+                                                         async_op=True)
+        return handles
 
     @nvtx.range('all_reduce_undivided_curvature')
     def all_reduce_undivided_curvature(self, module_name=None, kron=None, diag=None, with_grad=False):
@@ -437,14 +453,17 @@ class NaturalGradient:
             if module_name is not None and name != module_name:
                 continue
             modules.append(module)
+        handles = []
         for shape in _module_level_shapes:
             keys_list = self._keys_list_from_shape(shape, kron=kron, diag=diag)
             for keys in keys_list:
-                self.fisher_manager.reduce_fisher(modules,
-                                                  *keys,
-                                                  all_reduce=True,
-                                                  with_grad=with_grad,
-                                                  group=self.sync_group)
+                handles += self.fisher_manager.reduce_fisher(modules,
+                                                             *keys,
+                                                             all_reduce=True,
+                                                             with_grad=with_grad,
+                                                             group=self.sync_group,
+                                                             async_op=True)
+        return handles
 
     @staticmethod
     def _keys_list_from_shape(shape, kron=None, diag=None):
@@ -466,14 +485,14 @@ class NaturalGradient:
             return [['diag', w_or_b] for w_or_b in diag]
 
     @nvtx.range('reduce_scatter_grad')
-    def reduce_scatter_grad(self):
-        self._scatter_or_gather_grad('scatter')
+    def reduce_scatter_grad(self, async_op=False):
+        self._scatter_or_gather_grad('scatter', async_op=async_op)
 
     @nvtx.range('all_gather_grad')
-    def all_gather_grad(self):
-        self._scatter_or_gather_grad('gather')
+    def all_gather_grad(self, async_op=False):
+        self._scatter_or_gather_grad('gather', async_op=async_op)
 
-    def _scatter_or_gather_grad(self, scatter_or_gather):
+    def _scatter_or_gather_grad(self, scatter_or_gather, async_op=False):
         assert dist.is_initialized()
         group = self.sync_group
         world_size = dist.get_world_size(group)
@@ -491,31 +510,58 @@ class NaturalGradient:
                 grads_list.append(grads)
                 tensor_list.append(parameters_to_vector(grads))
             if scatter_or_gather == 'scatter':
-                dist.reduce_scatter(tensor_list[rank], tensor_list, group=group)
-                vector_to_parameters(tensor_list[rank], grads_list[rank])
+                handle = dist.reduce_scatter(tensor_list[rank], tensor_list, group=group, async_op=async_op)
+                if async_op:
+                    self.grad_sync_handles.append(handle)
+                    self.grads.append(grads_list[rank])
+                    self.packed_grads.append(tensor_list[rank])
+                else:
+                    vector_to_parameters(tensor_list[rank], grads_list[rank])
             else:
-                dist.all_gather(tensor_list, tensor_list[rank], group=group)
-                for j in range(world_size):
-                    vector_to_parameters(tensor_list[j], grads_list[j])
+                handle = dist.all_gather(tensor_list, tensor_list[rank], group=group, async_op=async_op)
+                if async_op:
+                    self.grad_sync_handles.append(handle)
+                    self.grads.append([grads_list[j] for j in range(world_size)])
+                    self.packed_grads.append([tensor_list[j] for j in range(world_size)])
+                else:
+                    for j in range(world_size):
+                        vector_to_parameters(tensor_list[j], grads_list[j])
 
     @nvtx.range('all_reduce_undivided_grad')
-    def all_reduce_undivided_grad(self):
+    def all_reduce_undivided_grad(self, async_op=False):
         assert dist.is_initialized()
         module_list = nn.ModuleList([m for m in self.modules_for_curvature if m not in self.partitioned_modules])
-        self._all_reduce_grad(module_list)
+        self._all_reduce_grad(module_list, async_op=async_op)
 
     @nvtx.range('all_reduce_no_curvature_grad')
-    def all_reduce_no_curvature_grad(self):
+    def all_reduce_no_curvature_grad(self, async_op=False):
         module_list = nn.ModuleList([m for m in self.model.modules() if m not in self.modules_for_curvature])
-        self._all_reduce_grad(module_list)
+        self._all_reduce_grad(module_list, async_op=async_op)
 
-    def _all_reduce_grad(self, module: nn.Module):
+    def _all_reduce_grad(self, module: nn.Module, async_op=False):
         grads = [p.grad for p in module.parameters() if p.grad is not None]
         if len(grads) == 0:
             return
         packed_tensor = parameters_to_vector(grads)
-        dist.all_reduce(packed_tensor, group=self.sync_group)
-        vector_to_parameters(packed_tensor, grads)
+        handle = dist.all_reduce(packed_tensor, group=self.sync_group, async_op=async_op)
+        if async_op:
+            self.grad_sync_handles.append(handle)
+            self.grads.append(grads)
+            self.packed_grads.append(packed_tensor)
+        else:
+            vector_to_parameters(packed_tensor, grads)
+
+    def wait_all_grad_sync(self):
+        for _ in range(len(self.grad_sync_handles)):
+            self.grad_sync_handles.pop(0).wait()
+            grads = self.grads.pop(0)
+            packed_grads = self.packed_grads.pop(0)
+            if isinstance(grads, list) and isinstance(grads[0], list):
+                assert isinstance(packed_grads, list)
+                for p, g in zip(packed_grads, grads):
+                    vector_to_parameters(p, g)
+            else:
+                vector_to_parameters(packed_grads, grads)
 
 
 class FullNaturalGradient(NaturalGradient):

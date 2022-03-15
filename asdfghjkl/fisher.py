@@ -212,7 +212,8 @@ class FisherManager(MatrixManager):
                               module_partitions: List[List[torch.nn.Module]],
                               *keys,
                               with_grad=False,
-                              group: dist.ProcessGroup = None):
+                              group: dist.ProcessGroup = None,
+                              async_op=False):
         assert dist.is_initialized()
         assert torch.cuda.is_available()
         assert dist.get_backend(group) == dist.Backend.NCCL
@@ -235,10 +236,12 @@ class FisherManager(MatrixManager):
             tensor_partitions.append(tensor_list)
         num_tensors_per_partition = len(tensor_partitions[0])
         assert all(len(tensor_partitions[i]) == num_tensors_per_partition for i in range(1, world_size))
+        handles = []
         for i in range(num_tensors_per_partition):
             input_list = [tensor_list[i] for tensor_list in tensor_partitions]
             output = input_list[dist.get_rank(group)]
-            dist.reduce_scatter(output, input_list, group=group)
+            handles.append(dist.reduce_scatter(output, input_list, group=group, async_op=async_op))
+        return handles
 
     def reduce_fisher(self,
                       modules,
@@ -246,7 +249,8 @@ class FisherManager(MatrixManager):
                       all_reduce=True,
                       with_grad=False,
                       dst=0,
-                      group: dist.ProcessGroup = None):
+                      group: dist.ProcessGroup = None,
+                      async_op=False):
         assert dist.is_initialized()
         tensor_list = []
         for module in modules:
@@ -258,11 +262,13 @@ class FisherManager(MatrixManager):
                 for p in module.parameters():
                     if p.requires_grad and p.grad is not None:
                         tensor_list.append(p.grad)
+        handles = []
         for tensor in tensor_list:
             if all_reduce:
-                dist.all_reduce(tensor, group=group)
+                handles.append(dist.all_reduce(tensor, group=group, async_op=async_op))
             else:
-                dist.reduce(tensor, dst=dst, group=group)
+                handles.append(dist.reduce(tensor, dst=dst, group=group, async_op=async_op))
+        return handles
 
     def reduce_fvp(self, fisher_shape, is_master=True, all_reduce=False):
         v = self.load_fvp(fisher_shape)
