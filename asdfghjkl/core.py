@@ -58,7 +58,11 @@ def extend(model,
             if (not has_bwd_op_with_inputs) and has_bwd_op:
                 def backward_hook(_module, unused, out_grads):
                     with stream_cxt:
-                        cxt.call_operations_in_backward(_module, None, None, out_grads[0].detach())
+                        try:
+                            cxt.call_operations_in_backward(_module, None, None, out_grads[0].detach())
+                        except NameError:
+                            # context resource is already released.
+                            pass
 
                 handles.append(module.register_full_backward_hook(backward_hook))
             cxt.register_operation(module, op_class(module, op_names, model_for_kernel=model))
