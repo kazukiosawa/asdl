@@ -41,6 +41,7 @@ class NaturalGradient:
         ema_decay=_invalid_ema_decay,
         ignore_modules=None,
         sync_group: dist.ProcessGroup = None,
+        sync_group_ranks: List[int] = None,
         module_partitions: List[List[nn.Module]] = None,
         record_mode=False,
         nvtx_tag='',
@@ -75,6 +76,7 @@ class NaturalGradient:
             assert dist.is_initialized(), 'torch.distributed has to be initialized ' \
                                           'when module_partitions is specified.'
             world_size = dist.get_world_size(sync_group)
+            assert len(module_partitions) == world_size
             assert all(len(module_partitions[0]) == len(module_partitions[i]) for i in range(1, world_size))
             self.partitioned_modules = [m for partition in module_partitions for m in partition]
         else:
@@ -85,7 +87,11 @@ class NaturalGradient:
         fisher_cls = get_fisher_class(fisher_type, loss_type)
         self.fisher_manager = fisher_cls(model, **kwargs)
 
+        if sync_group is not None:
+            assert sync_group_ranks is not None
+            assert sync_group.size() == len(sync_group_ranks)
         self.sync_group = sync_group
+        self.sync_group_ranks = sync_group_ranks
         self.record_mode = record_mode
         self._nvtx_tag = nvtx_tag
 
@@ -405,11 +411,12 @@ class NaturalGradient:
         if not enabled:
             return
         handles = []
-        if module_name is not None:
-            handles += self.reduce_curvature(module_name, kron=kron, diag=diag, with_grad=with_grad)
-        else:
-            handles += self.reduce_scatter_curvature(kron=kron, diag=diag, with_grad=with_grad)
-        handles += self.all_reduce_undivided_curvature(module_name=module_name, with_grad=with_grad)
+        if self.module_partitions is not None:
+            if module_name is not None:
+                handles += self.reduce_curvature(module_name, kron=kron, diag=diag, with_grad=with_grad)
+            else:
+                handles += self.reduce_scatter_curvature(kron=kron, diag=diag, with_grad=with_grad)
+        handles += self.all_reduce_undivided_curvature(module_name=module_name, kron=kron, diag=diag, with_grad=with_grad)
         if async_op:
             self.curvature_sync_handles += handles
         else:
@@ -419,13 +426,15 @@ class NaturalGradient:
     def sync_grad_pre_precondition(self, enabled=True, async_op=False):
         if not enabled:
             return
-        self.reduce_scatter_grad(async_op=async_op)
+        if self.module_partitions is not None:
+            self.reduce_scatter_grad(async_op=async_op)
         self.all_reduce_undivided_grad(async_op=async_op)
 
     def sync_grad_post_precondition(self, enabled=True, async_op=False):
         if not enabled:
             return
-        self.all_gather_grad(async_op=async_op)
+        if self.module_partitions is not None:
+            self.all_gather_grad(async_op=async_op)
         self.all_reduce_no_curvature_grad(async_op=async_op)
 
     @nvtx.range('reduce_scatter_curvature')
@@ -447,8 +456,13 @@ class NaturalGradient:
     def reduce_curvature(self, module_name, kron=None, diag=None, with_grad=False):
         module_partitions = self.module_partitions
         assert module_partitions is not None, 'module_partitions is not specified.'
-        module = next(m for name, m in self.named_modules_for_curvature if name == module_name)
-        dst = next(i for i, partition in enumerate(module_partitions) if module in partition)
+        try:
+            module = next(m for name, m in self.named_modules_for_curvature if name == module_name)
+            dst = next(i for i, partition in enumerate(module_partitions) if module in partition)
+            if self.sync_group is not None:
+                dst = self.sync_group_ranks[dst]
+        except StopIteration:
+            return []
         keys_list = self._keys_list_from_shape(self.shape_for[module], kron=kron, diag=diag)
         handles = []
         for keys in keys_list:
