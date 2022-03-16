@@ -245,7 +245,7 @@ class SymMatrix:
         return pointer
 
     def update_inv(self, damping=_default_damping):
-        if self.has_data:
+        if self.has_data and not torch.all(self.data == 0):
             self.inv = cholesky_inv(self.data, damping)
         if self.has_kron:
             self.kron.update_inv(damping)
@@ -428,10 +428,12 @@ class Kron:
 
         if calc_A_inv:
             assert self.has_A
-            self.A_inv = cholesky_inv(self.A, damping_A)
+            if not torch.all(self.A == 0):
+                self.A_inv = cholesky_inv(self.A, damping_A)
         if calc_B_inv:
             assert self.has_B
-            self.B_inv = cholesky_inv(self.B, damping_B)
+            if not torch.all(self.B == 0):
+                self.B_inv = cholesky_inv(self.B, damping_B)
 
     def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
         mat_A = self.A_inv if use_inv else self.A
@@ -558,9 +560,11 @@ class Diag:
 
     def update_inv(self, damping=_default_damping):
         if self.has_weight:
-            self.weight_inv = 1 / (self.weight + damping)
+            if not torch.all(self.weight == 0):
+                self.weight_inv = 1 / (self.weight + damping)
         if self.has_bias:
-            self.bias_inv = 1 / (self.bias + damping)
+            if not torch.all(self.bias == 0):
+                self.bias_inv = 1 / (self.bias + damping)
 
     def mvp(self, vec_weight=None, vec_bias=None, use_inv=False, inplace=False):
         assert vec_weight is not None or vec_bias is not None
@@ -647,10 +651,11 @@ class UnitWise:
     def update_inv(self, damping=_default_damping):
         assert self.has_data
         data = self.data
-        diag = torch.diagonal(data, dim1=1, dim2=2)
-        diag += damping
-        self.inv = torch.inverse(data)
-        diag -= damping
+        if not torch.all(data == 0):
+            diag = torch.diagonal(data, dim1=1, dim2=2)
+            diag += damping
+            self.inv = torch.inverse(data)
+            diag -= damping
 
     def mvp(self, vec_weight, vec_bias, use_inv=False, inplace=False):
         mat = self.inv if use_inv else self.data  # (f, 2, 2) or (f_out, f_in+1, f_in+1)
