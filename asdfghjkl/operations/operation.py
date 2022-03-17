@@ -556,8 +556,8 @@ class OperationContext:
                       unit_data=self.get_result(module, OP_COV_UNIT_WISE, pop=pop))
         cov_kron = self.get_result(module, OP_COV_KRON, pop=pop)
         if cov_kron is not None:
-            kwargs['kron_A'] = cov_kron.get('A', None)
-            kwargs['kron_B'] = cov_kron.get('B', None)
+            kwargs['kron_A'] = cov_kron.pop('A', None)
+            kwargs['kron_B'] = cov_kron.pop('B', None)
         cov_diag = self.get_result(module, OP_COV_DIAG, pop=pop)
         if cov_diag is not None:
             if original_requires_grad(module, 'weight'):
