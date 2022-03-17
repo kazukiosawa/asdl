@@ -82,6 +82,7 @@ class NaturalGradient:
         else:
             self.partitioned_modules = []
         self.module_partitions = module_partitions
+        self.num_modules_per_partition = len(module_partitions[0])
 
         self.fisher_shape = fisher_shape
         fisher_cls = get_fisher_class(fisher_type, loss_type)
@@ -305,15 +306,24 @@ class NaturalGradient:
                                      no_save=no_save)
 
     @nvtx.range('update_inv')
-    def update_inv(self, damping=None, module_name=None, kron=None, zero_curvature=False):
+    def update_inv(self, damping=None, module_name=None, kron=None, zero_curvature=False, partition_aware=False):
         if kron is None:
             kron = ['A', 'B']
         if damping is None:
             damping = self.damping
+
         for shape in _module_level_shapes:
             for name, module in self.named_modules_for(shape):
-                if module_name is not None and name != module_name:
-                    continue
+                if module_name is not None:
+                    if name != module_name:
+                        continue
+                    if partition_aware and module in self.partitioned_modules:
+                        partition_id = self.partitioned_modules.index(module) // self.num_modules_per_partition
+                        module_id_in_partition = self.module_partitions[partition_id].index(module)
+                        rank_in_group = dist.get_rank(self.sync_group)
+                        modified_partition_id = (partition_id + rank_in_group) % len(self.module_partitions)
+                        module = self.module_partitions[modified_partition_id][module_id_in_partition]
+
                 matrix = self._get_module_symmatrix(module, shape)
                 if matrix is None:
                     continue
@@ -343,6 +353,9 @@ class NaturalGradient:
                             matrix.mul_(0)
 
                 nvtx.range_pop()
+
+                if module_name is not None:
+                    break
 
         fisher = self._get_full_fisher()
         if fisher is not None:
