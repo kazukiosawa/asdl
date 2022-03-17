@@ -125,7 +125,7 @@ class FisherManager(MatrixManager):
 
                 y = model(x)
                 self._fisher_core(closure, y, t)
-                self.accumulate(cxt, scale)
+                self.accumulate(cxt, scale, fvp=fvp)
 
             if calc_emp_loss_grad_after_fisher:
                 assert t is not None
@@ -166,7 +166,7 @@ class FisherManager(MatrixManager):
     def _fisher_core(self, closure, outputs, targets):
         raise NotImplementedError
 
-    def accumulate(self, cxt, scale=1., target_module=None, target_module_name=None):
+    def accumulate(self, cxt, scale=1., target_module=None, target_module_name=None, fvp=False):
         model = self._model
         for name, module in model.named_modules():
             if target_module is not None and module != target_module:
@@ -174,12 +174,22 @@ class FisherManager(MatrixManager):
             if target_module_name is not None and name != target_module_name:
                 continue
             # accumulate layer-wise fisher/fvp
-            self._accumulate_fisher(module, cxt.cov_symmatrix(module, pop=True), scale)
-            self._accumulate_fvp(module, cxt.cvp_paramvector(module, pop=True), scale)
-        if target_module is None or model == target_module:
+            if fvp:
+                self._accumulate_fvp(module, cxt.cvp_paramvector(module, pop=True), scale)
+            else:
+                self._accumulate_fisher(module, cxt.cov_symmatrix(module, pop=True), scale)
+            if target_module is not None:
+                break
+            if target_module_name is not None:
+                target_module = module
+                break
+
+        if target_module is None or target_module == model:
             # accumulate full fisher/fvp
-            self._accumulate_fisher(model, cxt.full_cov_symmatrix(model, pop=True), scale)
-            self._accumulate_fvp(model, cxt.full_cvp_paramvector(model, pop=True), scale)
+            if fvp:
+                self._accumulate_fvp(model, cxt.full_cvp_paramvector(model, pop=True), scale)
+            else:
+                self._accumulate_fisher(model, cxt.full_cov_symmatrix(model, pop=True), scale)
 
     def _accumulate_fisher(self, module: nn.Module, new_fisher, scale=1., fvp=False):
         if new_fisher is None:
