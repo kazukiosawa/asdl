@@ -341,6 +341,69 @@ def calculate_fisher(
         scale=1.,
         **kwargs
 ):
+    """
+    Calculates Fisher Information Matrix or Fisher Vector Product of a neural network model.
+    Returns an instance of Fisher class corresponding to fisher_type and loss_type.
+    Computed FIM will be stored in fisher_type (FISHER_EXACT, FISHER_MC or FISHER_EMP) attribute of
+    the model or modules in the model depending on fisher_shape. FVP can be obtained by calling
+    load_fvp() function of the returned instance. You can use wrapper functions fisher_for_cross_entropy,
+    fisher_for_mse, fvp_for_cross_entropy, fvp_for_mse for each loss_type and fvp for your convenience.
+    Args:
+        model: torch.nn.Module instance representing a neural network model to calculate FIM for.
+               Current supported module classes are nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d,
+               nn.LayerNorm, nn.Embedding, Bias, and Scale. Other modules can be used, but they will be
+               ignored when computing FIM.
+        fisher_type: String specifying which type of FIM to use. Can be one of [FISHER_EXACT, FISHER_MC,
+                     FISHER_EMP]. FISHER_EXACT is the exact FIM, FISHER_MC is the Monte-Carlo estimation
+                     of FIM, and FISHER_EMP is the Empirical Fisher.
+        fisher_shapes: String or list specifying which shape approximation of FIM to use. Valid arguments
+                       are [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG]. 
+        loss_type: String specifying which loss function to use.
+                   Can be one of [LOSS_CROSS_ENTROPY, LOSS_MSE].
+        inputs, targets: Single batch of inputs and targets to feed in to the model.
+                         targets will be used only for FISHER_EMP.
+        data_loader: torch.utils.data.DataLoader instance to feed in to the model.
+                     Either inputs or data_loader must be specified.
+        fvp: When set to True, FVP (vector specified by vec argument will be used) is computed efficiently
+             without explicitly constructing FIM.
+        vec: ParamVector instance used to compute FVP when fvp is True. With a vector torch.Tensor v,
+             ParamVector can be instantiated with e.g. ParamVector([p for p in model.parameters()], v).
+        is_ditributed: When set to True, distributed computation is supported.
+        all_reduce: When this and is_distributed is set to True, all-reduces the computed Fisher across
+                    all processes. Otherwise, the computed Fisher will be reduced only to master process.
+        is_master: This flag indicates whether the current process is the master.
+        accumulate: When set to True, the computed Fisher will be accumulated to the previously computed
+                    Fisher of the model.
+        data_average: When set to True, Fisher is averaged over all data. Otherwise, Fisher is summed
+                      over all data.
+        calc_emp_loss_grad: When set to True, calculates gradient of loss with inputs and true labels.
+                            If fisher_type is FISHER_EMP, this doesn't require additional backpropagation.
+                            Otherwise, an additional backpropagation is required. If data_average is False,
+                            gradient of loss will be summed over all data.
+        return_loss: When set to True, returns total loss and outputs of model as well. Total loss will be
+                     averaged over all data if data_average is True.
+        seed: Sets the seed for generating random numbers.
+        scale: Float value for scaling the Fisher.
+        n_mc_samples: Specifies how many MC samples is taken for FISHER_MC. Default: 1.
+        var: Variance of target distribution for FISHER_MC in regression task. Default: 0.5.
+    Returns:
+        One of Fisher class instance corresponding to fisher_type and loss_type. You can get eigenvalues,
+        trace, FVP, etc. from this instance. Also returns total loss and outputs of the model if
+        return_loss is True.
+    Examples::
+        >>> model = torch.nn.Linear(100, 10)
+        >>> x = torch.randn(32, 100)
+        >>>
+        >>> # FIM computation
+        >>> fisher_for_cross_entropy(model, FISHER_EXACT, SHAPE_FULL, inputs=x)
+        >>> fim = getattr(model, FISHER_EXACT)
+        >>>
+        >>> # FVP computation
+        >>> params = [p for p in model.parameters()]
+        >>> vec = ParamVector(params, [torch.randn_like(p) for p in params])
+        >>> f = fvp_for_cross_entropy(model, FISHER_EXACT, SHAPE_FULL, inputs=x)
+        >>> fvp = f.load_fvp(SHAPE_FULL).get_flatten_vector()
+    """
     assert fisher_type in _supported_types
     assert loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]
     if loss_type == LOSS_CROSS_ENTROPY:
@@ -455,35 +518,29 @@ def fisher_esd(
         is_distributed=False,
         **kwargs
 ):
-    # Calculates Eigenvalue Spectral Density (ESD) for Fisher Information Matrix (FIM)
-    # using Stochastic Lanczos Quadrature (SLQ).
-    # Referenced from https://github.com/amirgholami/PyHessian/blob/master/density_plot.py.
-    # Args:
-    #     model: torch.nn.Module instance representing a neural network model to calculate FIM for.
-    #     fisher_type: string specifying which type of FIM to use. 
-    #                  Can be one of [FISHER_EXACT, FISHER_MC, FISHER_EMP].
-    #     fisher_shape: string specifying which shape approximation of FIM to use.
-    #                   Can be one of [SHAPE_FULL, SHAPE_LAYER_WISE].
-    #     loss_type: string specifying which loss function to use.
-    #                Can be one of [LOSS_CROSS_ENTROPY, LOSS_MSE].
-    #     inputs, targets: Single batch of inputs and targets to feed in to the model.
-    #                      targets will be used only for FISHER_EMP.
-    #     data_loader: torch.utils.data.DataLoader instance to feed in to the model.
-    #                  Either inputs or data_loader must be specified.
-    #     n_v: The number of SLQ runs.
-    #     num_iter: The number of iterations for Lanczos method in SLQ.
-    #     num_bins: The number of partitions between max and min eigenvalue for plotting.
-    #     sigma_squared: Variance of gaussian kernel.
-    #     overhead: Margin added to eigenvalue spectra.
-    #     is_distributed: When set to True, distributed computation is supported.
-    # Examples::
-    #     >>> model = torch.nn.Linear(100, 10)
-    #     >>> x = torch.randn(32, 100)
-    #     >>> y = torch.tensor([0]*32, dtype=torch.long)
-    #     >>> density, grids = asdl.fisher_esd_for_cross_entropy(
-    #     ...                           model, asdl.FISHER_EXACT, asdl.SHAPE_FULL, inputs=x, targets=y)
-    #     >>> matplotlib.pyplot.semilogy(grids, density+1e-07)
-    #     >>> matplotlib.pyplot.show()
+    """
+    Calculates Eigenvalue Spectral Density (ESD) for Fisher Information Matrix (FIM) using Stochastic
+    Lanczos Quadrature (SLQ). Returns numpy arrays density and grids whichcorrespond to y and x
+    coordinate of the density plot respectively. You can use wrapper functions
+    fisher_esd_for_cross_entropy or fisher_esd_for_mse for each loss_type for your convenience.
+    Referenced from https://github.com/amirgholami/PyHessian/blob/master/density_plot.py.
+    Args:
+        model, fisher_type, loss_type, inputs, targets, data_loader: Same as calculate_fihser().
+        fisher_shape: string specifying which shape approximation of FIM to use.
+                      Can be one of [SHAPE_FULL, SHAPE_LAYER_WISE].
+        n_v: The number of SLQ runs.
+        num_iter: The number of iterations for Lanczos method in SLQ.
+        num_bins: The number of partitions between max and min eigenvalue for plotting.
+        sigma_squared: Variance of gaussian kernel.
+        overhead: Margin added to eigenvalue spectra.
+        is_distributed: When set to True, distributed computation is supported.
+    Examples::
+        >>> model = torch.nn.Linear(100, 10)
+        >>> x = torch.randn(32, 100)
+        >>> density, grids = fisher_esd_for_cross_entropy(model, FISHER_EXACT, SHAPE_FULL, inputs=x)
+        >>> matplotlib.pyplot.semilogy(grids, density+1e-07)
+        >>> matplotlib.pyplot.show()
+    """
 
     def fvp_fn(vec: ParamVector) -> ParamVector:
         f = calculate_fisher(model,
