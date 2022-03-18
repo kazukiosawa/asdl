@@ -79,10 +79,11 @@ class NaturalGradient:
             assert len(module_partitions) == world_size
             assert all(len(module_partitions[0]) == len(module_partitions[i]) for i in range(1, world_size))
             self.partitioned_modules = [m for partition in module_partitions for m in partition]
+            self.num_modules_per_partition = len(module_partitions[0])
         else:
             self.partitioned_modules = []
+            self.num_modules_per_partition = None
         self.module_partitions = module_partitions
-        self.num_modules_per_partition = len(module_partitions[0])
 
         self.fisher_shape = fisher_shape
         fisher_cls = get_fisher_class(fisher_type, loss_type)
