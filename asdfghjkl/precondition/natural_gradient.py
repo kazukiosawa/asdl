@@ -39,6 +39,7 @@ class NaturalGradient:
         loss_type=LOSS_CROSS_ENTROPY,
         damping=1e-5,
         ema_decay=_invalid_ema_decay,
+        grad_scale=1.,
         ignore_modules=None,
         sync_group: dist.ProcessGroup = None,
         sync_group_ranks: List[int] = None,
@@ -55,6 +56,7 @@ class NaturalGradient:
         self.loss_type = loss_type
         self.damping = damping
         self.ema_decay = ema_decay
+        self.grad_scale = grad_scale
         if isinstance(fisher_shape, str):
             fisher_shape = [fisher_shape]
         self.named_modules_for_curvature = []
@@ -366,7 +368,9 @@ class NaturalGradient:
                     fisher.mul_(0)
 
     @nvtx.range('precondition')
-    def precondition(self, vectors: ParamVector = None, grad_scale=1.):
+    def precondition(self, vectors: ParamVector = None, grad_scale=None):
+        if grad_scale is None:
+            grad_scale = self.grad_scale
         for shape in _module_level_shapes:
             for module in self.modules_for(shape):
                 if not self.is_module_for_inv_and_precondition(module):
@@ -384,7 +388,9 @@ class NaturalGradient:
             fisher.mvp(vectors=vectors, use_inv=True, inplace=True)
 
     def precondition_module(self, module, shape=None, vectors: ParamVector = None,
-                            vec_weight: torch.Tensor = None, vec_bias: torch.Tensor = None, grad_scale=1.):
+                            vec_weight: torch.Tensor = None, vec_bias: torch.Tensor = None, grad_scale=None):
+        if grad_scale is None:
+            grad_scale = self.grad_scale
         if shape is None:
             for s in _module_level_shapes:
                 if module in self.modules_for(s):
@@ -405,7 +411,8 @@ class NaturalGradient:
             assert vec_bias is not None, 'gradient has not been calculated.'
         if grad_scale != 1:
             vec_weight.data.mul_(grad_scale)
-            vec_bias.data.mul_(grad_scale)
+            if vec_bias is not None:
+                vec_bias.data.mul_(grad_scale)
         matrix.mvp(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=True, inplace=True)
 
     def is_module_for_inv_and_precondition(self, module: nn.Module):
@@ -681,6 +688,7 @@ class EmpiricalNaturalGradient(NaturalGradient):
                  fisher_shape=SHAPE_FULL,
                  damping=1e-5,
                  ema_decay=_invalid_ema_decay,
+                 grad_scale=1.,
                  ignore_modules=None,
                  sync_group: dist.ProcessGroup = None,
                  module_partitions: List[List[nn.Module]] = None,
@@ -692,6 +700,7 @@ class EmpiricalNaturalGradient(NaturalGradient):
                          fisher_shape=fisher_shape,
                          damping=damping,
                          ema_decay=ema_decay,
+                         grad_scale=grad_scale,
                          ignore_modules=ignore_modules,
                          sync_group=sync_group,
                          module_partitions=module_partitions,
