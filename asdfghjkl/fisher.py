@@ -359,10 +359,15 @@ def calculate_fisher(
     """
     Calculates Fisher Information Matrix or Fisher Vector Product of a neural network model.
     Returns an instance of Fisher class corresponding to fisher_type and loss_type.
-    Computed FIM will be stored in fisher_type (FISHER_EXACT, FISHER_MC or FISHER_EMP) attribute of
-    the model or modules in the model depending on fisher_shape. FVP can be obtained by calling
-    load_fvp() function of the returned instance. You can use wrapper functions fisher_for_cross_entropy,
-    fisher_for_mse, fvp_for_cross_entropy, fvp_for_mse for each loss_type and fvp at your convenience.
+    Computed FIM will be stored in fisher_type (FISHER_EXACT, FISHER_MC or FISHER_EMP) attribute of the model or
+    modules in the model (depending on fisher_shape) as a SymMatrix instance. This SymMatrix instance has FIM in
+    its data attribute for SHAPE_FULL and SHAPE_LAYERWISE. For other shapes, the instance has kron, unit and diag
+    attributes which are Kron, UnitWise and Diag instances respectively. The Kron instance has factorized FIM data
+    in its A and B attributes, the UnitWise instance has FIM data in its data attribute, and the Diag instance has
+    FIM data corresponding to each layer's weights and biases in its weight and bias attributes.
+    FVP can be obtained by calling load_fvp() function of the returned instance.
+    You can use wrapper functions fisher_for_cross_entropy, fisher_for_mse, fvp_for_cross_entropy, fvp_for_mse
+    for each loss_type and fvp at your convenience.
     Args:
         model: torch.nn.Module instance representing a neural network model to calculate FIM for.
                Current supported module classes are nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d,
