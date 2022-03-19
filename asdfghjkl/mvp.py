@@ -89,6 +89,9 @@ def stochastic_lanczos_quadrature(mvp_fn: Callable[[ParamVector], ParamVector],
         num_iter: The number of iterations for Lanczos method.
         is_distributed: When set to True, distributed computation is supported.
         random_seed: Sets seed for non-deterministic matrix (e.g. fisher_mc)
+    Returns:
+        Lists eigval_list_full and weight_list_full which contains n_v lists of eigenvalues and weights.
+        Each pair of elements from those lists approximates weight-node pairs of Gaussian quadrature rule.
     """
 
     assert n_v >= 1
