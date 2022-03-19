@@ -44,6 +44,11 @@ _supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_LAYER_WISE]
 
 
 class _FisherBase(MatrixManager):
+    """
+    Base class managing the computation of FIM or FVP. With 3 kinds of Fisher type and 2 kinds
+    of loss type, there are 6 classes derived from this class each of which has its own unique
+    _fisher_core function to compute Fisher.
+    """
     def __init__(self, model, **kwargs):
         super().__init__(model, self.fisher_type)
 
@@ -199,6 +204,16 @@ class _FisherBase(MatrixManager):
                     setattr(module, attr, v.get_vectors_by_module(module))
 
     def load_fvp(self, fisher_shape: str) -> ParamVector:
+        """
+        This function returns computed FVP from the model. The returned instance will be ParamVector
+        instance. If you want to get FVP in torch.Tensor type, you can get it by calling
+        get_flatten_vector() function of the returned instance.
+        Args:
+            fisher_shape: String specifying which of FVPs computed with different shape approximations
+                          should be returned.
+        Returns:
+            A ParamVector instance of FVP.
+        """
         if fisher_shape == SHAPE_FULL:
             v = getattr(self._model, self.fvp_attr, None)
             if v is None:
@@ -347,17 +362,18 @@ def calculate_fisher(
     Computed FIM will be stored in fisher_type (FISHER_EXACT, FISHER_MC or FISHER_EMP) attribute of
     the model or modules in the model depending on fisher_shape. FVP can be obtained by calling
     load_fvp() function of the returned instance. You can use wrapper functions fisher_for_cross_entropy,
-    fisher_for_mse, fvp_for_cross_entropy, fvp_for_mse for each loss_type and fvp for your convenience.
+    fisher_for_mse, fvp_for_cross_entropy, fvp_for_mse for each loss_type and fvp at your convenience.
     Args:
         model: torch.nn.Module instance representing a neural network model to calculate FIM for.
                Current supported module classes are nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d,
                nn.LayerNorm, nn.Embedding, Bias, and Scale. Other modules can be used, but they will be
-               ignored when computing FIM.
+               ignored when computing Fisher.
         fisher_type: String specifying which type of FIM to use. Can be one of [FISHER_EXACT, FISHER_MC,
                      FISHER_EMP]. FISHER_EXACT is the exact FIM, FISHER_MC is the Monte-Carlo estimation
                      of FIM, and FISHER_EMP is the Empirical Fisher.
         fisher_shapes: String or list specifying which shape approximation of FIM to use. Valid arguments
-                       are [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG]. 
+                       include [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG] if fvp
+                       is False, otherwise [SHAPE_FULL, SHAPE_LAYER_WISE].
         loss_type: String specifying which loss function to use.
                    Can be one of [LOSS_CROSS_ENTROPY, LOSS_MSE].
         inputs, targets: Single batch of inputs and targets to feed in to the model.
@@ -466,6 +482,29 @@ def fisher_eig(
         print_progress=False,
         **kwargs
 ):
+    """
+    Calculates eigenvalues and eigenvectors of Fisher Information Matrix using power method.
+    Eigenvalues are sorted in descending order and eigenvectors are sorted correspondingly.
+    You can use wrapper functions fisher_eig_for_cross_entropy and fisher_eig_for_mse at your
+    convenience.
+    Args:
+        model, fisher_type, loss_type, inputs, targets, data_loader,
+                                         is_distributed, n_mc_samples, var: Same as calculate_fisher().
+        fisher_shape: String specifying which shape approximation of FIM to use.
+                      Can be one of [SHAPE_FULL, SHAPE_LAYER_WISE].
+        top_n: The top_n greatest eigenvalues are returned.
+        max_iters: Specifies the number of iterations in power method.
+        tol: Specifies the tolerance value for power method to check convergence.
+        print_progress: When set to True, progress is printed out during power method.
+    Returns:
+        The top_n greatest eigenvalues and their corresponding eigenvectors.
+    Examples::
+        >>> model = torch.nn.Linear(100, 10)
+        >>> x = torch.randn(32, 100)
+        >>> eigvals, eigvecs = fisher_eig_for_cross_entropy(model, FISHER_EXACT, SHAPE_FULL, inputs=x, top_n=5)
+        >>> print(eigvals)
+        [1.1401393413543701, 1.106902837753296, 1.069031000137329, 1.0103809833526611, 0.9808512926101685]
+    """
 
     def fvp_fn(vec: ParamVector) -> ParamVector:
         f = calculate_fisher(model,
@@ -522,11 +561,12 @@ def fisher_esd(
     Calculates Eigenvalue Spectral Density (ESD) for Fisher Information Matrix (FIM) using Stochastic
     Lanczos Quadrature (SLQ). Returns numpy arrays density and grids whichcorrespond to y and x
     coordinate of the density plot respectively. You can use wrapper functions
-    fisher_esd_for_cross_entropy or fisher_esd_for_mse for each loss_type for your convenience.
+    fisher_esd_for_cross_entropy or fisher_esd_for_mse for each loss_type at your convenience.
     Referenced from https://github.com/amirgholami/PyHessian/blob/master/density_plot.py.
     Args:
-        model, fisher_type, loss_type, inputs, targets, data_loader: Same as calculate_fihser().
-        fisher_shape: string specifying which shape approximation of FIM to use.
+        model, fisher_type, loss_type, inputs, targets, data_loader,
+                                         is_distributed, n_mc_samples, var: Same as calculate_fisher().
+        fisher_shape: String specifying which shape approximation of FIM to use.
                       Can be one of [SHAPE_FULL, SHAPE_LAYER_WISE].
         n_v: The number of SLQ runs.
         num_iter: The number of iterations for Lanczos method in SLQ.
@@ -619,6 +659,43 @@ def fisher_free(
         random_seed=None,
         **kwargs
 ) -> ParamVector:
+    """
+    Solves (F + d * I)x = b using conjugate gradient method. You can use wrapper functions
+    fisher_free_for_cross_entropy or fisher_free_for_mse for each loss_type at your convenience.
+    Returns ParamVector x which is the solution of the equation obtained by conjugate gradient method.
+    Args:
+        model: torch.nn.Module instance representing a neural network model to calculate FIM for.
+               If b is not specified, gradients of this model's parameter will be used, in which case
+               the gradients must not be None.
+        fisher_type, loss_type,  data_loader, inputs, targets,
+                                         is_distributed, n_mc_samples, var: Same as calculate_fisher().
+        fisher_shape: String specifying which shape approximation of FIM to use.
+                      Can be one of [SHAPE_FULL, SHAPE_LAYER_WISE].
+        b: ParamVector instance representing the right-hand side of the equation to be solved. If None,
+           b will be gradients of parameters in the model.
+        init_x: ParamVector instance representing the initial value for x in the equation. If None,
+                x will be initialized as a zero vector.
+        damping: The damping value representing d in the equation to be solved.
+        max_iters: The number of iterations in conjugate gradient method. If None, max_iters will be the
+                   size of the vector b.
+        tol: Specifies the tolerance value for conjugate gradient method to check convergence.
+        preconditioner: Preconditioner with precondition() method for preconditioning residual at each iteration.
+        print_progress: When set to True, progress is printed out during conjugate gradient method.
+        random_seed: Sets the seed for non-deterministic matrices such as FISHER_MC. Even if this is None,
+                     a random integer will be assigned when fisher_type is FISHER_MC.
+    Returns:
+        ParamVector instance which is the solution of the equation (F + d * I)x = b obtained by conjugate
+        gradient method.
+    Example::
+        >>> model = torch.nn.Linear(100, 10)
+        >>> input = torch.randn(32, 100)
+        >>> b = {p: torch.randn_like(p) for p in model.parameters()}
+        >>> b = ParamVector(b.keys(), b.values())
+        >>> x = fisher_free_for_cross_entropy(model, FISHER_EXACT, SHAPE_FULL, b=b, inputs=input)
+        >>> x.get_flatten_vector()
+        tensor([-1097.0865,   956.4941,  1207.2789,  ...,  -430.0797,   469.2620,
+                -266.1364])
+    """
 
     def fvp_fn(vec: ParamVector) -> ParamVector:
         f = calculate_fisher(model,
@@ -670,6 +747,29 @@ def fisher_quadratic_form(
         is_distributed=False,
         **kwargs
 ):
+    """
+    Calculates quadratic form of Fisher Information Matrix given a vector. You can use wrapper functions
+    fisher_quadratic_form_for_cross_entropy or fisher_quadratic_form_for_mse for each loss_type at your convenience.
+    Args:
+        model: torch.nn.Module instance representing a neural network model to calculate FIM for.
+               If v is not specified, gradients of this model's parameter will be used, in which case
+               the gradients must not be None.
+        fisher_type, loss_type,  data_loader, inputs, targets,
+                                         is_distributed, n_mc_samples, var: Same as calculate_fisher().
+        fisher_shape: String specifying which shape approximation of FIM to use.
+                      Can be one of [SHAPE_FULL, SHAPE_LAYER_WISE].
+        v: ParamVector instance for computing the quadratic form.
+    Returns:
+        torch.Tensor type scalar which is the quadratic form of FIM with vector v.
+    Example::
+        >>> model = torch.nn.Linear(100, 10)
+        >>> input = torch.randn(32, 100)
+        >>> v = {p: torch.randn_like(p) for p in model.parameters()}
+        >>> v = ParamVector(v.keys(), v.values())
+        >>> qform = fisher_quadratic_form_for_cross_entropy(model, FISHER_EXACT, SHAPE_FULL, v=v, inputs=input)
+        >>> qform
+        tensor(92.5649)
+    """
     def fvp_fn(vec: ParamVector) -> ParamVector:
         f = calculate_fisher(model,
                              fisher_type,
