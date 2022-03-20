@@ -587,7 +587,9 @@ class NaturalGradient:
 
     @nvtx.range('all_reduce_no_curvature_grad')
     def all_reduce_no_curvature_grad(self, async_op=False):
-        module_list = nn.ModuleList([m for m in self.model.modules() if m not in self.modules_for_curvature])
+        module_list = nn.ModuleList([m for m in self.model.modules()
+                                     if len(list(m.children())) == 0 and m not in self.modules_for_curvature])
+        print(dist.get_rank(), 'no curvature', module_list)
         self._all_reduce_grad(module_list, async_op=async_op)
 
     def _all_reduce_grad(self, module: nn.Module, async_op=False):
