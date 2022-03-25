@@ -49,7 +49,7 @@ _supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, 
 _supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_LAYER_WISE]
 
 
-class _FisherBase(MatrixManager):
+class FisherManager(MatrixManager):
     """
     Base class managing the computation of FIM or FVP. With 3 kinds of Fisher type and 2 kinds
     of loss type, there are 6 classes derived from this class each of which has its own unique
