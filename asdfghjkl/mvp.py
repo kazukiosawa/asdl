@@ -23,9 +23,23 @@ def power_method(mvp_fn: Callable[[ParamVector], ParamVector],
                  is_distributed=False,
                  print_progress=False,
                  random_seed=None):
-    # main logic is adopted from https://github.com/amirgholami/PyHessian/blob/master/pyhessian/hessian.py
-    # modified interface and format
-    # modified for various matrices and distributed memory run
+    """
+    Matrix-free algorithm for calculating top_n eigenvalues and eigenvectors of a matrix.
+    Main logic is adopted from https://github.com/amirgholami/PyHessian/blob/master/pyhessian/hessian.py.
+    Modified interface and format. Modified for various matrices and distributed memory run.
+    Args:
+        mvp_fn: A function to compute matrix vector product.
+        model: A neural network model of interest.
+        top_n: The number of greatest eigenvalues to be calculated.
+        max_iters: The maximum number of iterations.
+        tol: The tolerance value for power method to check convergence.
+        is_distributed: When True, distributed computation is supported.
+        print_progress: When True, progress is printed out during power method.
+        random_seed: Seed for matrices that are not deterministic (e.g., FISHER_MC).
+    Returns:
+        A list of top_n greatest (in absolute value) eigenvalues in descending order and a list of their
+        corresponding eigenvectors.
+    """
 
     assert top_n >= 1
     assert max_iters >= 1
@@ -80,9 +94,9 @@ def stochastic_lanczos_quadrature(mvp_fn: Callable[[ParamVector], ParamVector],
     """
     Matrix-free algorithm to estimate weight-node pairs of Eigenvalue Spectral Density with
     Gaussian quadrature rule applied.
-    referenced from https://github.com/amirgholami/PyHessian/blob/master/pyhessian/hessian.py.
+    Referenced from https://github.com/amirgholami/PyHessian/blob/master/pyhessian/hessian.py.
     Args:
-        mvp_fn: Function to compute matrix vector product.
+        mvp_fn: A function to compute matrix vector product.
         model: A neural network model of interest.
         n_v: The number of runs the algorithm takes. The estimate of weight-node pair will be
              computed for each run.
@@ -167,8 +181,19 @@ def conjugate_gradient_method(mvp_fn: Callable[[ParamVector], ParamVector],
                               random_seed=None) -> ParamVector:
     """
     Solve (A + d * I)x = b by conjugate gradient method.
-    d: damping
-    Return x when x is close enough to inv(A) * b.
+    Args:
+        mvp_fn: A function to compute matrix vector product.
+        b: ParamVector instance representing the right-hand side of the equation to be solved.
+        init_x: ParamVector instance representing the initial value for x in the equation. If None,
+                x will be initialized as a zero vector.
+        damping: The damping value representing d in the equation to be solved.
+        max_iters: The maximum number of iterations.
+        tol:  The tolerance value for conjugate gradient method to check convergence.
+        preconditioner: Preconditioner with precondition() method for preconditioning residual at each iteration.
+        print_progress: If True, progress is printed out during conjugate gradient method.
+        random_seed: Seed for non-deterministic matrices such as FISHER_MC.
+    Returns:
+        x when x is close enough to inv(A) * b.
     """
     if not isinstance(b, ParamVector):
         raise TypeError(f'b has to be an instance of {ParamVector}. {type(b)} is given.')
@@ -225,6 +250,16 @@ def quadratic_form(mvp_fn: Callable[[ParamVector], ParamVector],
                    v: ParamVector,
                    random_seed=None,
                    damping=0):
+    """
+    Computes quadratic form, v.T * (M + d * I) * v of a matrix M given a vector v and a damping value d.
+    Args:
+        mvp_fn: A function to compute matrix vector product.
+        v: ParamVector instance for computing the quadratic form.
+        random_seed: Seed for non-deterministic matrices such as FISHER_MC.
+        damping: The damping value.
+    Returns:
+        The quadratic form v.T * (M + d * I) * v.
+    """
     Av = _mvp(mvp_fn, v, random_seed, damping)
     return v.dot(Av)
 
