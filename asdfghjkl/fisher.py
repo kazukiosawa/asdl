@@ -76,6 +76,9 @@ class FisherManager(MatrixManager):
         return f'{self.fisher_type}_fvp'
 
     def zero_fisher(self, fvp=False):
+        """
+        Deletes FIM or FVP (if fvp=True) of the model.
+        """
         attr = self.fvp_attr if fvp else self.fisher_attr
         for module in self._model.modules():
             if hasattr(module, attr):
@@ -94,6 +97,11 @@ class FisherManager(MatrixManager):
                          seed=None,
                          scale=1.,
                          stream: Stream = None):
+        """
+        Calculates Fisher. See comments under calculate_fisher function for more detail.
+        stream argument is torch.cuda.Stream instance, which, if provided, allows computation for Fisher at
+        each layer and forward and backward propagation of the model to be executed concurrently.
+        """
         model = self._model
         device = self._device
         if isinstance(fisher_shapes, str):
@@ -172,6 +180,16 @@ class FisherManager(MatrixManager):
         raise NotImplementedError
 
     def accumulate(self, cxt, scale=1., target_module=None, target_module_name=None, fvp=False):
+        """
+        Accumulates computed Fisher to an attribute of the model or target_module if specified.
+        The name of the attribute is specified by the fisher_attr or fvp_attr property of this class.
+        Args:
+            cxt: OperationContext instance used for computation of Fisher.
+            scale: Float value for scaling the Fisher.
+            target_module, target_module_name: If specified, accumulates only the Fisher of target_module or a module
+                                               with the same name as target_module_name.
+            fvp: When True, FVP is accumulated, otherwise FIM is accumulated.
+        """
         model = self._model
         for name, module in model.named_modules():
             if target_module is not None and module != target_module:
@@ -213,6 +231,23 @@ class FisherManager(MatrixManager):
         self._accumulate_fisher(module, new_fisher, scale, fvp=True)
 
     def get_fisher_tensor(self, module: nn.Module, *keys) -> Union[torch.Tensor, None]:
+        """
+        Extract torch.Tensor type FIM data from module's FIM stored as SymMatrix.
+        Args:
+            module: torch.nn.Module instance which has Fisher in its fisher_attr attribute.
+            keys: Specifies which data of Fisher to extract.
+        Returns:
+            torch.Tensor type Fisher data specified by keys from the module or None if module doesn't
+            have Fisher corresponding to keys.
+        Example:
+            >>> model = nn.Linear(100, 10)
+            >>> x = torch.randn(32, 100)
+            >>> f = fisher_for_cross_entropy(model, FISHER_EXACT, SHAPE_KRON, inputs=x)
+            >>> kron_a = []
+            >>> for module in model.modules():
+            ...     if hasattr(module, f.fisher_attr):
+            ...         kron_a.append(f.get_fisher_tensor(module, 'kron', 'A'))
+        """
         fisher = getattr(module, self.fisher_attr, None)
         if fisher is None:
             return None
@@ -229,6 +264,17 @@ class FisherManager(MatrixManager):
                               with_grad=False,
                               group: dist.ProcessGroup = None,
                               async_op=False):
+        """
+        Reduces, then scatters FIM of each module partition in module_partitions.
+        Args:
+            module_partitions: List of module partitions. Each partition needs to have same number of module and Fisher.
+            keys: Specifies which data of Fisher to reduce and scatter.
+            with_grad: If True, also reduces and scatters the gradients of module parameters.
+            group: The process group to work on. If None, the default process group will be used.
+            async_op: Whether this op should be an async op.
+        Returns:
+            List of async work handle, if async_op is True. List of None, if not async_op or if not part of the group.
+        """
         assert dist.is_initialized()
         assert torch.cuda.is_available()
         assert dist.get_backend(group) == dist.Backend.NCCL
@@ -266,6 +312,17 @@ class FisherManager(MatrixManager):
                       dst=0,
                       group: dist.ProcessGroup = None,
                       async_op=False):
+        """
+        Reduces FIM of modules across all machines.
+        Args:
+            modules: List of modules that have Fisher to be reduced.
+            keys: Specifies which data of Fisher to reduce.
+            all_reduce: If True, all-reduce is performed instead of reduce.
+            with_grad: If True, the gradients of module parameters is reduced as well.
+            dst: Destination rank for reduce.
+            group: The process group to work on. If None, the default process group will be used.
+            async_op: Whether reduce or all-reduce is performed asynchronously.
+        """
         assert dist.is_initialized()
         tensor_list = []
         for module in modules:
@@ -286,6 +343,14 @@ class FisherManager(MatrixManager):
         return handles
 
     def reduce_fvp(self, fisher_shape, is_master=True, all_reduce=False):
+        """
+        Reduces the model's FVP computed with fisher_shape across all machines.
+        Args:
+            fisher_shape: String specifying which of FVPs computed with different shape approximations
+                          should be reduced.
+            is_master: This flag indicates whether the current process is the master.
+            all_reduce: If True, all-reduce is performed instead of reduce.
+        """
         v = self.load_fvp(fisher_shape)
         v = reduce_vectors(v, is_master, all_reduce)
         attr = self.fvp_attr
@@ -486,23 +551,23 @@ def calculate_fisher(
                          targets will be used only for FISHER_EMP.
         data_loader: torch.utils.data.DataLoader instance to feed in to the model.
                      Either inputs or data_loader must be specified.
-        fvp: When set to True, FVP (vector specified by vec argument will be used) is computed efficiently
+        fvp: When True, FVP (vector specified by vec argument will be used) is computed efficiently
              without explicitly constructing FIM.
         vec: ParamVector instance used to compute FVP when fvp is True. With a vector torch.Tensor v,
              ParamVector can be instantiated with e.g. ParamVector([p for p in model.parameters()], v).
-        is_ditributed: When set to True, distributed computation is supported.
-        all_reduce: When this and is_distributed is set to True, all-reduces the computed Fisher across
+        is_ditributed: When True, distributed computation is supported.
+        all_reduce: When this and is_distributed is True, all-reduces the computed Fisher across
                     all processes. Otherwise, the computed Fisher will be reduced only to master process.
         is_master: This flag indicates whether the current process is the master.
-        accumulate: When set to True, the computed Fisher will be accumulated to the previously computed
+        accumulate: When True, the computed Fisher will be accumulated to the previously computed
                     Fisher of the model.
-        data_average: When set to True, Fisher is averaged over all data. Otherwise, Fisher is summed
+        data_average: When True, Fisher is averaged over all data. Otherwise, Fisher is summed
                       over all data.
-        calc_emp_loss_grad: When set to True, calculates gradient of loss with inputs and true labels.
+        calc_emp_loss_grad: When True, calculates gradient of loss with inputs and true labels.
                             If fisher_type is FISHER_EMP, this doesn't require additional backpropagation.
                             Otherwise, an additional backpropagation is required. If data_average is False,
                             gradient of loss will be summed over all data.
-        return_loss: When set to True, returns total loss and outputs of model as well. Total loss will be
+        return_loss: When True, returns total loss and outputs of model as well. Total loss will be
                      averaged over all data if data_average is True.
         seed: Sets the seed for generating random numbers.
         scale: Float value for scaling the Fisher.
@@ -585,7 +650,7 @@ def fisher_eig(
         top_n: The top_n greatest eigenvalues are returned.
         max_iters: Specifies the number of iterations in power method.
         tol: Specifies the tolerance value for power method to check convergence.
-        print_progress: When set to True, progress is printed out during power method.
+        print_progress: When True, progress is printed out during power method.
     Returns:
         The top_n greatest eigenvalues and their corresponding eigenvectors.
     Examples::
@@ -663,7 +728,7 @@ def fisher_esd(
         num_bins: The number of partitions between max and min eigenvalue for plotting.
         sigma_squared: Variance of gaussian kernel.
         overhead: Margin added to eigenvalue spectra.
-        is_distributed: When set to True, distributed computation is supported.
+        is_distributed: When True, distributed computation is supported.
     Examples::
         >>> model = torch.nn.Linear(100, 10)
         >>> x = torch.randn(32, 100)
@@ -770,7 +835,7 @@ def fisher_free(
                    size of the vector b.
         tol: Specifies the tolerance value for conjugate gradient method to check convergence.
         preconditioner: Preconditioner with precondition() method for preconditioning residual at each iteration.
-        print_progress: When set to True, progress is printed out during conjugate gradient method.
+        print_progress: When True, progress is printed out during conjugate gradient method.
         random_seed: Sets the seed for non-deterministic matrices such as FISHER_MC. Even if this is None,
                      a random integer will be assigned when fisher_type is FISHER_MC.
     Returns:
