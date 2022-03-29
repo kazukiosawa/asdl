@@ -60,6 +60,33 @@ def data_loader_gradient(
 
 
 def batch_gradient(model, closure, return_outputs=False):
+    """
+    Calculates gradients of parameters of the model for each batch.
+    Args:
+        model: torch.nn.Module instance to calculate gradient for.
+        closure: A function which does backpropagation.
+        return_outputs: If True, outputs of closure is returned as well.
+    Returns:
+        Batch gradients of the shape (n, p) where n is the batch size and p is the number of parameters.
+        If return_outputs is True, outputs of closure is also returned.
+    Example::
+        >>> model = torch.nn.Linear(100, 10)
+        >>> x = torch.randn(32, 100)
+        >>> y = torch.tensor([0]*32, dtype=torch.long)
+        >>> loss_fn = torch.nn.CrossEntropyLoss()
+        >>> def closure():
+        ...     outputs = model(x)
+        ...     loss = loss_fn(outputs, y)
+        ...     loss.backward()
+        ...     return outputs
+        ...
+        >>> batch_grads = asdl.batch_gradient(model, closure, return_outputs=True)
+        >>> for grad in batch_grads:
+        ...     print(grad.shape)
+        ...
+        torch.Size([32, 1010])
+        torch.Size([32, 10])
+    """
     with extend(model, OP_BATCH_GRADS) as cxt:
         outputs = closure()
         grads = []
@@ -75,6 +102,32 @@ def batch_gradient(model, closure, return_outputs=False):
 
 
 def save_batch_gradient(model, closure, return_outputs=False):
+    """
+    Calculate batch gradient of the model's parameters and save it to 'batch_grad' attribute of each parameter.
+    Args:
+        model: torch.nn.Module instance to calculate gradient for.
+        closure: A function which does backpropagation.
+        return_outputs: If True, outputs of closure is returned as well.
+    Returns:
+        Outputs of closure if return_outputs is True.
+    Example::
+        >>> model = torch.nn.Linear(100, 10)
+        >>> x = torch.randn(32, 100)
+        >>> y = torch.tensor([0]*32, dtype=torch.long)
+        >>> loss_fn = torch.nn.CrossEntropyLoss()
+        >>> def closure():
+        ...     outputs = model(x)
+        ...     loss = loss_fn(outputs, y)
+        ...     loss.backward()
+        ...     return outputs
+        ...
+        >>> save_batch_gradient(model, closure)
+        >>> for param in model.parameters():
+        ...     print(param.batch_grad.shape)
+        ...
+        torch.Size([32, 10, 100])
+        torch.Size([32, 10])
+    """
     with extend(model, OP_BATCH_GRADS) as cxt:
         outputs = closure()
         for module in model.modules():
