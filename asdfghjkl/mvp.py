@@ -32,7 +32,7 @@ def power_method(mvp_fn: Callable[[ParamVector], ParamVector],
         model: A neural network model of interest.
         top_n: The number of greatest eigenvalues to be calculated.
         max_iters: The maximum number of iterations.
-        tol: The tolerance value for power method to check convergence.
+        tol: The tolerance value to check convergence.
         is_distributed: When True, distributed computation is supported.
         print_progress: When True, progress is printed out during power method.
         random_seed: Seed for matrices that are not deterministic (e.g., FISHER_MC).

@@ -15,6 +15,11 @@ _supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_DIAG]
 
 
 class Hessian(MatrixManager):
+    """
+    This class manages the calculation of hessian matrix.
+    Args:
+        model: NN model to calculate Hessian for.
+    """
     def __init__(self, model):
         super().__init__(model, HESSIAN)
 
@@ -80,6 +85,33 @@ def hvp(model,
         all_reduce=False,
         is_master=True,
         data_average=False):
+    """
+    Calculates Hessian Vector Product.
+    Args:
+        model: NN model of interest.
+        loss_fn: Loss function. Reduction method is expected to be summation.
+        vec: ParamVector instance used to compute HVP.
+        inputs, targets: Single batch of inputs and targets to feed in to the model.
+        data_loader: torch.utils.data.DataLoader instance to feed in to the model.
+                     Either inputs and targets or data_loader must be specified.
+        is_distributed: If True, distributed computation is supported.
+        all_reduce: If this and is_distributed is True, all-reduces the computed HVP across
+                    all processes. Otherwise, the computed HVP will be reduced only to master process.
+        is_master: This flag indicates whether the current process is the master.
+        data_average: If True, HVP is averaged over all data. Otherwise, HVP is summed over all data.
+    Returns:
+        HVP and gradient of the loss with respect to the model parameters.
+    Example::
+        >>> model = torch.nn.Linear(100, 10)
+        >>> x = torch.randn(32, 100)
+        >>> y = torch.tensor([0]*32, dtype=torch.long)
+        >>> loss_fn = torch.nn.CrossEntropyLoss(reduction='sum')
+        >>> vec = {p: torch.randn_like(p) for p in model.parameters()}
+        >>> vec = asdl.ParamVector(vec.keys(), vec.values())
+        >>> hvp, grad = asdl.hvp(model, loss_fn, vec, x, y)
+        >>> hvp.get_flatten_vector()
+        tensor([ 18.2251, -13.8554,   7.7957,  ...,  -7.8146,  -1.7201,   2.8145])
+    """
     device = next(model.parameters()).device
     if data_loader is not None:
         scale = 1 / len(data_loader.dataset) if data_average else 1
@@ -128,6 +160,34 @@ def hessian_eig(
     print_progress=False,
     data_average=False
 ):
+    """
+    Calculates top_n greatest (in absolute value) eigenvalues and their eigenvectors using power method.
+    Eigenvalues are sorted in descending order and eigenvectors are sorted correspondingly.
+    Args:
+        model: NN model of interest.
+        loss_fn: Loss function. Reduction method is expected to be summation.
+        inputs, targets: Single batch of inputs and targets to feed in to the model.
+        data_loader: torch.utils.data.DataLoader instance to feed in to the model.
+                     Either inputs and targets or data_loader must be specified.
+        top_n: The number of greatest eigenvalues to be computed and returned.
+        max_iters: The maximum number of iterations for power method.
+        tol: The tolerance value for power method to check convergence.
+        is_distributed: If True, distributed computation is supported.
+        print_progress: If True, progress is printed out during power method.
+        data_average: If True, the average over all data is taken for Hessian, otherwise summation over all data
+                      is taken.
+    Returns:
+        The top_n greatest (in absolute value) eigenvalues and their corresponding eigenvectors. Eigenvalues is
+        sorted in descending oreder and eigenvectors is sorted correspondingly.
+    Example::
+        >>> model = torch.nn.Linear(100, 10)
+        >>> x = torch.randn(32, 100)
+        >>> y = torch.tensor([0]*32, dtype=torch.long)
+        >>> loss_fn = torch.nn.CrossEntropyLoss(reduction='sum')
+        >>> eigvals, eigvecs = hessian_eig(model, loss_fn, x, y, top_n=5)
+        >>> eigvals
+        [42.4885139465332, 41.401275634765625, 33.121273040771484, 32.43955993652344, 31.223182678222656]
+    """
     def hvp_fn(vec: ParamVector) -> ParamVector:
         return hvp(model,
                    loss_fn,
@@ -164,6 +224,39 @@ def hessian_free(
         print_progress=False,
         data_average=False
 ):
+    """
+    Solves (H + d * I)x = b with respect to x using conjugate gradient method.
+    Args:
+        model: NN model of interest.
+        loss_fn: Loss function. Reduction method is expected to be summation.
+        b: ParamVector instance representing the right-hand side of the equation to be solved.
+        data_loader: torch.utils.data.DataLoader instance to feed in to the model.
+        inputs, targets: Single batch of inputs and targets to feed in to the model.
+                         Either inputs and targets or data_loader must be specified.
+        init_x: ParamVector instance representing the initial value for x in the equation. If None,
+                x will be initialized as a zero vector.
+        damping: The damping value for d in the equation to be solved.
+        max_iters: The maximum number of iterations.
+        tol: The tolerance value for conjugate gradient method to check convergence.
+        is_distributed: If True, distributed computation is supported.
+        print_progress: If True, progress is printed out during conjugate gradient method.
+        data_average: If True, the average over all data is taken for Hessian, otherwise summation over all data
+                      is taken.
+    Returns:
+        ParamVector instance which is the solution of the equation (F + d * I)x = b obtained by conjugate
+        gradient method.
+    Example::
+        >>> model = torch.nn.Linear(100, 10)
+        >>> inputs = torch.randn(32, 100)
+        >>> targets = torch.tensor([0]*32, dtype=torch.long)
+        >>> loss_fn = torch.nn.CrossEntropyLoss(reduction='sum')
+        >>> b = {p: torch.randn_like(p) for p in model.parameters()}
+        >>> b = ParamVector(b.keys(), b.values())
+        >>> x = hessian_free(model, loss_fn, b, inputs=inputs, targets=targets)
+        >>> x.get_flatten_vector()
+        tensor([  43.3498,  161.1647, -113.9113,  ..., -138.1220,  710.3869,
+                -392.6661])
+    """
     def hvp_fn(vec: ParamVector) -> ParamVector:
         return hvp(model,
                    loss_fn,
@@ -194,6 +287,34 @@ def hessian_quadratic_form(
         data_average=True,
         damping=None,
 ):
+    """
+    Calculates quadratic form, v.T * (H + d * I) * v of Hessian Matrix H given a vector v and a damping value d.
+    Also calculates dot product of v and the gradient of loss with respect to model parameters.
+    Args:
+        model: NN model of interest.
+        loss_fn: Loss function. Reduction method is expected to be summation.
+        v: ParamVector instance for computing the quadratic form. If None, gradients of model parameters is used,
+           which means the model parameter's gradient must be calculated beforehand.
+        data_loader: torch.utils.data.DataLoader instance to feed in to the model.
+        inputs, targets: Single batch of inputs and targets to feed in to the model.
+                         Either inputs and targets or data_loader must be specified.
+        is_distributed: If True, distributed computation is supported.
+        data_average: If True, the average over all data is taken for Hessian, otherwise summation over all data
+                      is taken.
+        damping: The damping value.
+    Returns:
+        The dot product of v and the gradient of loss with respect to model parameters, and quadratic form of
+        Hessian given a vector.
+    Example::
+        >>> model = torch.nn.Linear(100, 10)
+        >>> inputs = torch.randn(32, 100)
+        >>> targets = torch.tensor([0]*32, dtype=torch.long)
+        >>> loss_fn = torch.nn.CrossEntropyLoss(reduction='sum')
+        >>> v = {p: torch.randn_like(p) for p in model.parameters()}
+        >>> v = ParamVector(v.keys(), v.values())
+        >>> hessian_quadratic_form(model, loss_fn, v=v, inputs=inputs, targets=targets)
+        (tensor(1.6246, grad_fn=<SumBackward0>), tensor(99.0703))
+    """
     if v is None:
         grads = {p: p.grad for p in model.parameters() if p.requires_grad}
         v = ParamVector(grads.keys(), grads.values())

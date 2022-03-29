@@ -555,7 +555,7 @@ def calculate_fisher(
              without explicitly constructing FIM.
         vec: ParamVector instance used to compute FVP when fvp is True. With a vector torch.Tensor v,
              ParamVector can be instantiated with e.g. ParamVector([p for p in model.parameters()], v).
-        is_ditributed: When True, distributed computation is supported.
+        is_distributed: When True, distributed computation is supported.
         all_reduce: When this and is_distributed is True, all-reduces the computed Fisher across
                     all processes. Otherwise, the computed Fisher will be reduced only to master process.
         is_master: This flag indicates whether the current process is the master.
@@ -728,7 +728,6 @@ def fisher_esd(
         num_bins: The number of partitions between max and min eigenvalue for plotting.
         sigma_squared: Variance of gaussian kernel.
         overhead: Margin added to eigenvalue spectra.
-        is_distributed: When True, distributed computation is supported.
     Examples::
         >>> model = torch.nn.Linear(100, 10)
         >>> x = torch.randn(32, 100)
