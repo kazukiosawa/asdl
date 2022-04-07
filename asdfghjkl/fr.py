@@ -51,7 +51,7 @@ class PastTask:
         self.kernel_inv = torch.linalg.inv(kernel).detach_()
 
     @torch.no_grad()
-    def update_mean(self, model, max_mem_per_batch=200):#500):
+    def update_mean(self, model, max_mem_per_batch=50):#100):#200):#500):
         import numpy as np
         n_batches = int(np.ceil(len(self.memorable_points) / max_mem_per_batch))
 
@@ -257,7 +257,8 @@ class FROMP:
                                    data_loader: DataLoader,
                                    class_ids: List[int] = None,
                                    memorable_points_as_tensor=True,
-                                   is_distributed=False):
+                                   is_distributed=False,
+                                   empty_gpu_cache_=False):
         model = self.model
         if isinstance(model, DDP):
             # As DDP disables hook functions required for Kernel calculation,
@@ -265,7 +266,7 @@ class FROMP:
             model = model.module
         model.eval()
 
-        if not self.use_identity_kernel:
+        if self.penalty_type == 'fromp' and not self.use_identity_kernel:
             # update GGN and inverse for the current task
             with customize_head(model, class_ids):
                 self.precond.update_curvature(data_loader=data_loader)
@@ -289,11 +290,13 @@ class FROMP:
         # update information (kernel & mean) for each observed task
         for i, task in enumerate(self.observed_tasks):
             with customize_head(model, task.class_ids, softmax=self.penalty_type!='der', temp=self.temp):
-                if not self.use_identity_kernel:
+                if self.penalty_type == 'fromp' and not self.use_identity_kernel:
                     task.update_kernel(model, self.kernel_fn, self.eps)
-                empty_gpu_cache(f"pre task.update_mean for task #{i+1}")
+                if empty_gpu_cache_:
+                    empty_gpu_cache(f"pre task.update_mean for task #{i+1}")
                 task.update_mean(model)
-                empty_gpu_cache(f"post task.update_mean for task #{i+1}")
+                if empty_gpu_cache_:
+                    empty_gpu_cache(f"post task.update_mean for task #{i+1}")
 
     def get_penalty(self, tau=None, temp=None, max_tasks=None, mem_indices=None, use_kprior_penalty=False):
         assert self.is_ready, 'Functional regularization is not ready yet, ' \
@@ -349,7 +352,7 @@ def collect_memorable_points(model,
     memorable_points_kwargs = dict(model=model, data_loader=data_loader, dataset=dataset, device=device,
                                     n_memorable_points=n_memorable_points, select_method=select_method)
 
-    n_task_data = len(dataset.get_task_targets()) if hasattr(dataset, 'task_indices') else len(dataset)
+    n_task_data = len(dataset.get_hard_task_targets()) if hasattr(dataset, 'task_indices') else len(dataset)
     if n_memorable_points >= n_task_data:
         # Use ALL data points as memorable points
         memorable_points_indices = range(n_task_data)
@@ -385,7 +388,7 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
     if hasattr(dataset, 'targets'):
         targets = torch.tensor(dataset.targets)
     elif hasattr(dataset, 'task_indices'):
-        targets = torch.tensor(dataset.get_task_targets())
+        targets = torch.tensor(dataset.get_hard_task_targets())
     else:
         print(type(data_loader))
         print(vars(data_loader).keys())
