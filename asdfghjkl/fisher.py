@@ -1,9 +1,13 @@
 from functools import partial
+from typing import List, Union
 import numpy as np
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.cuda import Stream
+import torch.distributed as dist
+
 from .core import no_centered_cov
 from .utils import skip_param_grad
 from .matrices import *
@@ -35,7 +39,9 @@ __all__ = [
     'fisher_quadratic_form_for_cross_entropy',
     'fisher_quadratic_form_for_mse',
     'LOSS_CROSS_ENTROPY',
-    'LOSS_MSE'
+    'LOSS_MSE',
+    'FisherManager',
+    'get_fisher_class',
 ]
 
 _supported_types = [FISHER_EXACT, FISHER_MC, FISHER_EMP]
@@ -43,13 +49,10 @@ _supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, 
 _supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_LAYER_WISE]
 
 
-class _FisherBase(MatrixManager):
-    def __init__(self, model, **kwargs):
-        super().__init__(model, self.fisher_type)
-
-    @property
-    def fisher_type(self):
-        raise NotImplementedError
+class FisherManager(MatrixManager):
+    def __init__(self, model, fisher_type):
+        super().__init__(model, fisher_type)
+        self.fisher_type = fisher_type
 
     @property
     def is_fisher_emp(self):
@@ -70,9 +73,8 @@ class _FisherBase(MatrixManager):
     def zero_fisher(self, fvp=False):
         attr = self.fvp_attr if fvp else self.fisher_attr
         for module in self._model.modules():
-            f = getattr(module, attr, None)
-            if f is not None:
-                f.mul_(0)
+            if hasattr(module, attr):
+                delattr(module, attr)
 
     def calculate_fisher(self,
                          fisher_shapes,
@@ -85,7 +87,8 @@ class _FisherBase(MatrixManager):
                          accumulate=False,
                          calc_emp_loss_grad=False,
                          seed=None,
-                         scale=1.):
+                         scale=1.,
+                         stream: Stream = None):
         model = self._model
         device = self._device
         if isinstance(fisher_shapes, str):
@@ -106,7 +109,7 @@ class _FisherBase(MatrixManager):
             if seed:
                 torch.random.manual_seed(seed)
 
-            with no_centered_cov(model, fisher_shapes, cvp=fvp, vectors=vec) as cxt:
+            with no_centered_cov(model, fisher_shapes, cvp=fvp, vectors=vec, stream=stream) as cxt:
                 def closure(loss_expr, retain_graph=False):
                     cxt.clear_batch_grads()
                     loss = loss_expr()
@@ -122,13 +125,7 @@ class _FisherBase(MatrixManager):
 
                 y = model(x)
                 self._fisher_core(closure, y, t)
-                for module in model.modules():
-                    # accumulate layer-wise fisher/fvp
-                    self._accumulate_fisher(module, cxt.cov_symmatrix(module), scale)
-                    self._accumulate_fvp(module, cxt.cvp_paramvector(module), scale)
-                # accumulate full fisher/fvp
-                self._accumulate_fisher(model, cxt.full_cov_symmatrix(model), scale)
-                self._accumulate_fvp(model, cxt.full_cvp_paramvector(model), scale)
+                self.accumulate(cxt, scale, fvp=fvp)
 
             if calc_emp_loss_grad_after_fisher:
                 assert t is not None
@@ -169,10 +166,36 @@ class _FisherBase(MatrixManager):
     def _fisher_core(self, closure, outputs, targets):
         raise NotImplementedError
 
+    def accumulate(self, cxt, scale=1., target_module=None, target_module_name=None, fvp=False):
+        model = self._model
+        for name, module in model.named_modules():
+            if target_module is not None and module != target_module:
+                continue
+            if target_module_name is not None and name != target_module_name:
+                continue
+            # accumulate layer-wise fisher/fvp
+            if fvp:
+                self._accumulate_fvp(module, cxt.cvp_paramvector(module, pop=True), scale)
+            else:
+                self._accumulate_fisher(module, cxt.cov_symmatrix(module, pop=True), scale)
+            if target_module is not None:
+                break
+            if target_module_name is not None:
+                target_module = module
+                break
+
+        if target_module is None or target_module == model:
+            # accumulate full fisher/fvp
+            if fvp:
+                self._accumulate_fvp(model, cxt.full_cvp_paramvector(model, pop=True), scale)
+            else:
+                self._accumulate_fisher(model, cxt.full_cov_symmatrix(model, pop=True), scale)
+
     def _accumulate_fisher(self, module: nn.Module, new_fisher, scale=1., fvp=False):
         if new_fisher is None:
             return
-        new_fisher.mul_(scale)
+        if scale != 1:
+            new_fisher.mul_(scale)
         dst_attr = self.fvp_attr if fvp else self.fisher_attr
         dst_fisher = getattr(module, dst_attr, None)
         if dst_fisher is None:
@@ -184,8 +207,78 @@ class _FisherBase(MatrixManager):
     def _accumulate_fvp(self, module: nn.Module, new_fisher, scale=1.):
         self._accumulate_fisher(module, new_fisher, scale, fvp=True)
 
-    def reduce_fisher(self, is_master=True, all_reduce=False):
-        self.reduce_matrices(is_master=is_master, all_reduce=all_reduce)
+    def get_fisher_tensor(self, module: nn.Module, *keys) -> Union[torch.Tensor, None]:
+        fisher = getattr(module, self.fisher_attr, None)
+        if fisher is None:
+            return None
+        data = fisher
+        for key in keys:
+            data = getattr(data, key, None)
+        if data is not None:
+            assert isinstance(data, torch.Tensor)
+        return data
+
+    def reduce_scatter_fisher(self,
+                              module_partitions: List[List[torch.nn.Module]],
+                              *keys,
+                              with_grad=False,
+                              group: dist.ProcessGroup = None,
+                              async_op=False):
+        assert dist.is_initialized()
+        assert torch.cuda.is_available()
+        assert dist.get_backend(group) == dist.Backend.NCCL
+        world_size = dist.get_world_size(group)
+        assert len(module_partitions) == world_size
+        assert all(len(module_partitions[0]) == len(module_partitions[i]) for i in range(1, world_size))
+        tensor_partitions = []
+        for module_list in module_partitions:
+            tensor_list = []
+            for module in module_list:
+                tensor = self.get_fisher_tensor(module, *keys)
+                if tensor is None:
+                    continue
+                assert tensor.is_cuda
+                tensor_list.append(tensor)
+                if with_grad:
+                    for p in module.parameters():
+                        if p.requires_grad and p.grad is not None:
+                            tensor_list.append(p.grad)
+            tensor_partitions.append(tensor_list)
+        num_tensors_per_partition = len(tensor_partitions[0])
+        assert all(len(tensor_partitions[i]) == num_tensors_per_partition for i in range(1, world_size))
+        handles = []
+        for i in range(num_tensors_per_partition):
+            input_list = [tensor_list[i] for tensor_list in tensor_partitions]
+            output = input_list[dist.get_rank(group)]
+            handles.append(dist.reduce_scatter(output, input_list, group=group, async_op=async_op))
+        return handles
+
+    def reduce_fisher(self,
+                      modules,
+                      *keys,
+                      all_reduce=True,
+                      with_grad=False,
+                      dst=0,
+                      group: dist.ProcessGroup = None,
+                      async_op=False):
+        assert dist.is_initialized()
+        tensor_list = []
+        for module in modules:
+            tensor = self.get_fisher_tensor(module, *keys)
+            if tensor is None:
+                continue
+            tensor_list.append(tensor)
+            if with_grad:
+                for p in module.parameters():
+                    if p.requires_grad and p.grad is not None:
+                        tensor_list.append(p.grad)
+        handles = []
+        for tensor in tensor_list:
+            if all_reduce:
+                handles.append(dist.all_reduce(tensor, group=group, async_op=async_op))
+            else:
+                handles.append(dist.reduce(tensor, dst=dst, group=group, async_op=async_op))
+        return handles
 
     def reduce_fvp(self, fisher_shape, is_master=True, all_reduce=False):
         v = self.load_fvp(fisher_shape)
@@ -218,16 +311,15 @@ class _FisherBase(MatrixManager):
             return rst
 
 
-class _FisherCrossEntropy(_FisherBase):
+class _FisherCrossEntropy(FisherManager):
     @property
     def loss_fn(self):
         return partial(F.cross_entropy, reduction='sum')
 
 
 class FisherExactCrossEntropy(_FisherCrossEntropy):
-    @property
-    def fisher_type(self):
-        return FISHER_EXACT
+    def __init__(self, model):
+        super().__init__(model, FISHER_EXACT)
 
     def _fisher_core(self, closure, outputs, unused):
         log_probs = F.log_softmax(outputs, dim=1)
@@ -237,6 +329,7 @@ class FisherExactCrossEntropy(_FisherCrossEntropy):
             sqrt_probs = torch.sqrt(probs)
         for i in range(n_classes):
             targets = torch.tensor([i] * n, device=outputs.device)
+
             def loss_expr():
                 loss = F.nll_loss(log_probs, targets, reduction='none')
                 return loss.mul(sqrt_probs[:, i]).sum()
@@ -245,12 +338,8 @@ class FisherExactCrossEntropy(_FisherCrossEntropy):
 
 class FisherMCCrossEntropy(_FisherCrossEntropy):
     def __init__(self, model, n_mc_samples=1):
-        super().__init__(model)
+        super().__init__(model, FISHER_MC)
         self.n_mc_samples = n_mc_samples
-
-    @property
-    def fisher_type(self):
-        return FISHER_MC
 
     def _fisher_core(self, closure, outputs, unused):
         probs = F.softmax(outputs, dim=1)
@@ -264,9 +353,8 @@ class FisherMCCrossEntropy(_FisherCrossEntropy):
 
 
 class FisherEmpCrossEntropy(_FisherCrossEntropy):
-    @property
-    def fisher_type(self):
-        return FISHER_EMP
+    def __init__(self, model):
+        super().__init__(model, FISHER_EMP)
 
     def _fisher_core(self, closure, outputs, targets):
         log_probs = F.log_softmax(outputs, dim=1)
@@ -274,16 +362,15 @@ class FisherEmpCrossEntropy(_FisherCrossEntropy):
                 retain_graph=False)
 
 
-class _FisherMSE(_FisherBase):
+class _FisherMSE(FisherManager):
     @property
     def loss_fn(self):
         return lambda x, y: 0.5 * (x - y).norm(dim=1).sum()
 
 
 class FisherExactMSE(_FisherMSE):
-    @property
-    def fisher_type(self):
-        return FISHER_EXACT
+    def __init__(self, model):
+        super().__init__(model, FISHER_EXACT)
 
     def _fisher_core(self, closure, outputs, unused):
         _, n_dims = outputs.shape
@@ -293,13 +380,9 @@ class FisherExactMSE(_FisherMSE):
 
 class FisherMCMSE(_FisherMSE):
     def __init__(self, model, n_mc_samples=1, var=0.5):
-        super().__init__(model)
+        super().__init__(model, FISHER_MC)
         self.n_mc_samples = n_mc_samples
         self.var = var
-
-    @property
-    def fisher_type(self):
-        return FISHER_MC
 
     def _fisher_core(self, closure, outputs, unused):
         dist = torch.distributions.normal.Normal(outputs, scale=np.sqrt(self.var))
@@ -311,13 +394,31 @@ class FisherMCMSE(_FisherMSE):
 
 
 class FisherEmpMSE(_FisherMSE):
-    @property
-    def fisher_type(self):
-        return FISHER_EMP
+    def __init__(self, model):
+        super().__init__(model, FISHER_EMP)
 
     def _fisher_core(self, closure, outputs, targets):
         closure(lambda: 0.5 * F.mse_loss(outputs, targets, reduction='sum'),
                 retain_graph=False)
+
+
+def get_fisher_class(fisher_type, loss_type):
+    assert fisher_type in _supported_types
+    assert loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]
+    if loss_type == LOSS_CROSS_ENTROPY:
+        if fisher_type == FISHER_EXACT:
+            return FisherExactCrossEntropy
+        elif fisher_type == FISHER_MC:
+            return FisherMCCrossEntropy
+        else:
+            return FisherEmpCrossEntropy
+    else:
+        if fisher_type == FISHER_EXACT:
+            return FisherExactMSE
+        elif fisher_type == FISHER_MC:
+            return FisherMCMSE
+        else:
+            return FisherEmpMSE
 
 
 def calculate_fisher(
@@ -341,23 +442,7 @@ def calculate_fisher(
         scale=1.,
         **kwargs
 ):
-    assert fisher_type in _supported_types
-    assert loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]
-    if loss_type == LOSS_CROSS_ENTROPY:
-        if fisher_type == FISHER_EXACT:
-            fisher_cls = FisherExactCrossEntropy
-        elif fisher_type == FISHER_MC:
-            fisher_cls = FisherMCCrossEntropy
-        else:
-            fisher_cls = FisherEmpCrossEntropy
-    else:
-        if fisher_type == FISHER_EXACT:
-            fisher_cls = FisherExactMSE
-        elif fisher_type == FISHER_MC:
-            fisher_cls = FisherMCMSE
-        else:
-            fisher_cls = FisherEmpMSE
-
+    fisher_cls = get_fisher_class(fisher_type, loss_type)
     f = fisher_cls(model, **kwargs)
     loss, outputs = f.calculate_fisher(
         fisher_shapes,

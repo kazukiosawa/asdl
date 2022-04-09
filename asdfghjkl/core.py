@@ -1,6 +1,9 @@
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
+import torch.cuda
 import torch.nn as nn
+from torch.cuda import Stream
+
 from .utils import record_original_requires_grad
 from .operations import *
 from .matrices import *
@@ -9,22 +12,22 @@ from .vector import ParamVector
 _supported_module_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d, nn.LayerNorm, nn.Embedding, Bias, Scale)
 
 
+__all__ = ['extend', 'no_centered_cov', 'save_inputs_outgrads', 'save_inputs', 'save_outgrads',
+           'module_wise_assignments', 'modules_to_assign']
+
+
 @contextmanager
-def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamVector = None) -> OperationContext:
+def extend(model,
+           *op_names,
+           ignore_modules=None,
+           map_rule=None,
+           vectors: ParamVector = None,
+           stream: Stream = None) -> OperationContext:
     handles = []
     cxt = OperationContext(vectors=vectors)
+    stream_cxt = torch.cuda.stream(stream) if torch.cuda.is_available() and stream is not None else nullcontext()
 
     try:
-        def forward_hook(module, in_data, out_data):
-            in_data = in_data[0]
-            cxt.call_operations_in_forward(module, in_data, out_data)
-
-            def backward_hook(out_grads):
-                cxt.call_operations_in_backward(module, in_data, out_data, out_grads)
-
-            if out_data.requires_grad:
-                handles.append(out_data.register_hook(backward_hook))
-
         for module, op_names in module_wise_assignments(model, *op_names, ignore_modules=ignore_modules, map_rule=map_rule):
             if len(op_names) == 0:
                 # no operation is assigned
@@ -32,8 +35,36 @@ def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamV
             op_class = get_op_class(module)
             if op_class is None:
                 continue
+            has_fwd_op = any(op_name in FWD_OPS for op_name in op_names)
+            has_bwd_op = any(op_name in BWD_OPS for op_name in op_names)
+            has_bwd_op_with_inputs = any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names)
+
             # register hooks and operations for child modules
-            handles.append(module.register_forward_hook(forward_hook))
+            if has_fwd_op or has_bwd_op_with_inputs:
+                if has_bwd_op_with_inputs:
+                    def forward_hook(_module, in_data, out_data):
+                        with stream_cxt:
+                            cxt.call_operations_in_forward(_module, in_data[0].detach(), out_data.detach())
+                        if out_data.requires_grad:
+                            def _backward_hook(out_grads):
+                                with stream_cxt:
+                                    cxt.call_operations_in_backward(_module, in_data[0].detach(), out_data.detach(), out_grads.detach())
+                            handles.append(out_data.register_hook(_backward_hook))
+                else:
+                    def forward_hook(_module, in_data, out_data):
+                        with stream_cxt:
+                            cxt.call_operations_in_forward(_module, in_data[0].detach(), out_data.detach())
+                handles.append(module.register_forward_hook(forward_hook))
+            if (not has_bwd_op_with_inputs) and has_bwd_op:
+                def backward_hook(_module, unused, out_grads):
+                    with stream_cxt:
+                        try:
+                            cxt.call_operations_in_backward(_module, None, None, out_grads[0].detach())
+                        except NameError:
+                            # context resource is already released.
+                            pass
+
+                handles.append(module.register_full_backward_hook(backward_hook))
             cxt.register_operation(module, op_class(module, op_names, model_for_kernel=model))
         if not cxt.is_operation_registered(model):
             # register empty operation for parent model
@@ -49,7 +80,7 @@ def extend(model, *op_names, ignore_modules=None, map_rule=None, vectors: ParamV
         del cxt
 
 
-def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = None) -> OperationContext:
+def no_centered_cov(model: nn.Module, shapes, ignore_modules=None, cvp=False, vectors: ParamVector = None, stream: Stream = None) -> OperationContext:
     shape_to_op = {
         SHAPE_FULL: OP_BATCH_GRADS,  # full
         SHAPE_LAYER_WISE: OP_CVP if cvp else OP_COV,  # layer-wise block-diagonal
@@ -57,7 +88,7 @@ def no_centered_cov(model: nn.Module, shapes, cvp=False, vectors: ParamVector = 
         SHAPE_UNIT_WISE: OP_COV_UNIT_WISE,  # unit-wise block-diagonal
         SHAPE_DIAG: OP_COV_DIAG,  # diagonal
     }
-    return extend(model, *shapes, map_rule=lambda s: shape_to_op[s], vectors=vectors)
+    return extend(model, *shapes, ignore_modules=ignore_modules, map_rule=lambda s: shape_to_op[s], vectors=vectors, stream=stream)
 
 
 def save_inputs_outgrads(model: nn.Module, targets=None, ignore_modules=None) -> OperationContext:
@@ -65,6 +96,22 @@ def save_inputs_outgrads(model: nn.Module, targets=None, ignore_modules=None) ->
         assign_rules = [(t, OP_SAVE_INPUTS, OP_SAVE_OUTGRADS) for t in targets]
     else:
         assign_rules = [OP_SAVE_INPUTS, OP_SAVE_OUTGRADS]
+    return extend(model, *assign_rules, ignore_modules=ignore_modules)
+
+
+def save_inputs(model: nn.Module, targets=None, ignore_modules=None) -> OperationContext:
+    if targets is not None:
+        assign_rules = [(t, OP_SAVE_INPUTS) for t in targets]
+    else:
+        assign_rules = [OP_SAVE_INPUTS]
+    return extend(model, *assign_rules, ignore_modules=ignore_modules)
+
+
+def save_outgrads(model: nn.Module, targets=None, ignore_modules=None) -> OperationContext:
+    if targets is not None:
+        assign_rules = [(t, OP_SAVE_OUTGRADS) for t in targets]
+    else:
+        assign_rules = [OP_SAVE_OUTGRADS]
     return extend(model, *assign_rules, ignore_modules=ignore_modules)
 
 
@@ -165,6 +212,8 @@ def module_wise_assignments(model, *assign_rules, ignore_modules=None, map_rule=
 
     for name, module in named_supported_modules(model):
         if module in ignore_modules:
+            continue
+        if any(isinstance(module, cls) for cls in ignore_modules if isinstance(cls, type)):
             continue
         if any(keyword in name for keyword in ignore_modules if isinstance(keyword, str)):
             continue

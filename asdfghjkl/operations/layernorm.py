@@ -15,6 +15,21 @@ class LayerNorm(Operation):
 
     normalized_shape: f[0] x f[1] x ... x f[-1]
     """
+    def __init__(self, module, op_names, model_for_kernel=None):
+        if OP_COV_KRON in op_names:
+            op_names = op_names.copy()
+            # kron operation is not supported. unit_wise will be used instead.
+            op_names.remove(OP_COV_KRON)
+            op_names.append(OP_COV_UNIT_WISE)
+
+        if OP_GRAM_HADAMARD in op_names:
+            op_names = op_names.copy()
+            # gram hadamard operation is not supported. gram direct will be used instead.
+            op_names.remove(OP_GRAM_HADAMARD)
+            op_names.append(OP_GRAM_DIRECT)
+
+        super().__init__(module, op_names, model_for_kernel)
+
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):
         # restore normalized input
@@ -36,21 +51,6 @@ class LayerNorm(Operation):
             out_grads = out_grads.flatten(end_dim=-norm_shape_len - 1)
         return out_grads
 
-    def __init__(self, module, op_names, model_for_kernel=None):
-        if OP_COV_KRON in op_names:
-            op_names = op_names.copy()
-            # kron operation is not supported. unit_wise will be used instead.
-            op_names.remove(OP_COV_KRON)
-            op_names.append(OP_COV_UNIT_WISE)
-
-        if OP_GRAM_HADAMARD in op_names:
-            op_names = op_names.copy()
-            # gram hadamard operation is not supported. gram direct will be used instead.
-            op_names.remove(OP_GRAM_HADAMARD)
-            op_names.append(OP_GRAM_DIRECT)
-
-        super().__init__(module, op_names, model_for_kernel)
-
     @staticmethod
     def batch_grads_weight(
         module: nn.Module, in_data: torch.Tensor, out_grads: torch.Tensor
@@ -60,7 +60,15 @@ class LayerNorm(Operation):
     @staticmethod
     def batch_grads_bias(module, out_grads):
         return out_grads
-    
+
+    @staticmethod
+    def grad_weight(module: nn.Module, in_data: torch.Tensor, out_grads: torch.Tensor):
+        return in_data.mul(out_grads).sum(dim=0)
+
+    @staticmethod
+    def grad_bias(module: nn.Module, out_grads: torch.Tensor):
+        return out_grads.sum(dim=0)
+
     @staticmethod
     def cov_diag_weight(module, in_data, out_grads):
         grads = in_data.mul(out_grads)
@@ -78,11 +86,7 @@ class LayerNorm(Operation):
         cov_ww = (grads_w ** 2).sum(0).flatten()  # n_features x 1
         cov_bb = (grads_b ** 2).sum(0).flatten()  # n_features x 1
         cov_wb = (grads_w * grads_b).sum(0).flatten()  # n_features x 1
-        blocks = torch.zeros(n_features, 2, 2).to(in_data.device)
-        for i in range(n_features):
-            blocks[i][0][0] = cov_ww[i]
-            blocks[i][1][1] = cov_bb[i]
-            blocks[i][0][1] = blocks[i][1][0] = cov_wb[i]
+        blocks = torch.vstack([cov_ww, cov_wb, cov_wb, cov_bb]).reshape(2, 2, n_features).transpose(0, 2)
         return blocks  # n_features x 2 x 2
 
     @staticmethod

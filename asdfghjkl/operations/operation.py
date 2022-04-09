@@ -1,8 +1,10 @@
-from typing import Dict
+from typing import Dict, List
 
 import torch
 import torch.nn as nn
-from ..utils import original_requires_grad, im2col_2d
+from torch.cuda import nvtx
+from ..utils import original_requires_grad
+from ..matrices import *
 from ..symmatrix import *
 from ..vector import ParamVector
 
@@ -31,12 +33,9 @@ ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
            OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS,
            OP_SAVE_INPUTS, OP_SAVE_OUTGRADS]
 
-FWD_OPS = [OP_SAVE_INPUTS, OP_COV_KRON, OP_GRAM_HADAMARD,
-           OP_RFIM_RELU, OP_RFIM_SOFTMAX]
-BWD_OPS_WITH_INPUTS = [OP_COV, OP_CVP, OP_COV_DIAG, OP_COV_UNIT_WISE,
-                       OP_BATCH_GRADS, OP_GRAM_DIRECT]
-BWD_OPS = [OP_SAVE_OUTGRADS, OP_COV_KRON, OP_GRAM_HADAMARD,
-           OP_RFIM_RELU, OP_RFIM_SOFTMAX] + BWD_OPS_WITH_INPUTS
+FWD_OPS = [OP_SAVE_INPUTS, OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX]
+BWD_OPS_WITH_INPUTS = [OP_COV, OP_CVP, OP_COV_DIAG, OP_COV_UNIT_WISE, OP_BATCH_GRADS, OP_GRAM_DIRECT]
+BWD_OPS = [OP_SAVE_OUTGRADS, OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX] + BWD_OPS_WITH_INPUTS
 
 
 class Operation:
@@ -58,7 +57,7 @@ class Operation:
         self._op_names = op_names
         self._op_results = {}
 
-    def accumulate_result(self, value, *keys, concat=False, concat_dim=0):
+    def accumulate_result(self, value, *keys, extend=False):
         """
         Examples:
              accumulate_result(data, OP_COV_UNIT_WISE)
@@ -74,12 +73,12 @@ class Operation:
         key = keys[-1]
         if results.get(key, None) is None:
             results[key] = value
-        elif concat:
-            results[key] = torch.cat([results[key], value], dim=concat_dim)
+        elif extend:
+            results[key].extend(value)
         else:
             results[key] += value
 
-    def get_result(self, *keys, default=None):
+    def get_result(self, *keys, pop=False, default=None):
         results = self._op_results
         if len(keys) > 1:
             for key in keys[:-1]:
@@ -88,6 +87,8 @@ class Operation:
                 except KeyError:
                     return None
         key = keys[-1]
+        if pop:
+            return results.pop(key, default)
         return results.get(key, default)
 
     def clear_result(self, *keys):
@@ -96,27 +97,32 @@ class Operation:
             for key in keys[:-1]:
                 results = results[key]
         key = keys[-1]
-        del results[key]
+        results.pop(key, None)
 
     def clear_results(self):
         self._op_results = {}
 
-    @torch.no_grad()
+    def add_op_name(self, op_name):
+        if op_name not in self._op_names:
+            self._op_names.add(op_name)
+
+    def remove_op_name(self, op_name):
+        while op_name in self._op_names:
+            self._op_names.remove(op_name)
+
     def forward_post_process(self, in_data: torch.Tensor, out_data: torch.Tensor):
         module = self._module
         op_names = self._op_names
 
         if any(op_name in FWD_OPS for op_name in op_names):
             in_data = self.preprocess_in_data(module, in_data, out_data)
-            if original_requires_grad(module, 'bias'):
-                in_data = self.extend_in_data(in_data)
+            if OP_SAVE_INPUTS in op_names:
+                self.accumulate_result([in_data], OP_SAVE_INPUTS, extend=True)
 
         for op_name in op_names:
             if op_name not in FWD_OPS:
                 continue
-            if op_name == OP_SAVE_INPUTS:
-                self.accumulate_result(in_data, OP_SAVE_INPUTS, concat=True)
-            elif op_name == OP_COV_KRON:
+            if op_name == OP_COV_KRON:
                 A = self.cov_kron_A(module, in_data)
                 self.accumulate_result(A, OP_COV_KRON, 'A')
             elif op_name == OP_GRAM_HADAMARD:
@@ -127,19 +133,21 @@ class Operation:
                     A = self.gram_A(module, in_data, in_data)
                 else:
                     A = self.gram_A(module, in_data[:n1], in_data[n1:])
-                self.accumulate_result(A, OP_GRAM_HADAMARD, 'A')
+                if original_requires_grad(module, 'bias'):
+                    A += 1.
             elif op_name == OP_RFIM_RELU:
                 self.accumulate_result(self.rfim_relu(module, in_data, out_data), OP_RFIM_RELU)
             elif op_name == OP_RFIM_SOFTMAX:
                 self.accumulate_result(self.rfim_softmax(module, in_data, out_data), OP_RFIM_SOFTMAX)
 
-    @torch.no_grad()
     def backward_pre_process(self, in_data, out_data, out_grads, vector: torch.Tensor = None):
         module = self._module
         op_names = self._op_names
 
         if any(op_name in BWD_OPS for op_name in op_names):
             out_grads = self.preprocess_out_grads(module, out_grads)
+            if OP_SAVE_OUTGRADS in op_names:
+                self.accumulate_result([out_grads], OP_SAVE_OUTGRADS, extend=True)
         if any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names):
             in_data = self.preprocess_in_data(module, in_data, out_data)
 
@@ -204,8 +212,6 @@ class Operation:
                     self._model_for_kernel.kernel += torch.matmul(batch_g, batch_g2.T)
                 else:
                     self._model_for_kernel.kernel += torch.matmul(batch_g[:n1], batch_g2[n1:].T)
-            elif op_name == OP_SAVE_OUTGRADS:
-                self.accumulate_result(out_grads, OP_SAVE_OUTGRADS, concat=True)
             elif op_name in [OP_COV_DIAG, OP_BATCH_GRADS]:
                 if original_requires_grad(module, 'weight'):
                     rst = getattr(self,
@@ -252,6 +258,14 @@ class Operation:
 
     @staticmethod
     def batch_grads_bias(module, out_grads):
+        raise NotImplementedError
+
+    @staticmethod
+    def grad_weight(module, in_data, out_grads):
+        raise NotImplementedError
+
+    @staticmethod
+    def grad_bias(module, out_grads):
         raise NotImplementedError
 
     @staticmethod
@@ -336,9 +350,9 @@ class OperationContext:
         vector = self.get_vectors_by_module(module, flatten=True)
         self.get_operation(module).backward_pre_process(in_data, out_data, out_grads, vector)
 
-    def get_result(self, module, *keys, default=None):
+    def get_result(self, module, *keys, pop=False, default=None):
         try:
-            return self.get_operation(module).get_result(*keys, default=default)
+            return self.get_operation(module).get_result(*keys, pop=pop, default=default)
         except KeyError:
             return default
 
@@ -347,6 +361,60 @@ class OperationContext:
 
     def clear_result(self, module, *keys):
         return self.get_operation(module).clear_result(*keys)
+
+    def turn_on_op(self, op_name):
+        for operation in self._operations.values():
+            operation.add_op_name(op_name)
+
+    def turn_off_op(self, op_name):
+        for operation in self._operations.values():
+            operation.remove_op_name(op_name)
+
+    def turn_on_save_inputs_outgrads(self):
+        self.turn_on_op(OP_SAVE_INPUTS)
+        self.turn_on_op(OP_SAVE_OUTGRADS)
+
+    def turn_off_save_inputs_outgrads(self):
+        self.turn_off_op(OP_SAVE_INPUTS)
+        self.turn_off_op(OP_SAVE_OUTGRADS)
+
+    def calc_grads(self, scale=None):
+        for module in self._operations.keys():
+            if original_requires_grad(module, 'weight') \
+                    or original_requires_grad(module, 'bias'):
+                self.calc_grad(module, scale)
+
+    def calc_grad(self, module, scale=None):
+        operation, in_data, out_grads = self.load_op_in_out(module)
+        if scale is not None:
+            assert scale.shape[0] == out_grads.shape[0]
+            out_grads.mul_(scale.unsqueeze(-1))
+        if original_requires_grad(module, 'weight'):
+            grad = operation.grad_weight(module, in_data, out_grads)
+            if module.weight.grad is None:
+                module.weight.grad = grad
+            else:
+                module.weight.grad.data.copy_(grad)
+        if original_requires_grad(module, 'bias'):
+            grad = operation.grad_bias(module, out_grads)
+            if module.bias.grad is None:
+                module.bias.grad = grad
+            else:
+                module.bias.grad.data.copy_(grad)
+
+    def calc_kernel(self):
+        kernel = None
+        for module in self._operations.keys():
+            if original_requires_grad(module, 'weight'):
+                operation, in_data, out_grads = self.load_op_in_out(module)
+                A = operation.gram_A(module, in_data, in_data)
+                B = operation.gram_B(module, out_grads, out_grads)
+                if kernel is None:
+                    kernel = torch.zeros_like(A)
+                kernel += A.mul(B)
+                if original_requires_grad(module, 'bias'):
+                    kernel += B
+        return kernel
 
     def batch_grads(self, module, flatten=False):
         grads = self.get_result(module, OP_BATCH_GRADS)
@@ -400,12 +468,10 @@ class OperationContext:
         cvp = torch.einsum('ni,n->i', bg, bgtv)
         self.accumulate_result(module, cvp, OP_FULL_CVP)
 
-    def load_op_in_out(self, module):
+    def load_op_in_out(self, module) -> (Operation, List[torch.Tensor], List[torch.Tensor]):
         operation = self.get_operation(module)
         in_data = self.in_data(module)
         out_grads = self.out_grads(module)
-        assert in_data is not None and out_grads is not None, \
-            "in_data and out_grads have not been saved."
         return operation, in_data, out_grads
 
     def cov(self, module):
@@ -414,48 +480,85 @@ class OperationContext:
     def cvp(self, module):
         return self.get_result(module, OP_CVP)
 
-    def calc_cov(self, module):
-        operation, in_data, out_grads = self.load_op_in_out(module)
-        _, _, batch_g = operation.collect_batch_grads(in_data, out_grads)
-        cov = torch.matmul(batch_g.T, batch_g)
-        self.accumulate_result(module, cov, OP_COV)
-
     def cov_kron(self, module):
         return self.get_result(module, OP_COV_KRON)
-
-    def calc_cov_kron(self, module):
-        operation, in_data, out_grads = self.load_op_in_out(module)
-        A = operation.cov_kron_A(module, in_data)
-        B = operation.cov_kron_B(module, out_grads)
-        self.accumulate_result(module, A, OP_COV_KRON, 'A')
-        self.accumulate_result(module, B, OP_COV_KRON, 'B')
 
     def cov_unit_wise(self, module):
         return self.get_result(module, OP_COV_UNIT_WISE)
 
-    def calc_cov_unit_wise(self, module):
-        operation, in_data, out_grads = self.load_op_in_out(module)
-        unit = operation.cov_unit_wise(module, in_data, out_grads)
-        self.accumulate_result(module, unit, OP_COV_UNIT_WISE)
-
     def cov_diag(self, module):
         return self.get_result(module, OP_COV_DIAG)
 
-    def calc_cov_diag(self, module):
+    def calc_cov(self, module, shape=SHAPE_LAYER_WISE, kron=None, clear_in_out=False, num_batches=None, tag=''):
         operation, in_data, out_grads = self.load_op_in_out(module)
-        diag_w = operation.cov_diag_weight(module, in_data, out_grads)
-        self.accumulate_result(module, diag_w, OP_COV_DIAG, 'weight')
-        if original_requires_grad(module, 'bias'):
-            diag_b = operation.cov_diag_bias(module, out_grads)
-            self.accumulate_result(module, diag_b, OP_COV_DIAG, 'bias')
+        if shape == SHAPE_KRON:
+            if kron is None:
+                kron = ['A', 'B']
+            if 'A' in kron and in_data is not None:
+                max_len = len(in_data) if num_batches is None else min(len(in_data), num_batches)
+                with nvtx.range('cov_kron_A' + tag):
+                    for i in range(max_len):
+                        if clear_in_out:
+                            tensor = in_data.pop(0)
+                        else:
+                            tensor = in_data[i]
+                        A = operation.cov_kron_A(module, tensor)
+                        self.accumulate_result(module, A, OP_COV_KRON, 'A')
+            if 'B' in kron and out_grads is not None:
+                max_len = len(out_grads) if num_batches is None else min(len(out_grads), num_batches)
+                with nvtx.range('cov_kron_B' + tag):
+                    for i in range(max_len):
+                        if clear_in_out:
+                            tensor = out_grads.pop(0)
+                        else:
+                            tensor = out_grads[i]
+                        B = operation.cov_kron_B(module, tensor)
+                        self.accumulate_result(module, B, OP_COV_KRON, 'B')
+        else:
+            if in_data is None or out_grads is None:
+                return
+            max_len = min(len(in_data), len(out_grads))
+            if num_batches is not None:
+                max_len = min(max_len, num_batches)
+            with nvtx.range(f'cov_{shape}' + tag):
+                for i in range(max_len):
+                    if clear_in_out:
+                        tensor1 = in_data.pop(0)
+                        tensor2 = out_grads.pop(0)
+                    else:
+                        tensor1 = in_data[i]
+                        tensor2 = out_grads[i]
+                    if shape == SHAPE_LAYER_WISE:
+                        _, _, batch_g = operation.collect_batch_grads(tensor1, tensor2)
+                        cov = torch.matmul(batch_g.T, batch_g)
+                        self.accumulate_result(module, cov, OP_COV)
+                    elif shape == SHAPE_UNIT_WISE:
+                        unit = operation.cov_unit_wise(module, tensor1, tensor2)
+                        self.accumulate_result(module, unit, OP_COV_UNIT_WISE)
+                    elif shape == SHAPE_DIAG:
+                        diag_w = operation.cov_diag_weight(module, tensor1, tensor2)
+                        self.accumulate_result(module, diag_w, OP_COV_DIAG, 'weight')
+                        if original_requires_grad(module, 'bias'):
+                            diag_b = operation.cov_diag_bias(module, tensor2)
+                            self.accumulate_result(module, diag_b, OP_COV_DIAG, 'bias')
 
-    def cov_symmatrix(self, module):
-        kwargs = dict(data=self.cov(module), unit_data=self.cov_unit_wise(module))
-        cov_kron = self.cov_kron(module)
+    def calc_cov_kron(self, module, clear_in_out=False):
+        self.calc_cov(module, SHAPE_KRON, clear_in_out)
+
+    def calc_cov_unit_wise(self, module, clear_in_out=False):
+        self.calc_cov(module, SHAPE_UNIT_WISE, clear_in_out)
+
+    def calc_cov_diag(self, module, clear_in_out=False):
+        self.calc_cov(module, SHAPE_DIAG, clear_in_out)
+
+    def cov_symmatrix(self, module, pop=False):
+        kwargs = dict(data=self.get_result(module, OP_COV, pop=pop),
+                      unit_data=self.get_result(module, OP_COV_UNIT_WISE, pop=pop))
+        cov_kron = self.get_result(module, OP_COV_KRON, pop=pop)
         if cov_kron is not None:
-            kwargs['kron_A'] = cov_kron['A']
-            kwargs['kron_B'] = cov_kron['B']
-        cov_diag = self.cov_diag(module)
+            kwargs['kron_A'] = cov_kron.pop('A', None)
+            kwargs['kron_B'] = cov_kron.pop('B', None)
+        cov_diag = self.get_result(module, OP_COV_DIAG, pop=pop)
         if cov_diag is not None:
             if original_requires_grad(module, 'weight'):
                 kwargs['diag_weight'] = cov_diag['weight']
@@ -465,14 +568,14 @@ class OperationContext:
             return None
         return SymMatrix(**kwargs)
 
-    def full_cov_symmatrix(self, module):
-        cov = self.full_cov(module)
+    def full_cov_symmatrix(self, module, pop=False):
+        cov = self.get_result(module, OP_FULL_COV, pop=pop)
         if cov is None:
             return
         return SymMatrix(data=cov)
 
-    def cvp_paramvector(self, module):
-        cvp = self.cvp(module)
+    def cvp_paramvector(self, module, pop=False):
+        cvp = self.get_result(module, OP_CVP, pop=pop)
         if cvp is None:
             return None
         params = []
@@ -485,8 +588,8 @@ class OperationContext:
             vectors.append(cvp['bias'])
         return ParamVector(params, vectors)
 
-    def full_cvp_paramvector(self, module):
-        cvp = self.full_cvp(module)
+    def full_cvp_paramvector(self, module, pop=False):
+        cvp = self.get_result(module, OP_FULL_CVP, pop=pop)
         if cvp is None:
             return None
         params = [p for p in module.parameters() if original_requires_grad(param=p)]

@@ -2,7 +2,7 @@ import os
 from operator import iadd
 import numpy as np
 import torch
-from .utils import add_value_to_diagonal, cholesky_inv
+from .utils import cholesky_inv
 from .vector import ParamVector
 
 __all__ = [
@@ -245,8 +245,8 @@ class SymMatrix:
         return pointer
 
     def update_inv(self, damping=_default_damping):
-        if self.has_data:
-            self.inv = cholesky_inv(add_value_to_diagonal(self.data, damping))
+        if self.has_data and not torch.all(self.data == 0):
+            self.inv = cholesky_inv(self.data, damping)
         if self.has_kron:
             self.kron.update_inv(damping)
         if self.has_diag:
@@ -310,23 +310,29 @@ class Kron:
         # NOTE: inv will not be preserved
         if not other.has_data:
             return self
-        if self.has_data:
-            A = self.A.add(other.A)
-            B = self.B.add(other.B)
+        if other.has_A:
+            A = self.A.add(other.A) if self.has_A else other.A
         else:
-            A = other.A
-            B = other.B
+            A = self.A
+        if other.has_B:
+            B = self.B.add(other.B) if self.has_B else other.B
+        else:
+            B = self.B
         return Kron(A, B)
 
     def __iadd__(self, other):
         if not other.has_data:
             return self
-        if self.has_data:
-            self.A.add_(other.A)
-            self.B.add_(other.B)
-        else:
-            self.A = other.A
-            self.B = other.B
+        if other.has_A:
+            if self.has_A:
+                self.A.add_(other.A)
+            else:
+                self.A = other.A
+        if other.has_B:
+            if self.has_B:
+                self.B.add_(other.B)
+            else:
+                self.B = other.B
         return self
 
     @property
@@ -335,7 +341,15 @@ class Kron:
 
     @property
     def has_data(self):
-        return self.A is not None and self.B is not None
+        return self.has_A or self.has_B
+
+    @property
+    def has_A(self):
+        return self.A is not None
+
+    @property
+    def has_B(self):
+        return self.B is not None
 
     @property
     def A_dim(self):
@@ -350,8 +364,10 @@ class Kron:
         return self._B_dim
 
     def mul_(self, value):
-        self.A.mul_(value)
-        self.B.mul_(value)
+        if self.has_A:
+            self.A.mul_(value)
+        if self.has_B:
+            self.B.mul_(value)
         return self
 
     def eigenvalues(self):
@@ -398,35 +414,39 @@ class Kron:
         pointer = unflatten(self.B, pointer)
         return pointer
 
-    def update_inv(self, damping=_default_damping, eps=1e-7):
+    def update_inv(self, damping=_default_damping, calc_A_inv=True, calc_B_inv=True, eps=1e-7):
         assert self.has_data
-        A = self.A
-        B = self.B
-        A_eig_mean = A.trace() / A.shape[0]
-        B_eig_mean = B.trace() / B.shape[0]
-        pi = torch.sqrt(A_eig_mean / B_eig_mean)
-        r = damping**0.5
+        if self.has_A and self.has_B:
+            A_eig_mean = self.A.trace() / self.A_dim
+            B_eig_mean = self.B.trace() / self.B_dim
+            pi = torch.sqrt(A_eig_mean / B_eig_mean)
+            r = damping**0.5
+            damping_A = max(r * pi, eps)
+            damping_B = max(r / pi, eps)
+        else:
+            damping_A = damping_B = damping
 
-        self.A_inv = cholesky_inv(add_value_to_diagonal(A, max(r * pi, eps)))
-        self.B_inv = cholesky_inv(add_value_to_diagonal(B, max(r / pi, eps)))
+        if calc_A_inv:
+            assert self.has_A
+            if not torch.all(self.A == 0):
+                self.A_inv = cholesky_inv(self.A, damping_A)
+        if calc_B_inv:
+            assert self.has_B
+            if not torch.all(self.B == 0):
+                self.B_inv = cholesky_inv(self.B, damping_B)
 
     def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
         mat_A = self.A_inv if use_inv else self.A
         mat_B = self.B_inv if use_inv else self.B
-        vec2d = vec_weight.view(self.B_dim, -1)
-        if vec_bias is not None:
-            vec2d = torch.cat([vec2d, vec_bias.unsqueeze(dim=1)], dim=1)
-        mvp2d = mat_B.mm(vec2d).mm(mat_A)
-        if vec_bias is not None:
-            mvp_w = mvp2d[:, :-1].view_as(vec_weight)
-            mvp_b = mvp2d[:, -1]
-            if inplace:
-                vec_weight.copy_(mvp_w)
-                vec_bias.copy_(mvp_b)
-            return mvp_w, mvp_b
-        mvp_w = mvp2d.view_as(vec_weight)
+        vec_weight_2d = vec_weight.view(self.B_dim, -1)
+        mvp_w = mat_B.mm(vec_weight_2d).mm(mat_A).view_as(vec_weight)
         if inplace:
             vec_weight.copy_(mvp_w)
+        if vec_bias is not None:
+            mvp_b = mat_B.mv(vec_bias)
+            if inplace:
+                vec_bias.copy_(mvp_b)
+            return mvp_w, mvp_b
         return mvp_w
 
 
@@ -540,9 +560,11 @@ class Diag:
 
     def update_inv(self, damping=_default_damping):
         if self.has_weight:
-            self.weight_inv = 1 / (self.weight + damping)
+            if not torch.all(self.weight == 0):
+                self.weight_inv = 1 / (self.weight + damping)
         if self.has_bias:
-            self.bias_inv = 1 / (self.bias + damping)
+            if not torch.all(self.bias == 0):
+                self.bias_inv = 1 / (self.bias + damping)
 
     def mvp(self, vec_weight=None, vec_bias=None, use_inv=False, inplace=False):
         assert vec_weight is not None or vec_bias is not None
@@ -629,14 +651,16 @@ class UnitWise:
     def update_inv(self, damping=_default_damping):
         assert self.has_data
         data = self.data
-        f, w, h = data.shape[0], data.shape[1], data.shape[2]
-        dmp = torch.eye(w, h, device=data.device, dtype=data.dtype).repeat(f, 1, 1) * damping
-        self.inv = torch.inverse(data + dmp)
+        if not torch.all(data == 0):
+            diag = torch.diagonal(data, dim1=1, dim2=2)
+            diag += damping
+            self.inv = torch.inverse(data)
+            diag -= damping
 
     def mvp(self, vec_weight, vec_bias, use_inv=False, inplace=False):
         mat = self.inv if use_inv else self.data  # (f, 2, 2) or (f_out, f_in+1, f_in+1)
-        if vec_weight.shape == vec_bias and vec_weight.shape[-1] == 2:
-            # for BatchNormNd
+        if vec_weight.shape == vec_bias.shape and mat.ndim == 3 and mat.shape[-1] == mat.shape[-2]:
+            # for BatchNormNd and LayerNorm
             v = torch.stack([vec_weight, vec_bias], dim=1)  # (f, 2)
             v = v.unsqueeze(2)  # (f, 2, 1)
             mvp_wb = torch.matmul(mat, v).squeeze(2)  # (f, 2)

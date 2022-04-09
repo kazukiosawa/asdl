@@ -11,7 +11,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from .precondition import KFAC, DiagNaturalGradient
 from .fisher import FISHER_EXACT, FISHER_MC
 from .kernel import batch, empirical_implicit_ntk, empirical_class_wise_direct_ntk, get_preconditioned_kernel_fn
-from .utils import add_value_to_diagonal
 
 
 __all__ = [
@@ -46,7 +45,8 @@ class PastTask:
         else:
             raise ValueError(f'Invalid kernel ndim: {ndim}. ndim must be 3 or 4.')
 
-        kernel = add_value_to_diagonal(kernel, eps)
+        diag = torch.diagonal(kernel)
+        diag += eps
         self.kernel_inv = torch.inverse(kernel).detach_()
 
     @torch.no_grad()
