@@ -205,6 +205,7 @@ class FROMP:
                  eps=1e-5,
                  max_tasks_for_penalty=None,
                  n_memorable_points=10,
+                 memorable_points_frac=None,
                  n_memorable_points_sub=10,
                  memory_select_method="lambda_descend",
                  ggn_shape='diag',
@@ -229,7 +230,8 @@ class FROMP:
         self.eps = eps
         self.max_tasks_for_penalty = max_tasks_for_penalty
         self.n_memorable_points = n_memorable_points
-        self.n_memorable_points_sub = None if n_memorable_points <= n_memorable_points_sub else n_memorable_points_sub
+        self.memorable_points_frac = memorable_points_frac
+        self.n_memorable_points_sub = None if (not n_memorable_points or n_memorable_points <= n_memorable_points_sub) else n_memorable_points_sub
         self.memory_select_method = memory_select_method
         self.use_identity_kernel = use_identity_kernel
         self.use_temp_correction = use_temp_correction
@@ -280,6 +282,7 @@ class FROMP:
             memorable_points, memorable_points_indices = collect_memorable_points(model,
                                                         data_loader,
                                                         self.n_memorable_points,
+                                                        self.memorable_points_frac,
                                                         self.memory_select_method,
                                                         memorable_points_as_tensor,
                                                         is_distributed,
@@ -335,6 +338,7 @@ class FROMP:
 def collect_memorable_points(model,
                              data_loader: DataLoader,
                              n_memorable_points,
+                             memorable_points_frac,
                              select_method="lambda_descend",
                              as_tensor=True,
                              is_distributed=False,
@@ -349,10 +353,12 @@ def collect_memorable_points(model,
 
     assert select_method in ['lambda_descend', 'random', 'lambda_descend_global', 'random_global'], \
         'Invalid memorable points selection method.'
-    memorable_points_kwargs = dict(model=model, data_loader=data_loader, dataset=dataset, device=device,
-                                    n_memorable_points=n_memorable_points, select_method=select_method)
 
     n_task_data = len(dataset.get_hard_task_targets()) if hasattr(dataset, 'task_indices') else len(dataset)
+    if n_memorable_points is None:
+        n_memorable_points = int(memorable_points_frac * n_task_data)
+    memorable_points_kwargs = dict(model=model, data_loader=data_loader, dataset=dataset, device=device,
+                                    n_memorable_points=n_memorable_points, select_method=select_method)
     if n_memorable_points >= n_task_data:
         # Use ALL data points as memorable points
         memorable_points_indices = range(n_task_data)
@@ -385,16 +391,12 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
     """ collect memorable points (class-balanced) """
 
     # extract dataset targets
-    if hasattr(dataset, 'targets'):
-        targets = torch.tensor(dataset.targets)
-    elif hasattr(dataset, 'task_indices'):
+    if hasattr(dataset, 'task_indices'):
         targets = torch.tensor(dataset.get_hard_task_targets())
+    elif hasattr(dataset, 'targets'):
+        targets = torch.tensor(dataset.targets)
     else:
-        print(type(data_loader))
-        print(vars(data_loader).keys())
-        print(type(dataset))
-        print(vars(dataset).keys())
-        targets = torch.tensor([dataset[i][1] for i in range(len(dataset))])
+        targets = torch.tensor([d[1] for d in dataset])
 
     # define number of memorable points per class
     n_classes = len(targets.unique())
