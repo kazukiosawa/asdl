@@ -37,7 +37,7 @@ class Embedding(Operation):
             A: num_embeddings x num_embeddings
         """
         counts = torch.stack(
-            [torch.bincount(in_data[i], minlength=module.num_embeddings) for i in range(in_data.shape[0])])
+            [torch.bincount(in_data[i].int(), minlength=module.num_embeddings) for i in range(in_data.shape[0])])
         counts = counts.float().to(module.weight.device)
         return torch.matmul(counts.T, counts)  # num_embeddings x num_embeddings
 

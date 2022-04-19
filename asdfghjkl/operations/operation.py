@@ -309,6 +309,8 @@ class OperationContext:
     def __init__(self, vectors: ParamVector = None):
         self._operations: Dict[nn.Module, Operation] = {}
         self._vectors: ParamVector = vectors
+        self._input_scale = 1.
+        self._output_scale = 1.
 
     def is_operation_registered(self, module: nn.Module):
         return module in self._operations
@@ -502,6 +504,8 @@ class OperationContext:
                             tensor = in_data.pop(0)
                         else:
                             tensor = in_data[i]
+                        if self._input_scale != 1:
+                            tensor = tensor * self._input_scale
                         A = operation.cov_kron_A(module, tensor)
                         self.accumulate_result(module, A, OP_COV_KRON, 'A')
             if 'B' in kron and out_grads is not None:
@@ -512,6 +516,8 @@ class OperationContext:
                             tensor = out_grads.pop(0)
                         else:
                             tensor = out_grads[i]
+                        if self._output_scale != 1:
+                            tensor = tensor * self._output_scale
                         B = operation.cov_kron_B(module, tensor)
                         self.accumulate_result(module, B, OP_COV_KRON, 'B')
         else:
@@ -600,6 +606,12 @@ class OperationContext:
 
     def rfim_softmax(self, module):
         return self.get_result(module, OP_RFIM_SOFTMAX)
+
+    def set_input_scale(self, scale):
+        self._input_scale = scale
+
+    def set_output_scale(self, scale):
+        self._output_scale = scale
 
     def in_data(self, module):
         return self.get_result(module, OP_SAVE_INPUTS)
