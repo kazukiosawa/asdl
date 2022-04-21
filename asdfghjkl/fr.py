@@ -25,12 +25,15 @@ _kernel_fns = {'implicit': empirical_implicit_ntk, 'class_wise': empirical_class
 
 
 class PastTask:
-    def __init__(self, memorable_points, class_ids=None, memorable_points_indices=None):
+    def __init__(self, memorable_points, class_ids=None, memorable_points_indices=None, memorable_points_indices_global=None, memorable_points_true_targets=None):
         self.memorable_points = memorable_points
         self.kernel_inv = None
         self.mean = None
         self.class_ids = class_ids
         self.memorable_points_indices = memorable_points_indices
+        self.memorable_points_indices_global = memorable_points_indices_global
+        self.memorable_points_true_targets = memorable_points_true_targets
+        self.n_memorable_points = len(self.memorable_points)
 
     def update_kernel(self, model, kernel_fn, eps=1e-5):
         memorable_points = self.memorable_points
@@ -51,7 +54,19 @@ class PastTask:
         self.kernel_inv = torch.linalg.inv(kernel).detach_()
 
     @torch.no_grad()
-    def update_mean(self, model, max_mem_per_batch=50):#100):#200):#500):
+    def update_mean(self, model, max_mem_per_batch=50, memory_loss_mode='soft_all'):#100):#200):#500):
+        if memory_loss_mode == 'hard_all':
+            all_true_targets_one_hot = []
+            for idx in range(self.n_memorable_points):
+                true_target = self.memorable_points_true_targets[idx]
+                if isinstance(true_target, torch.Tensor):
+                    true_target = true_target.argmax().item() - min(self.class_ids)
+                true_target_one_hot = torch.zeros(len(self.class_ids))
+                true_target_one_hot[true_target] = 1.
+                all_true_targets_one_hot.append(true_target_one_hot)
+            self.mean = torch.stack(all_true_targets_one_hot)
+            return
+
         import numpy as np
         n_batches = int(np.ceil(len(self.memorable_points) / max_mem_per_batch))
 
@@ -61,6 +76,36 @@ class PastTask:
             # Split forward passes into mini-batches to save memory
             mem_batch_indices = np.array_split(range(len(self.memorable_points)), n_batches)
             self.mean = torch.cat([self._evaluate_mean(model, idx=idx).cpu() for idx in mem_batch_indices])
+ 
+        if memory_loss_mode in ['soft_correct', 'soft_correct_hard_rest']:
+            if self.class_ids != list(range(len(self.class_ids))):
+                for i, class_id in enumerate(self.class_ids):
+                    self.memorable_points_true_targets[self.memorable_points_true_targets == class_id] = i
+            if memory_loss_mode == 'soft_correct':
+                mean_list = [m for m in self.mean]
+                memorable_points_list = [m for m in self.memorable_points]
+            for idx in range(self.n_memorable_points)[::-1]:
+                model_prediction = self.mean[idx].argmax().item()
+                true_target = self.memorable_points_true_targets[idx]
+                if isinstance(true_target, torch.Tensor):
+                    true_target = true_target.argmax().item() - min(self.class_ids)
+                if model_prediction != true_target:
+                    if memory_loss_mode == 'soft_correct':
+                        # Discard memory points with incorrect model predictions
+                        del self.memorable_points_indices[idx]
+                        del self.memorable_points_true_targets[idx]
+                        del mean_list[idx]
+                        del memorable_points_list[idx]
+                    elif memory_loss_mode == 'soft_correct_hard_rest':
+                        # Set incorrect model predictions to true targets
+                        true_target_one_hot = torch.zeros(len(self.class_ids))
+                        true_target_one_hot[true_target] = 1.
+                        self.mean[idx] = true_target_one_hot
+
+            if memory_loss_mode == 'soft_correct':
+                self.mean = torch.stack(mean_list)
+                self.memorable_points = torch.stack(memorable_points_list)
+                self.n_memorable_points = len(self.memorable_points)
 
     def _evaluate_mean(self, model, n_memorable_points_sub=None, idx=None):
         means = []
@@ -78,7 +123,6 @@ class PastTask:
                 return model(memorable_points[idx, :].to(device))
             else:
                 return model(memorable_points.to(device))
-
 
     def get_penalty(self, model, n_memorable_points_sub=None, idx=None, use_kprior_penalty=False):
         assert self.mean is not None
@@ -208,6 +252,7 @@ class FROMP:
                  memorable_points_frac=None,
                  n_memorable_points_sub=10,
                  memory_select_method="lambda_descend",
+                 memory_loss_mode="soft_all",
                  ggn_shape='diag',
                  ggn_type='exact',
                  prior_prec=1e-5,
@@ -233,6 +278,7 @@ class FROMP:
         self.memorable_points_frac = memorable_points_frac
         self.n_memorable_points_sub = None if (not n_memorable_points or n_memorable_points <= n_memorable_points_sub) else n_memorable_points_sub
         self.memory_select_method = memory_select_method
+        self.memory_loss_mode = memory_loss_mode
         self.use_identity_kernel = use_identity_kernel
         self.use_temp_correction = use_temp_correction
         self.penalty_type = penalty_type
@@ -279,7 +325,7 @@ class FROMP:
 
         # register the current task with the memorable points
         with customize_head(model, class_ids):
-            memorable_points, memorable_points_indices = collect_memorable_points(model,
+            mem_points_res= collect_memorable_points(model,
                                                         data_loader,
                                                         self.n_memorable_points,
                                                         self.memorable_points_frac,
@@ -287,8 +333,13 @@ class FROMP:
                                                         memorable_points_as_tensor,
                                                         is_distributed,
                                                         self.n_memorable_points_sub)
-            
-        self.observed_tasks.append(PastTask(memorable_points, class_ids, memorable_points_indices))
+        memorable_points, memorable_points_indices, memorable_points_indices_global, memorable_points_true_targets = mem_points_res
+
+        self.observed_tasks.append(PastTask(memorable_points,
+                                            class_ids,
+                                            memorable_points_indices,
+                                            memorable_points_indices_global,
+                                            memorable_points_true_targets))
 
         # update information (kernel & mean) for each observed task
         for i, task in enumerate(self.observed_tasks):
@@ -297,7 +348,7 @@ class FROMP:
                     task.update_kernel(model, self.kernel_fn, self.eps)
                 if empty_gpu_cache_:
                     empty_gpu_cache(f"pre task.update_mean for task #{i+1}")
-                task.update_mean(model)
+                task.update_mean(model, memory_loss_mode=self.memory_loss_mode)
                 if empty_gpu_cache_:
                     empty_gpu_cache(f"post task.update_mean for task #{i+1}")
 
@@ -361,30 +412,30 @@ def collect_memorable_points(model,
                                     n_memorable_points=n_memorable_points, select_method=select_method)
     if n_memorable_points >= n_task_data:
         # Use ALL data points as memorable points
-        memorable_points_indices = range(n_task_data)
+        memorable_points_indices = list(range(n_task_data))
     elif 'global' in select_method:
         memorable_points_indices = _collect_memorable_points(**memorable_points_kwargs)
     else:
         memorable_points_indices = _collect_memorable_points_class_balanced(**memorable_points_kwargs)
 
+    # Convert within-task (i.e. starting at 0) to across-task memorable points indices
+    memorable_points_indices_global = [dataset.globalize_memory_index(idx) for idx in memorable_points_indices]
+
     if as_tensor:
         # create a Tensor for memorable points on model's device
-        idx_fun = lambda idx: dataset.task_indices[-1][idx] if hasattr(dataset, 'task_indices') else idx
-        memorable_points_indices = [idx_fun(idx) for idx in memorable_points_indices]
-        memorable_points = [dataset[idx][0] for idx in memorable_points_indices]
-        return torch.stack(memorable_points).to(device), memorable_points_indices
+        memorable_points = [dataset[idx][0] for idx in memorable_points_indices_global]
+        memorable_points = torch.stack(memorable_points).to(device)
     else:
         # create a DataLoader for memorable points
-        memorable_points = Subset(dataset, memorable_points_indices)
+        memorable_points = Subset(dataset, memorable_points_indices_global)
         if n_memorable_points_sub is not None:
             batch_size = n_memorable_points_sub
         else:
             batch_size = min(n_memorable_points, data_loader.batch_size)
-        return DataLoader(memorable_points,
-                          batch_size=batch_size,
-                          pin_memory=True,
-                          drop_last=False,
-                          shuffle=False), memorable_points_indices
+        memorable_points = DataLoader(memorable_points, batch_size=batch_size, pin_memory=True, drop_last=False, shuffle=False)
+
+    memorable_points_true_targets = [dataset[idx][1] for idx in memorable_points_indices_global]
+    return memorable_points, memorable_points_indices, memorable_points_indices_global, memorable_points_true_targets
 
 
 def _collect_memorable_points_class_balanced(model, data_loader, dataset, device, n_memorable_points, select_method):
@@ -420,7 +471,7 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
 
         memorable_points_indices.append(class_indices[select_indices[:n_memorable_points_per_class]])
 
-    return torch.cat(memorable_points_indices)
+    return torch.cat(memorable_points_indices).tolist()
 
 
 def _collect_memorable_points(model, data_loader, dataset, device, n_memorable_points, select_method):
@@ -434,7 +485,7 @@ def _collect_memorable_points(model, data_loader, dataset, device, n_memorable_p
         # obtain uniformly random indices (across full dataset)
         select_indices = torch.randperm(len(dataset))
 
-    return select_indices[:n_memorable_points]
+    return select_indices[:n_memorable_points].tolist()
 
 
 def _compute_hessian_traces(model, data_loader, dataset, device):
