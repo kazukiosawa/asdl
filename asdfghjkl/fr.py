@@ -54,7 +54,7 @@ class PastTask:
         self.kernel_inv = torch.linalg.inv(kernel).detach_()
 
     @torch.no_grad()
-    def update_mean(self, model, max_mem_per_batch=50, memory_loss_mode='soft_all'):#100):#200):#500):
+    def update_mean(self, model, max_mem_per_batch=50, memory_loss_mode='soft_all', memory_residual_frac=1.0):#100):#200):#500):
         if memory_loss_mode == 'hard_all':
             all_true_targets_one_hot = []
             for idx in range(self.n_memorable_points):
@@ -77,30 +77,49 @@ class PastTask:
             mem_batch_indices = np.array_split(range(len(self.memorable_points)), n_batches)
             self.mean = torch.cat([self._evaluate_mean(model, idx=idx).cpu() for idx in mem_batch_indices])
  
-        if memory_loss_mode in ['soft_correct', 'soft_correct_hard_rest']:
+        if memory_loss_mode in ['soft_correct', 'soft_correct_hard_rest', 'soft_low_residual_hard_rest']:
             if self.class_ids != list(range(len(self.class_ids))):
                 for i, class_id in enumerate(self.class_ids):
                     self.memorable_points_true_targets[self.memorable_points_true_targets == class_id] = i
-            if memory_loss_mode == 'soft_correct':
-                mean_list = [m for m in self.mean]
-                memorable_points_list = [m for m in self.memorable_points]
-            for idx in range(self.n_memorable_points)[::-1]:
-                model_prediction = self.mean[idx].argmax().item()
-                true_target = self.memorable_points_true_targets[idx]
-                if isinstance(true_target, torch.Tensor):
-                    true_target = true_target.argmax().item() - min(self.class_ids)
-                if model_prediction != true_target:
-                    if memory_loss_mode == 'soft_correct':
-                        # Discard memory points with incorrect model predictions
-                        del self.memorable_points_indices[idx]
-                        del self.memorable_points_true_targets[idx]
-                        del mean_list[idx]
-                        del memorable_points_list[idx]
-                    elif memory_loss_mode == 'soft_correct_hard_rest':
-                        # Set incorrect model predictions to true targets
+
+            if memory_loss_mode == 'soft_low_residual_hard_rest':
+                if isinstance(self.memorable_points_true_targets, torch.Tensor) and len(self.memorable_points_true_targets.shape) == 2:
+                    true_targets_one_hot = self.memorable_points_true_targets
+                else:
+                    true_targets_one_hot = [] 
+                    for true_target in self.memorable_points_true_targets:
                         true_target_one_hot = torch.zeros(len(self.class_ids))
                         true_target_one_hot[true_target] = 1.
-                        self.mean[idx] = true_target_one_hot
+                        true_targets_one_hot.append(true_target_one_hot)
+                    true_targets_one_hot = torch.stack(true_targets_one_hot)
+                residuals = (self.mean - true_targets_one_hot).abs().sum(axis=1)
+
+                # sort indices by residuals (across full dataset)
+                n_memory_residual = int(self.n_memorable_points * memory_residual_frac)
+                large_residual_indices = torch.argsort(residuals, descending=True)[:n_memory_residual]
+                self.mean[large_residual_indices] = true_targets_one_hot[large_residual_indices]
+
+            else:
+                if memory_loss_mode == 'soft_correct':
+                    mean_list = [m for m in self.mean]
+                    memorable_points_list = [m for m in self.memorable_points]
+                for idx in range(self.n_memorable_points)[::-1]:
+                    model_prediction = self.mean[idx].argmax().item()
+                    true_target = self.memorable_points_true_targets[idx]
+                    if isinstance(true_target, torch.Tensor):
+                        true_target = true_target.argmax().item() - min(self.class_ids)
+                    if model_prediction != true_target:
+                        if memory_loss_mode == 'soft_correct':
+                            # Discard memory points with incorrect model predictions
+                            del self.memorable_points_indices[idx]
+                            del self.memorable_points_true_targets[idx]
+                            del mean_list[idx]
+                            del memorable_points_list[idx]
+                        elif memory_loss_mode == 'soft_correct_hard_rest':
+                            # Set incorrect model predictions to true targets
+                            true_target_one_hot = torch.zeros(len(self.class_ids))
+                            true_target_one_hot[true_target] = 1.
+                            self.mean[idx] = true_target_one_hot
 
             if memory_loss_mode == 'soft_correct':
                 self.mean = torch.stack(mean_list)
@@ -253,6 +272,7 @@ class FROMP:
                  n_memorable_points_sub=10,
                  memory_select_method="lambda_descend",
                  memory_loss_mode="soft_all",
+                 memory_residual_frac=1.0,
                  ggn_shape='diag',
                  ggn_type='exact',
                  prior_prec=1e-5,
@@ -279,6 +299,7 @@ class FROMP:
         self.n_memorable_points_sub = None if (not n_memorable_points or n_memorable_points <= n_memorable_points_sub) else n_memorable_points_sub
         self.memory_select_method = memory_select_method
         self.memory_loss_mode = memory_loss_mode
+        self.memory_residual_frac = memory_residual_frac
         self.use_identity_kernel = use_identity_kernel
         self.use_temp_correction = use_temp_correction
         self.penalty_type = penalty_type
@@ -348,7 +369,7 @@ class FROMP:
                     task.update_kernel(model, self.kernel_fn, self.eps)
                 if empty_gpu_cache_:
                     empty_gpu_cache(f"pre task.update_mean for task #{i+1}")
-                task.update_mean(model, memory_loss_mode=self.memory_loss_mode)
+                task.update_mean(model, memory_loss_mode=self.memory_loss_mode, memory_residual_frac=self.memory_residual_frac)
                 if empty_gpu_cache_:
                     empty_gpu_cache(f"post task.update_mean for task #{i+1}")
 
