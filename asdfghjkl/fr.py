@@ -83,15 +83,14 @@ class PastTask:
                     self.memorable_points_true_targets[self.memorable_points_true_targets == class_id] = i
 
             if memory_loss_mode == 'soft_low_residual_hard_rest':
-                if isinstance(self.memorable_points_true_targets, torch.Tensor) and len(self.memorable_points_true_targets.shape) == 2:
-                    true_targets_one_hot = self.memorable_points_true_targets
-                else:
-                    true_targets_one_hot = [] 
-                    for true_target in self.memorable_points_true_targets:
-                        true_target_one_hot = torch.zeros(len(self.class_ids))
-                        true_target_one_hot[true_target] = 1.
-                        true_targets_one_hot.append(true_target_one_hot)
-                    true_targets_one_hot = torch.stack(true_targets_one_hot)
+                true_targets_one_hot = [] 
+                for true_target in self.memorable_points_true_targets:
+                    if isinstance(true_target, torch.Tensor):
+                        true_target = true_target.argmax().item() - min(self.class_ids)
+                    true_target_one_hot = torch.zeros(len(self.class_ids))
+                    true_target_one_hot[true_target] = 1.
+                    true_targets_one_hot.append(true_target_one_hot)
+                true_targets_one_hot = torch.stack(true_targets_one_hot)
                 residuals = (self.mean - true_targets_one_hot).abs().sum(axis=1)
 
                 # sort indices by residuals (across full dataset)
@@ -521,8 +520,8 @@ def _compute_hessian_traces(model, data_loader, dataset, device):
                                    shuffle=False)
     # collect Hessian trace
     hessian_traces = []
-    for inputs, _ in no_shuffle_loader:
-        inputs = inputs.to(device)
+    for batch in no_shuffle_loader:
+        inputs = batch[0].to(device)
         logits = model(inputs)
         probs = F.softmax(logits, dim=1)  # (n, c)
         diag_hessian = probs - probs * probs  # (n, c)
