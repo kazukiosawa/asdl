@@ -641,7 +641,7 @@ class LayerWiseNaturalGradient(NaturalGradient):
                  ema_decay=_invalid_ema_decay,
                  ignore_modules=None,
                  **kwargs):
-        super().__init__(model, fisher_type, SHAPE_LAYER_WISE, loss_type, damping, ema_decay, ignore_modules, **kwargs)
+        super().__init__(model, fisher_type, SHAPE_LAYER_WISE, loss_type, damping, ema_decay, ignore_modules=ignore_modules, **kwargs)
 
 
 class KFAC(NaturalGradient):
@@ -656,7 +656,7 @@ class KFAC(NaturalGradient):
         fisher_shape = [SHAPE_KRON,
                         (nn.BatchNorm1d, SHAPE_UNIT_WISE),
                         (nn.BatchNorm2d, SHAPE_UNIT_WISE)]
-        super().__init__(model, fisher_type, fisher_shape, loss_type, damping, ema_decay, ignore_modules, **kwargs)
+        super().__init__(model, fisher_type, fisher_shape, loss_type, damping, ema_decay, ignore_modules=ignore_modules, **kwargs)
 
 
 class UnitWiseNaturalGradient(NaturalGradient):
@@ -668,7 +668,7 @@ class UnitWiseNaturalGradient(NaturalGradient):
                  ema_decay=_invalid_ema_decay,
                  ignore_modules=None,
                  **kwargs,):
-        super().__init__(model, fisher_type, SHAPE_UNIT_WISE, loss_type, damping, ema_decay, ignore_modules, **kwargs)
+        super().__init__(model, fisher_type, SHAPE_UNIT_WISE, loss_type, damping, ema_decay, ignore_modules=ignore_modules, **kwargs)
 
 
 class DiagNaturalGradient(NaturalGradient):
@@ -680,7 +680,7 @@ class DiagNaturalGradient(NaturalGradient):
                  ema_decay=_invalid_ema_decay,
                  ignore_modules=None,
                  **kwargs):
-        super().__init__(model, fisher_type, SHAPE_DIAG, loss_type, damping, ema_decay, ignore_modules, **kwargs)
+        super().__init__(model, fisher_type, SHAPE_DIAG, loss_type, damping, ema_decay, ignore_modules=ignore_modules, **kwargs)
 
 
 class EmpiricalNaturalGradient(NaturalGradient):
