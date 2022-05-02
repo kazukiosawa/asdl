@@ -23,9 +23,12 @@ _precond_classes = {'kron': KFAC, 'diag': DiagNaturalGradient}
 _fisher_types = {'exact': FISHER_EXACT, 'mc': FISHER_MC}
 _kernel_fns = {'implicit': empirical_implicit_ntk, 'class_wise': empirical_class_wise_direct_ntk}
 
+TYPE_MEMORABLE_PAST = 1
+TYPE_ERROR_CORRETION = 2
+
 
 class PastTask:
-    def __init__(self, memorable_points, class_ids=None, memorable_points_indices=None, memorable_points_indices_global=None, memorable_points_true_targets=None):
+    def __init__(self, memorable_points, class_ids=None, memorable_points_indices=None, memorable_points_indices_global=None, memorable_points_true_targets=None, memorable_points_types=None):
         self.memorable_points = memorable_points
         self.kernel_inv = None
         self.mean = None
@@ -33,6 +36,7 @@ class PastTask:
         self.memorable_points_indices = memorable_points_indices
         self.memorable_points_indices_global = memorable_points_indices_global
         self.memorable_points_true_targets = memorable_points_true_targets
+        self.memorable_points_types = memorable_points_types
         self.n_memorable_points = len(self.memorable_points)
 
     def update_kernel(self, model, kernel_fn, eps=1e-5):
@@ -56,15 +60,7 @@ class PastTask:
     @torch.no_grad()
     def update_mean(self, model, max_mem_per_batch=50, memory_loss_mode='soft_all', memory_residual_frac=1.0):#100):#200):#500):
         if memory_loss_mode == 'hard_all':
-            all_true_targets_one_hot = []
-            for idx in range(self.n_memorable_points):
-                true_target = self.memorable_points_true_targets[idx]
-                if isinstance(true_target, torch.Tensor):
-                    true_target = true_target.argmax().item() - min(self.class_ids)
-                true_target_one_hot = torch.zeros(len(self.class_ids))
-                true_target_one_hot[true_target] = 1.
-                all_true_targets_one_hot.append(true_target_one_hot)
-            self.mean = torch.stack(all_true_targets_one_hot)
+            self.mean = self._compute_memory_true_targets_one_hot()
             return
 
         import numpy as np
@@ -83,14 +79,7 @@ class PastTask:
                     self.memorable_points_true_targets[self.memorable_points_true_targets == class_id] = i
 
             if memory_loss_mode == 'soft_low_residual_hard_rest':
-                true_targets_one_hot = [] 
-                for true_target in self.memorable_points_true_targets:
-                    if isinstance(true_target, torch.Tensor):
-                        true_target = true_target.argmax().item() - min(self.class_ids)
-                    true_target_one_hot = torch.zeros(len(self.class_ids))
-                    true_target_one_hot[true_target] = 1.
-                    true_targets_one_hot.append(true_target_one_hot)
-                true_targets_one_hot = torch.stack(true_targets_one_hot)
+                true_targets_one_hot = self._compute_memory_true_targets_one_hot()
                 residuals = (self.mean - true_targets_one_hot).abs().sum(axis=1)
 
                 # sort indices by residuals (across full dataset)
@@ -116,14 +105,21 @@ class PastTask:
                             del memorable_points_list[idx]
                         elif memory_loss_mode == 'soft_correct_hard_rest':
                             # Set incorrect model predictions to true targets
-                            true_target_one_hot = torch.zeros(len(self.class_ids))
-                            true_target_one_hot[true_target] = 1.
-                            self.mean[idx] = true_target_one_hot
+                            self.mean[idx] = _convert_targets_to_one_hot([true_target], len(self.class_ids))[0]
 
             if memory_loss_mode == 'soft_correct':
                 self.mean = torch.stack(mean_list)
                 self.memorable_points = torch.stack(memorable_points_list)
                 self.n_memorable_points = len(self.memorable_points)
+
+    def _compute_memory_true_targets_one_hot(self):
+        """ return the true targets of the memory points as one-hot vectors """
+        true_targets = []
+        for true_target in self.memorable_points_true_targets:
+            if isinstance(true_target, torch.Tensor):
+                true_target = true_target.argmax().item() - min(self.class_ids)
+            true_targets.append(true_target)
+        return _convert_targets_to_one_hot(true_targets, len(self.class_ids))
 
     def _evaluate_mean(self, model, n_memorable_points_sub=None, idx=None):
         means = []
@@ -272,6 +268,7 @@ class FROMP:
                  memory_select_method="lambda_descend",
                  memory_loss_mode="soft_all",
                  memory_residual_frac=1.0,
+                 use_nn_error_correction=False,
                  ggn_shape='diag',
                  ggn_type='exact',
                  prior_prec=1e-5,
@@ -299,6 +296,7 @@ class FROMP:
         self.memory_select_method = memory_select_method
         self.memory_loss_mode = memory_loss_mode
         self.memory_residual_frac = memory_residual_frac
+        self.use_nn_error_correction = use_nn_error_correction
         self.use_identity_kernel = use_identity_kernel
         self.use_temp_correction = use_temp_correction
         self.penalty_type = penalty_type
@@ -345,21 +343,27 @@ class FROMP:
 
         # register the current task with the memorable points
         with customize_head(model, class_ids):
-            mem_points_res= collect_memorable_points(model,
+            (memorable_points,
+            memorable_points_indices,
+            memorable_points_indices_global,
+            memorable_points_true_targets,
+            memorable_points_types) = collect_memorable_points(model,
                                                         data_loader,
                                                         self.n_memorable_points,
                                                         self.memorable_points_frac,
                                                         self.memory_select_method,
+                                                        self.memory_residual_frac,
+                                                        self.use_nn_error_correction,
                                                         memorable_points_as_tensor,
                                                         is_distributed,
                                                         self.n_memorable_points_sub)
-        memorable_points, memorable_points_indices, memorable_points_indices_global, memorable_points_true_targets = mem_points_res
 
         self.observed_tasks.append(PastTask(memorable_points,
                                             class_ids,
                                             memorable_points_indices,
                                             memorable_points_indices_global,
-                                            memorable_points_true_targets))
+                                            memorable_points_true_targets,
+                                            memorable_points_types))
 
         # update information (kernel & mean) for each observed task
         for i, task in enumerate(self.observed_tasks):
@@ -411,6 +415,8 @@ def collect_memorable_points(model,
                              n_memorable_points,
                              memorable_points_frac,
                              select_method="lambda_descend",
+                             memory_residual_frac=1.0,
+                             use_nn_error_correction=False,
                              as_tensor=True,
                              is_distributed=False,
                              n_memorable_points_sub=None):
@@ -428,6 +434,10 @@ def collect_memorable_points(model,
     n_task_data = len(dataset.get_hard_task_targets()) if hasattr(dataset, 'task_indices') else len(dataset)
     if n_memorable_points is None:
         n_memorable_points = int(memorable_points_frac * n_task_data)
+    if use_nn_error_correction and memory_residual_frac > 0:
+        n_error_correction_points = int(n_memorable_points * memory_residual_frac)
+        n_memorable_points -= n_error_correction_points
+
     memorable_points_kwargs = dict(model=model, data_loader=data_loader, dataset=dataset, device=device,
                                     n_memorable_points=n_memorable_points, select_method=select_method)
     if n_memorable_points >= n_task_data:
@@ -437,6 +447,14 @@ def collect_memorable_points(model,
         memorable_points_indices = _collect_memorable_points(**memorable_points_kwargs)
     else:
         memorable_points_indices = _collect_memorable_points_class_balanced(**memorable_points_kwargs)
+    memorable_points_types = [TYPE_MEMORABLE_PAST] * n_memorable_points
+
+    # append points for NN error correction
+    if use_nn_error_correction and memory_residual_frac > 0:
+        print(f"Collecting {n_error_correction_points} highest-residual points for error correction (+{n_memorable_points} memory points)...")
+        error_correction_points_indices = _collect_error_correction_points(**memorable_points_kwargs, n_error_correction_points=n_error_correction_points, correction_select_method='random')
+        memorable_points_indices += error_correction_points_indices
+        memorable_points_types += [TYPE_ERROR_CORRETION] * n_error_correction_points
 
     # Convert within-task (i.e. starting at 0) to across-task memorable points indices
     memorable_points_indices_global = [dataset.globalize_memory_index(idx) for idx in memorable_points_indices]
@@ -455,7 +473,7 @@ def collect_memorable_points(model,
         memorable_points = DataLoader(memorable_points, batch_size=batch_size, pin_memory=True, drop_last=False, shuffle=False)
 
     memorable_points_true_targets = [dataset[idx][1] for idx in memorable_points_indices_global]
-    return memorable_points, memorable_points_indices, memorable_points_indices_global, memorable_points_true_targets
+    return memorable_points, memorable_points_indices, memorable_points_indices_global, memorable_points_true_targets, memorable_points_types
 
 
 def _collect_memorable_points_class_balanced(model, data_loader, dataset, device, n_memorable_points, select_method):
@@ -475,7 +493,7 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
 
     if select_method == 'lambda_descend':
         # compute Hessian traces
-        hessian_traces = _compute_hessian_traces(model, data_loader, dataset, device)
+        hessian_traces = _compute_dataset_scores(model, data_loader, dataset, device, 'lambda_descend')
 
     # for each class, select a uniformly random subset of data points
     memorable_points_indices = []
@@ -499,7 +517,7 @@ def _collect_memorable_points(model, data_loader, dataset, device, n_memorable_p
 
     if select_method == 'lambda_descend':
         # sort indices by Hessian trace (across full dataset)
-        hessian_traces = _compute_hessian_traces(model, data_loader, dataset, device)
+        hessian_traces = _compute_dataset_scores(model, data_loader, dataset, device, 'lambda_descend')
         select_indices = torch.argsort(hessian_traces, descending=True)
     else:
         # obtain uniformly random indices (across full dataset)
@@ -508,8 +526,28 @@ def _collect_memorable_points(model, data_loader, dataset, device, n_memorable_p
     return select_indices[:n_memorable_points].tolist()
 
 
-def _compute_hessian_traces(model, data_loader, dataset, device):
-    """ compute Hessian traces for selecting memorable points using the lambda_descend method """
+def _collect_error_correction_points(model, data_loader, dataset, device, n_memorable_points, select_method, n_error_correction_points, correction_select_method):
+    """ collect points for NN error correction (not class-balanced) """
+
+    if correction_select_method == 'residual_descend':
+        # sort indices by residuals (across full dataset)
+        residuals = _compute_dataset_scores(model, data_loader, dataset, device, 'residual_descend')
+        select_indices = torch.argsort(residuals, descending=True)
+    elif correction_select_method == 'error_descend':
+        # sort indices by errors, i.e. logits times residuals (across full dataset)
+        errors = _compute_dataset_scores(model, data_loader, dataset, device, 'error_descend')
+        select_indices = torch.argsort(errors, descending=True)
+    else:
+        # obtain uniformly random indices (across full dataset)
+        select_indices = torch.randperm(len(dataset))
+
+    return select_indices[:n_error_correction_points].tolist()
+
+
+def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method):
+    """ compute scores for selecting memorable points with the given method """
+
+    assert scoring_method in ['lambda_descend', 'residual_descend', 'error_descend']
 
     # create a data loader w/o shuffling so that indices in the dataset are stored
     no_shuffle_loader = DataLoader(dataset,
@@ -518,16 +556,53 @@ def _compute_hessian_traces(model, data_loader, dataset, device):
                                    pin_memory=True,
                                    drop_last=False,
                                    shuffle=False)
-    # collect Hessian trace
-    hessian_traces = []
+    # collect scores
+    all_scores = []
     for batch in no_shuffle_loader:
-        inputs = batch[0].to(device)
-        logits = model(inputs)
-        probs = F.softmax(logits, dim=1)  # (n, c)
-        diag_hessian = probs - probs * probs  # (n, c)
-        hessian_traces.append(diag_hessian.sum(dim=1))  # [(n,)]
+        inputs, targets = batch[0].to(device), batch[1].to(device)
+        logits = model(inputs)  # (n, c)
+        probs = F.softmax(logits, dim=1) # (n, c)
+        if scoring_method == 'lambda_descend':
+            scores = _compute_hessian_traces(probs)
+        elif scoring_method == 'residual_descend':
+            scores = _compute_residuals(probs, targets)
+        elif scoring_method == 'error_descend':
+            scores = _compute_errors(logits, probs, targets)
+        all_scores.append(scores)  # [(n,)]
 
-    return torch.cat(hessian_traces).cpu()
+    return torch.cat(all_scores).cpu()
+
+
+def _compute_hessian_traces(probs):
+    """ compute Hessian traces for selecting memorable points using the lambda_descend method """
+
+    diag_hessian = probs - probs * probs    # (n, c)
+    return diag_hessian.sum(dim=1)          # (n,)
+
+
+def _compute_residuals(probs, targets):
+    """ compute residuals for selecting memorable points for NN error correction """
+
+    targets_one_hot = _convert_targets_to_one_hot(targets, probs.shape[1])  # (n, c)
+    return (probs - targets_one_hot.to(probs.device)).abs().sum(dim=1)   # (n,)
+
+
+def _compute_errors(logits, probs, targets):
+    """ compute errors (i.e. logits times residuals) for selecting memorable points for NN error correction """
+
+    targets_one_hot = _convert_targets_to_one_hot(targets, probs.shape[1])  # (n, c)
+    residuals = (probs - targets_one_hot.to(probs.device)).unsqueeze(2)    # (n, c, 1)
+    logits = logits.unsqueeze(1)    # (n, 1, c)
+    return torch.bmm(logits, residuals).flatten() # (n,)
+
+
+def _convert_targets_to_one_hot(targets, one_hot_len):
+    targets_one_hot = []
+    for target in targets:
+        target_one_hot = torch.zeros(one_hot_len)
+        target_one_hot[target] = 1.
+        targets_one_hot.append(target_one_hot)
+    return torch.stack(targets_one_hot)
 
 
 @contextmanager
