@@ -505,7 +505,8 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
             select_indices = torch.argsort(hessian_traces[class_indices], descending=True)
         else:
             # obtain uniformly random indices (for current class)
-            select_indices = torch.randperm(len(class_indices))
+            import numpy as np
+            select_indices = np.random.permutation(len(class_indices))
 
         memorable_points_indices.append(class_indices[select_indices[:n_memorable_points_per_class]])
 
@@ -515,13 +516,14 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
 def _collect_memorable_points(model, data_loader, dataset, device, n_memorable_points, select_method):
     """ collect memorable points (not class-balanced) """
 
-    if select_method == 'lambda_descend':
+    if select_method == 'lambda_descend_global':
         # sort indices by Hessian trace (across full dataset)
         hessian_traces = _compute_dataset_scores(model, data_loader, dataset, device, 'lambda_descend')
         select_indices = torch.argsort(hessian_traces, descending=True)
     else:
         # obtain uniformly random indices (across full dataset)
-        select_indices = torch.randperm(len(dataset))
+        import numpy as np
+        select_indices = np.random.permutation(len(dataset))
 
     return select_indices[:n_memorable_points].tolist()
 
@@ -539,7 +541,8 @@ def _collect_error_correction_points(model, data_loader, dataset, device, n_memo
         select_indices = torch.argsort(errors, descending=True)
     else:
         # obtain uniformly random indices (across full dataset)
-        select_indices = torch.randperm(len(dataset))
+        import numpy as np
+        select_indices = np.random.permutation(len(dataset))
 
     return select_indices[:n_error_correction_points].tolist()
 
