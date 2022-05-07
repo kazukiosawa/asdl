@@ -95,7 +95,7 @@ class PastTask:
                     model_prediction = self.mean[idx].argmax().item()
                     true_target = self.memorable_points_true_targets[idx]
                     if isinstance(true_target, torch.Tensor):
-                        true_target = true_target.argmax().item() - min(self.class_ids)
+                        true_target = true_target.argmax().item()
                     if model_prediction != true_target:
                         if memory_loss_mode == 'soft_correct':
                             # Discard memory points with incorrect model predictions
@@ -114,11 +114,7 @@ class PastTask:
 
     def _compute_memory_true_targets_one_hot(self):
         """ return the true targets of the memory points as one-hot vectors """
-        true_targets = []
-        for true_target in self.memorable_points_true_targets:
-            if isinstance(true_target, torch.Tensor):
-                true_target = true_target.argmax().item() - min(self.class_ids)
-            true_targets.append(true_target)
+        true_targets = [t.argmax().item() if isinstance(t, torch.Tensor) else t for t in self.memorable_points_true_targets]
         return _convert_targets_to_one_hot(true_targets, len(self.class_ids))
 
     def _evaluate_mean(self, model, n_memorable_points_sub=None, idx=None):
