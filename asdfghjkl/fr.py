@@ -435,7 +435,7 @@ def collect_memorable_points(model,
         n_memorable_points -= n_error_correction_points
 
     memorable_points_kwargs = dict(model=model, data_loader=data_loader, dataset=dataset, device=device,
-                                    n_memorable_points=n_memorable_points, select_method=select_method)
+                                    n_memorable_points=n_memorable_points, select_method=select_method, n_task_data=n_task_data)
     if n_memorable_points >= n_task_data:
         # Use ALL data points as memorable points
         memorable_points_indices = list(range(n_task_data))
@@ -472,7 +472,7 @@ def collect_memorable_points(model,
     return memorable_points, memorable_points_indices, memorable_points_indices_global, memorable_points_true_targets, memorable_points_types
 
 
-def _collect_memorable_points_class_balanced(model, data_loader, dataset, device, n_memorable_points, select_method):
+def _collect_memorable_points_class_balanced(model, data_loader, dataset, device, n_memorable_points, select_method, n_task_data):
     """ collect memorable points (class-balanced) """
 
     # extract dataset targets
@@ -509,7 +509,7 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
     return torch.cat(memorable_points_indices).tolist()
 
 
-def _collect_memorable_points(model, data_loader, dataset, device, n_memorable_points, select_method):
+def _collect_memorable_points(model, data_loader, dataset, device, n_memorable_points, select_method, n_task_data):
     """ collect memorable points (not class-balanced) """
 
     if select_method == 'lambda_descend_global':
@@ -519,12 +519,12 @@ def _collect_memorable_points(model, data_loader, dataset, device, n_memorable_p
     else:
         # obtain uniformly random indices (across full dataset)
         import numpy as np
-        select_indices = np.random.permutation(len(dataset))
+        select_indices = np.random.permutation(n_task_data)
 
     return select_indices[:n_memorable_points].tolist()
 
 
-def _collect_error_correction_points(model, data_loader, dataset, device, n_memorable_points, select_method, n_error_correction_points, correction_select_method):
+def _collect_error_correction_points(model, data_loader, dataset, device, n_memorable_points, select_method, n_task_data, n_error_correction_points, correction_select_method):
     """ collect points for NN error correction (not class-balanced) """
 
     if correction_select_method == 'residual_descend':
