@@ -263,7 +263,7 @@ class FROMP:
                  n_memorable_points_sub=10,
                  memory_select_method="lambda_descend",
                  memory_loss_mode="soft_all",
-                 memory_residual_frac=1.0,
+                 memory_residual_frac=0.5,
                  use_nn_error_correction=False,
                  ggn_shape='diag',
                  ggn_type='exact',
