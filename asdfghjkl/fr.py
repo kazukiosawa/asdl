@@ -58,7 +58,7 @@ class PastTask:
         self.kernel_inv = torch.linalg.inv(kernel).detach_()
 
     @torch.no_grad()
-    def update_mean(self, model, max_mem_per_batch=50, memory_loss_mode='soft_all', memory_residual_frac=1.0):#100):#200):#500):
+    def update_mean(self, model, max_mem_per_batch=512, memory_loss_mode='soft_all', memory_residual_frac=1.0):
         if memory_loss_mode == 'hard_all':
             self.mean = self._compute_memory_true_targets_one_hot()
             return
@@ -74,9 +74,13 @@ class PastTask:
             self.mean = torch.cat([self._evaluate_mean(model, idx=idx).cpu() for idx in mem_batch_indices])
  
         if memory_loss_mode in ['soft_correct', 'soft_correct_hard_rest', 'soft_low_residual_hard_rest']:
+            if isinstance(self.class_ids, torch.Tensor):
+                self.class_ids = self.class_ids.cpu()
             if self.class_ids != list(range(len(self.class_ids))):
+                self.memorable_points_true_targets = torch.tensor(self.memorable_points_true_targets).cpu()
                 for i, class_id in enumerate(self.class_ids):
                     self.memorable_points_true_targets[self.memorable_points_true_targets == class_id] = i
+                self.memorable_points_true_targets = self.memorable_points_true_targets.tolist()
 
             if memory_loss_mode == 'soft_low_residual_hard_rest':
                 true_targets_one_hot = self._compute_memory_true_targets_one_hot()
@@ -317,10 +321,12 @@ class FROMP:
 
     def update_regularization_info(self,
                                    data_loader: DataLoader,
+                                   dataset,
                                    class_ids: List[int] = None,
                                    memorable_points_as_tensor=True,
                                    is_distributed=False,
-                                   empty_gpu_cache_=False):
+                                   empty_gpu_cache_=False,
+                                   make_mem_train_loader=None):
         model = self.model
         if isinstance(model, DDP):
             # As DDP disables hook functions required for Kernel calculation,
@@ -345,6 +351,7 @@ class FROMP:
             memorable_points_true_targets,
             memorable_points_types) = collect_memorable_points(model,
                                                         data_loader,
+                                                        dataset,
                                                         self.n_memorable_points,
                                                         self.memorable_points_frac,
                                                         self.memory_select_method,
@@ -352,7 +359,8 @@ class FROMP:
                                                         self.use_nn_error_correction,
                                                         memorable_points_as_tensor,
                                                         is_distributed,
-                                                        self.n_memorable_points_sub)
+                                                        self.n_memorable_points_sub,
+                                                        make_mem_train_loader)
 
         self.observed_tasks.append(PastTask(memorable_points,
                                             class_ids,
@@ -408,6 +416,7 @@ class FROMP:
 @torch.no_grad()
 def collect_memorable_points(model,
                              data_loader: DataLoader,
+                             dataset,
                              n_memorable_points,
                              memorable_points_frac,
                              select_method="lambda_descend",
@@ -415,9 +424,9 @@ def collect_memorable_points(model,
                              use_nn_error_correction=False,
                              as_tensor=True,
                              is_distributed=False,
-                             n_memorable_points_sub=None):
+                             n_memorable_points_sub=None,
+                             make_mem_train_loader=None):
     device = next(model.parameters()).device
-    dataset = data_loader.dataset
 
     assert data_loader.batch_size is not None, 'DataLoader w/o batch_size is not supported.'
     if is_distributed:
@@ -453,12 +462,17 @@ def collect_memorable_points(model,
         memorable_points_types += [TYPE_ERROR_CORRETION] * n_error_correction_points
 
     # Convert within-task (i.e. starting at 0) to across-task memorable points indices
-    memorable_points_indices_global = [dataset.globalize_memory_index(idx) for idx in memorable_points_indices]
+    global_mem_idx = lambda idx: dataset.globalize_memory_index(idx) 
+    memorable_points_indices_global = [global_mem_idx(idx) for idx in memorable_points_indices]
 
     if as_tensor:
         # create a Tensor for memorable points on model's device
-        memorable_points = [dataset[idx][0] for idx in memorable_points_indices_global]
-        memorable_points = torch.stack(memorable_points).to(device)
+        if make_mem_train_loader is None:
+            memorable_points = [dataset[idx][0] for idx in memorable_points_indices_global]
+            memorable_points = torch.stack(memorable_points).to(device)
+        else:
+            mem_train_loader = make_mem_train_loader(memorable_points_indices_global)
+            memorable_points = torch.cat([batch[0] for batch in mem_train_loader]).float().to(device)
     else:
         # create a DataLoader for memorable points
         memorable_points = Subset(dataset, memorable_points_indices_global)
@@ -468,7 +482,10 @@ def collect_memorable_points(model,
             batch_size = min(n_memorable_points, data_loader.batch_size)
         memorable_points = DataLoader(memorable_points, batch_size=batch_size, pin_memory=True, drop_last=False, shuffle=False)
 
-    memorable_points_true_targets = [dataset[idx][1] for idx in memorable_points_indices_global]
+    if make_mem_train_loader is None:
+        memorable_points_true_targets = [dataset[idx][1] for idx in memorable_points_indices_global]
+    else:
+        memorable_points_true_targets = dataset.targets[memorable_points_indices_global].tolist()
     return memorable_points, memorable_points_indices, memorable_points_indices_global, memorable_points_true_targets, memorable_points_types
 
 
