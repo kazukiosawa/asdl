@@ -20,7 +20,7 @@ class Net(nn.Module):
         self.layernorm = nn.LayerNorm(5)
     
     def forward(self, x):
-        x = self.embedding(x).view(32, 1, 4, 4)
+        x = self.embedding(x).view(-1, 1, 4, 4)
         x = F.relu(self.batchnorm2(self.conv(x)))
         x = torch.flatten(x, 1)
         x = F.relu(self.batchnorm1(self.linear(x)))
@@ -28,9 +28,10 @@ class Net(nn.Module):
         x = self.layernorm(x)
         return x
 
-@pytest.fixture()
+@pytest.fixture
 def model():
-    return Net()
+    device = torch.device('cuda' if torch.cuda.is_available() else "cpu")
+    return Net().to(device)
 
 @pytest.fixture
 def data(loss_type):
@@ -46,8 +47,13 @@ def pytest_addoption(parser):
     parser.addoption("--fisher_type", action="extend", nargs="+", type=str, choices=[FISHER_EXACT, FISHER_MC, FISHER_EMP])
     parser.addoption("--fisher_shape", action="extend", nargs="+", type=str,
                      choices=[SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG])
+    parser.addoption("--cuda", action="store_true")
+    parser.addoption("--data_size", action="store", type=int, default=16)
+    parser.addoption("--padding", action="store", type=int, default=0)
 
 def pytest_generate_tests(metafunc):
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
     if "loss_type" in metafunc.fixturenames:
         loss_types = metafunc.config.getoption("loss_type")
         if loss_types is None:
@@ -67,4 +73,19 @@ def pytest_generate_tests(metafunc):
         if "fisher_shapes" in metafunc.fixturenames:
             fisher_shapes = [fisher_shapes]
         metafunc.parametrize("fisher_shape", fisher_shapes)
+    
+    if "cuda" in metafunc.fixturenames:
+        cuda = metafunc.config.getoption("cuda")
+        if cuda is not None:
+            metafunc.parametrize("cuda", [cuda])
+
+    if "data_size" in metafunc.fixturenames:
+        data_size = metafunc.config.getoption("data_size")
+        if data_size is not None:
+            metafunc.parametrize("data_size", [data_size])
+
+    if "padding" in metafunc.fixturenames:
+        padding = metafunc.config.getoption("padding")
+        if padding is not None:
+            metafunc.parametrize("padding", [padding])
     
