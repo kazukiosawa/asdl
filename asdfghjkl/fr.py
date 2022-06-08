@@ -436,7 +436,7 @@ def collect_memorable_points(model,
     assert select_method in ['lambda_descend', 'random', 'lambda_descend_global', 'random_global'], \
         'Invalid memorable points selection method.'
 
-    n_task_data = len(dataset.get_hard_task_targets()) if hasattr(dataset, 'task_indices') else len(dataset)
+    n_task_data = dataset.get_n_task_data() if getattr(dataset, 'get_n_task_data') else len(dataset)
     if n_memorable_points is None:
         n_memorable_points = int(memorable_points_frac * n_task_data)
     if use_nn_error_correction and memory_residual_frac > 0:
@@ -493,7 +493,7 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
     """ collect memorable points (class-balanced) """
 
     # extract dataset targets
-    if hasattr(dataset, 'task_indices'):
+    if hasattr(dataset, 'get_hard_task_targets'):
         targets = torch.tensor(dataset.get_hard_task_targets())
     elif hasattr(dataset, 'targets'):
         targets = torch.tensor(dataset.targets)
