@@ -75,8 +75,9 @@ class Linear(Operation):
         kron_A = torch.matmul(in_data.T, in_data)  # f_in x f_in
         if original_requires_grad(module, 'bias'):
             kron_A = torch.cat([kron_A, in_data.sum(dim=0, keepdim=True)], dim=0)  # (f_in + 1) x f_in
-            column_ext = torch.cat([in_data.sum(dim=0), in_data.new_tensor(in_data.shape[0])]).view(-1, 1)  # (f_in + 1) x 1
-            kron_A = torch.cat([kron_A, right_column], dim=1)   # (f_in + 1) x (f_in + 1)
+            column_ext = torch.cat([in_data.sum(dim=0),
+                                    in_data.new_tensor(in_data.shape[0]).view(1)]).view(-1, 1)  # (f_in + 1) x 1
+            kron_A = torch.cat([kron_A, column_ext], dim=1)   # (f_in + 1) x (f_in + 1)
         return kron_A
 
     @staticmethod

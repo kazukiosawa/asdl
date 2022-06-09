@@ -447,7 +447,7 @@ class Kron:
         vec = torch.cat([v for v in vec if v is not None], dim=1)
         vec_2d = vec.view(self.B_dim, -1)
         mvp_vec = mat_B.mm(vec_2d).mm(mat_A).view_as(vec)
-        if vec_bais is not None:
+        if vec_bias is not None:
             mvp_w = mvp_vec[:, :-1].view_as(vec_weight)
         else:
             mvp_w = mvp_vec.view_as(vec_weight)

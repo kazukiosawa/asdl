@@ -85,7 +85,7 @@ class Conv2d(Operation):
             column_ext = m.sum(dim=1, keepdim=True).div(out_size)  # (c_in)(kernel_size) x 1
             kron_A = torch.cat([kron_A, column_ext], dim=1)  # (c_in)(kernel_size) x {(c_in)(kernel_size) + 1}
             row_ext = torch.cat([m.sum(dim=1).div(out_size),
-                                 m.new_tensor(in_data.shape[0])]).view(1, -1)  # 1 x {(c_in)(kernel_size) + 1}
+                                 m.new_tensor(in_data.shape[0]).view(1)]).view(1, -1)  # 1 x {(c_in)(kernel_size) + 1}
             kron_A = torch.cat([kron_A, row_ext], dim=0)   # {(c_in)(kernel_size) + 1} x {(c_in)(kernel_size) + 1}
         return kron_A
 
