@@ -441,10 +441,10 @@ def collect_memorable_points(model,
         dataset = Subset(dataset, indices)
 
     assert memory_select_method in ['lambda_descend', 'leverage_descend', 'random', 'lambda_descend_global', 'leverage_descend_global', 'random_global',
-                                    'lambda_descend_sample', 'leverage_descend_sample', 'lambda_descend_global_sample', 'leverage_descend_global_sample'],\
+                                    'lambda_sample', 'leverage_sample', 'lambda_sample_global', 'leverage_sample_global'],\
         'Invalid memorable points selection method.'
     assert correction_select_method in ['residual_descend', 'error_descend', 'random', 'residual_descend_global', 'error_descend_global', 'random_global',
-                                        'residual_descend_sample', 'error_descend_sample', 'residual_descend_global_sample', 'error_descend_global_sample'],\
+                                        'residual_sample', 'error_sample', 'residual_sample_global', 'error_sample_global'],\
         'Invalid error-correction points selection method.'
 
     n_task_data = dataset.get_n_task_data() if getattr(dataset, 'get_n_task_data') else len(dataset)
@@ -458,8 +458,7 @@ def collect_memorable_points(model,
     collect_method = {}
     sample_points = {}
     for _type, _select_method in [('memory', memory_select_method), ('correction', correction_select_method)]:
-        select_method_split = _select_method.split('_')
-        select_method[_type] = '_'.join(select_method_split[:2])
+        select_method[_type] = _select_method.split('_')[0]
         collect_method[_type] = _collect_memorable_points if 'global' in _select_method else _collect_memorable_points_class_balanced
         sample_points[_type] = 'sample' in _select_method
 
@@ -562,7 +561,7 @@ def _collect_memorable_points(model, data_loader, dataset, device, prior_prec, n
 def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method, prior_prec=None):
     """ compute scores for selecting memorable points with the given method """
 
-    assert scoring_method in ['lambda_descend', 'leverage_descend', 'residual_descend', 'error_descend', 'random']
+    assert scoring_method in ['lambda', 'leverage', 'residual', 'error', 'random']
 
     if scoring_method == 'random':
         # return random scores
@@ -584,19 +583,19 @@ def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method,
         inputs, targets = batch[0].to(device), batch[1].to(device)
         logits = model(inputs)  # (n, c)
         probs = F.softmax(logits, dim=1) # (n, c)
-        if scoring_method in ['lambda_descend', 'leverage_descend']:
+        if scoring_method in ['lambda', 'leverage']:
             # compute Hessian traces
             scores = _compute_hessian_traces(probs)
-        elif scoring_method == 'residual_descend':
+        elif scoring_method == 'residual':
             # compute residuals
             scores = _compute_residuals(probs, targets)
-        elif scoring_method == 'error_descend':
+        elif scoring_method == 'error':
             # compute errors (i.e. logits times residuals)
             scores = _compute_errors(logits, probs, targets)
         all_scores.append(scores)  # [(n,)]
     all_scores = torch.cat(all_scores).cpu()
 
-    if scoring_method == 'leverage_descend':
+    if scoring_method == 'leverage':
         assert prior_prec is not None
         # compute leverage scores
         all_scores = _compute_leverage_scores(model, no_shuffle_loader, all_scores, prior_prec).cpu()
@@ -605,14 +604,14 @@ def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method,
 
 
 def _compute_hessian_traces(probs):
-    """ compute Hessian traces for selecting memorable points using the lambda_descend method """
+    """ compute Hessian traces for selecting memorable points using the lambda method """
 
     diag_hessian = probs - probs * probs    # (n, c)
     return diag_hessian.sum(dim=1)          # (n,)
 
 
 def _compute_leverage_scores(model, data_loader, lambdas, prior_prec, eps=1e-8):
-    """ compute leverage scores for selecting memorable points using the leverage_descend method """
+    """ compute leverage scores for selecting memorable points using the leverage method """
 
     kernel_fn = empirical_class_wise_direct_ntk
     kernel = batch(kernel_fn, model, data_loader)   # (n, n, c)
