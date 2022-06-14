@@ -310,6 +310,7 @@ class FROMP:
                                                    damping=prior_prec)
         self.kernel_fn = get_preconditioned_kernel_fn(_kernel_fns[kernel_type], self.precond)
         self.observed_tasks: List[PastTask] = []
+        self.prior_prec = prior_prec
 
     @property
     def is_ready(self):
@@ -352,7 +353,8 @@ class FROMP:
                                                         self.use_nn_error_correction,
                                                         memorable_points_as_tensor,
                                                         is_distributed,
-                                                        self.n_memorable_points_sub)
+                                                        self.n_memorable_points_sub,
+                                                        self.prior_prec)
 
         self.observed_tasks.append(PastTask(memorable_points,
                                             class_ids,
@@ -415,7 +417,8 @@ def collect_memorable_points(model,
                              use_nn_error_correction=False,
                              as_tensor=True,
                              is_distributed=False,
-                             n_memorable_points_sub=None):
+                             n_memorable_points_sub=None,
+                             prior_prec=None):
     device = next(model.parameters()).device
     dataset = data_loader.dataset
 
@@ -424,7 +427,7 @@ def collect_memorable_points(model,
         indices = range(dist.get_rank(), len(dataset), dist.get_world_size())
         dataset = Subset(dataset, indices)
 
-    assert select_method in ['lambda_descend', 'random', 'lambda_descend_global', 'random_global'], \
+    assert select_method in ['lambda_descend', 'leverage_descend', 'random', 'lambda_descend_global', 'leverage_descend_global', 'random_global'], \
         'Invalid memorable points selection method.'
 
     n_task_data = len(dataset.get_hard_task_targets()) if hasattr(dataset, 'task_indices') else len(dataset)
@@ -435,7 +438,8 @@ def collect_memorable_points(model,
         n_memorable_points -= n_error_correction_points
 
     memorable_points_kwargs = dict(model=model, data_loader=data_loader, dataset=dataset, device=device,
-                                    n_memorable_points=n_memorable_points, select_method=select_method, n_task_data=n_task_data)
+                                    n_memorable_points=n_memorable_points, select_method=select_method,
+                                    n_task_data=n_task_data, prior_prec=prior_prec)
     if n_memorable_points >= n_task_data:
         # Use ALL data points as memorable points
         memorable_points_indices = list(range(n_task_data))
@@ -472,7 +476,7 @@ def collect_memorable_points(model,
     return memorable_points, memorable_points_indices, memorable_points_indices_global, memorable_points_true_targets, memorable_points_types
 
 
-def _collect_memorable_points_class_balanced(model, data_loader, dataset, device, n_memorable_points, select_method, n_task_data):
+def _collect_memorable_points_class_balanced(model, data_loader, dataset, device, n_memorable_points, select_method, n_task_data, prior_prec):
     """ collect memorable points (class-balanced) """
 
     # extract dataset targets
@@ -490,6 +494,9 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
     if select_method == 'lambda_descend':
         # compute Hessian traces
         hessian_traces = _compute_dataset_scores(model, data_loader, dataset, device, 'lambda_descend')
+    elif select_method == 'leverage_descend':
+        # compute Hessian traces
+        leverage_scores = _compute_dataset_scores(model, data_loader, dataset, device, 'leverage_descend', prior_prec)
 
     # for each class, select a uniformly random subset of data points
     memorable_points_indices = []
@@ -499,6 +506,9 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
         if select_method == 'lambda_descend':
             # sort indices by Hessian trace (for current class) 
             select_indices = torch.argsort(hessian_traces[class_indices], descending=True)
+        elif select_method == 'leverage_descend':
+            # sort indices by leverage score (for current class) 
+            select_indices = torch.argsort(leverage_scores[class_indices], descending=True)
         else:
             # obtain uniformly random indices (for current class)
             import numpy as np
@@ -509,13 +519,17 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
     return torch.cat(memorable_points_indices).tolist()
 
 
-def _collect_memorable_points(model, data_loader, dataset, device, n_memorable_points, select_method, n_task_data):
+def _collect_memorable_points(model, data_loader, dataset, device, n_memorable_points, select_method, n_task_data, prior_prec):
     """ collect memorable points (not class-balanced) """
 
     if select_method == 'lambda_descend_global':
         # sort indices by Hessian trace (across full dataset)
         hessian_traces = _compute_dataset_scores(model, data_loader, dataset, device, 'lambda_descend')
         select_indices = torch.argsort(hessian_traces, descending=True)
+    elif select_method == 'leverage_descend_global':
+        # sort indices by leverage score (across full dataset)
+        leverage_scores = _compute_dataset_scores(model, data_loader, dataset, device, 'leverage_descend', prior_prec)
+        select_indices = torch.argsort(leverage_scores, descending=True)
     else:
         # obtain uniformly random indices (across full dataset)
         import numpy as np
@@ -543,10 +557,10 @@ def _collect_error_correction_points(model, data_loader, dataset, device, n_memo
     return select_indices[:n_error_correction_points].tolist()
 
 
-def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method):
+def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method, prior_prec=None):
     """ compute scores for selecting memorable points with the given method """
 
-    assert scoring_method in ['lambda_descend', 'residual_descend', 'error_descend']
+    assert scoring_method in ['lambda_descend', 'leverage_descend', 'residual_descend', 'error_descend']
 
     # create a data loader w/o shuffling so that indices in the dataset are stored
     no_shuffle_loader = DataLoader(dataset,
@@ -555,21 +569,27 @@ def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method)
                                    pin_memory=True,
                                    drop_last=False,
                                    shuffle=False)
+
     # collect scores
     all_scores = []
     for batch in no_shuffle_loader:
         inputs, targets = batch[0].to(device), batch[1].to(device)
         logits = model(inputs)  # (n, c)
         probs = F.softmax(logits, dim=1) # (n, c)
-        if scoring_method == 'lambda_descend':
+        if scoring_method in ['lambda_descend', 'leverage_descend']:
             scores = _compute_hessian_traces(probs)
         elif scoring_method == 'residual_descend':
             scores = _compute_residuals(probs, targets)
         elif scoring_method == 'error_descend':
             scores = _compute_errors(logits, probs, targets)
         all_scores.append(scores)  # [(n,)]
+    all_scores = torch.cat(all_scores).cpu()
 
-    return torch.cat(all_scores).cpu()
+    if scoring_method == 'leverage_descend':
+        assert prior_prec is not None
+        all_scores = _compute_leverage_scores(model, no_shuffle_loader, all_scores, prior_prec).cpu()
+
+    return all_scores   # (n,)
 
 
 def _compute_hessian_traces(probs):
@@ -577,6 +597,17 @@ def _compute_hessian_traces(probs):
 
     diag_hessian = probs - probs * probs    # (n, c)
     return diag_hessian.sum(dim=1)          # (n,)
+
+
+def _compute_leverage_scores(model, data_loader, lambdas, prior_prec, eps=1e-8):
+    """ compute leverage scores for selecting memorable points using the leverage_descend method """
+
+    kernel_fn = empirical_class_wise_direct_ntk
+    kernel = batch(kernel_fn, model, data_loader)   # (n, n, c)
+    kernel = torch.sum(kernel, dim=-1)  # (n, n)
+    kernel_plus_ridge = torch.linalg.inverse(torch.diag(lambdas + eps)) * prior_prec + kernel  # (n, n)
+    kernel_inv = torch.linalg.inverse(kernel_plus_ridge)   # (n, n)
+    return torch.einsum('ij,ji->i', kernel, kernel_inv)  # (n,)
 
 
 def _compute_residuals(probs, targets):
