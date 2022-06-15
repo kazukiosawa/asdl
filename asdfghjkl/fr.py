@@ -467,6 +467,7 @@ def collect_memorable_points(model,
         # Use ALL data points as memorable points
         memorable_points_indices = list(range(n_task_data))
     else:
+        print(f"Collecting {n_memorable_points}/{n_task_data} {memory_select_method} memory points...")
         memorable_points_indices = collect_method['memory'](**memorable_points_kwargs,
                                                             n_memorable_points=n_memorable_points,
                                                             memory_select_method=select_method['memory'],
@@ -475,7 +476,7 @@ def collect_memorable_points(model,
 
     # append points for NN error correction
     if use_nn_error_correction and memory_residual_frac > 0:
-        print(f"Collecting {n_error_correction_points} points for {select_method['correction']} error correction (+{n_memorable_points} memory points)...")
+        print(f"Collecting {n_error_correction_points}/{n_task_data} {correction_select_method} error correction points...")
         error_correction_points_indices = collect_method['correction'](**memorable_points_kwargs,
                                                                        n_memorable_points=n_error_correction_points,
                                                                        memory_select_method=select_method['correction'],
@@ -535,7 +536,7 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
         class_indices = (targets == cls).nonzero(as_tuple=False).flatten()
         if sample_points:
             import numpy as np
-            probs = scores[class_indices] / scores[class_indices].sum()
+            probs = (scores[class_indices] / scores[class_indices].sum()).numpy()
             select_indices = torch.tensor(np.random.choice(class_indices, size=n_memorable_points_per_class, replace=False, p=probs))
         else:
             select_indices = torch.argsort(scores[class_indices], descending=True)
