@@ -566,7 +566,7 @@ def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method,
     if scoring_method == 'random':
         # return random scores
         import numpy as np
-        n_task_data = dataset.get_n_task_data() if getattr(dataset, 'get_n_task_data') else len(dataset)
+        n_task_data = dataset.get_n_task_data() if hasattr(dataset, 'get_n_task_data') else len(dataset)
         return torch.tensor(np.random.rand(n_task_data))   # (n,)
 
     # create a data loader w/o shuffling so that indices in the dataset are stored
@@ -599,6 +599,9 @@ def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method,
         assert prior_prec is not None
         # compute leverage scores
         all_scores = _compute_leverage_scores(model, no_shuffle_loader, all_scores, prior_prec).cpu()
+
+    if hasattr(dataset, 'get_task_indices'):
+        all_scores = all_scores[dataset.get_task_indices()]
 
     return all_scores   # (n,)
 
