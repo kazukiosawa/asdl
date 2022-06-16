@@ -49,7 +49,8 @@ def batch(kernel_fn, model, x1, x2=None, batch_size=1, store_on_device=True, is_
     """
 
     def _get_loader(x):
-        if isinstance(x, DataLoader):
+        from tqdm import tqdm
+        if isinstance(x, DataLoader) or isinstance(x, tqdm):
             return x
         elif isinstance(x, Tensor):
             assert x.shape[0] % batch_size == 0, \
@@ -94,7 +95,9 @@ def _serial(kernel_fn, model, loader1, loader2=None, store_on_device=True):
             rows.append(torch.cat(row_kernels, dim=1))
     else:
         n_batches1 = len(loader1)
-        blocks = [[torch.empty(0) for _ in range(n_batches1)] for _ in range(n_batches1)]
+        #blocks = [[torch.empty(0) for _ in range(n_batches1)] for _ in range(n_batches1)]
+        kernel = torch.zeros(len(loader1.dataset), len(loader1.dataset), device=device)
+        block_size = int(len(loader1.dataset) / n_batches1)
         for i, batch1 in enumerate(loader1):
             batch1 = _get_inputs(batch1).to(device)
             for j, batch2 in enumerate(loader1):
@@ -102,16 +105,19 @@ def _serial(kernel_fn, model, loader1, loader2=None, store_on_device=True):
                 if i == j:
                     block = kernel_fn(model, batch1)
                 elif i > j:
-                    block = blocks[j][i].clone().transpose(0, 1)
+                    #block = blocks[j][i].clone().transpose(0, 1)
+                    block = kernel[j*block_size:(j+1)*block_size,i*block_size:(i+1)*block_size].clone().transpose(0, 1)
                     if block.ndim == 4:
                         # n x n x c x c
                         block = block.transpose(2, 3)
                 else:
                     block = kernel_fn(model, batch1, batch2)
-                blocks[i][j] = block.to(device)
-        rows = [torch.cat(blocks[i], dim=1) for i in range(n_batches1)]
+                #blocks[i][j] = block.to(device)
+                kernel[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size] = block
+        #rows = [torch.cat(blocks[i], dim=1) for i in range(n_batches1)]
 
-    return torch.cat(rows, dim=0).to(device)
+    #return torch.cat(rows, dim=0).to(device)
+    return kernel
 
 
 def _get_subset_loader(loader: DataLoader, batch_indices: List):
@@ -336,19 +342,22 @@ def _empirical_class_wise_ntk(model, x1, x2=None, hadamard=False, precond=None):
         _zero_kernel(model, n1, n2)
         outputs = model(inputs)
         n_classes = outputs.shape[-1]  # c
-        kernels = []
+        kernel = torch.zeros(n1, n2, device=x1.device)  # n1 x n2
+        #kernels = []
         for k in range(n_classes):
             model.zero_grad()
             scalar = outputs[:, k].sum()
             scalar.backward(retain_graph=(k < n_classes - 1))
-            kernels.append(model.kernel.clone().detach())
+            #kernels.append(model.kernel.clone().detach())
+            kernel.add_(model.kernel.detach())
             _zero_kernel(model, n1, n2)
         _clear_kernel(model)
 
     for module in model.modules():
         delattr(module, 'gram_precond')
 
-    return torch.stack(kernels).permute(1, 2, 0)  # n1 x n2 x c
+    #return torch.stack(kernels).permute(1, 2, 0)  # n1 x n2 x c
+    return kernel
 
 
 def logits_hessian_cross_entropy(logits):
