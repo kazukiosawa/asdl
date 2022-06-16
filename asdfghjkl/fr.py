@@ -523,25 +523,17 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
     else:
         targets = torch.tensor([d[1] for d in dataset])
 
-    # define number of memorable points per class
-    n_classes = len(targets.unique())
-    n_memorable_points_per_class = int(n_memorable_points / n_classes)
-
     # compute dataset scores
     scores = _compute_dataset_scores(model, data_loader, dataset, device, memory_select_method, prior_prec)
 
     # for each class, select the data points with the highest scores
+    classes = targets.unique()
+    n_memorable_points_per_class = int(n_memorable_points / len(classes))
     memorable_points_indices = []
-    for cls in targets.unique():
+    for cls in classes:
         class_indices = (targets == cls).nonzero(as_tuple=False).flatten()
-        if sample_points:
-            import numpy as np
-            probs = (scores[class_indices] / scores[class_indices].sum()).numpy()
-            select_indices = torch.tensor(np.random.choice(class_indices, size=n_memorable_points_per_class, replace=False, p=probs))
-        else:
-            select_indices = torch.argsort(scores[class_indices], descending=True)
-            select_indices = class_indices[select_indices[:n_memorable_points_per_class]]
-        memorable_points_indices.append(select_indices)
+        select_indices = select_memory_indices(scores[class_indices], n_memorable_points_per_class, sample_points)
+        memorable_points_indices.append(class_indices[select_indices])
 
     return torch.cat(memorable_points_indices).tolist()
 
@@ -550,13 +542,21 @@ def _collect_memorable_points(model, data_loader, dataset, device, prior_prec, n
     """ collect memorable points (not class-balanced) """
 
     scores = _compute_dataset_scores(model, data_loader, dataset, device, memory_select_method, prior_prec)
+    select_indices = select_memory_indices(scores, n_memorable_points, sample_points)
+    return select_indices.tolist()
+
+
+def select_memory_indices(scores, n_memorable_points, sample_points):
+    """ select indices of the memory points by either sampling or sorting according to the score """
+
     if sample_points:
         import numpy as np
-        probs = scores / scores.sum()
-        select_indices = np.random.choice(len(scores), size=n_memorable_points, replace=False, p=probs)
+        probs = (scores / scores.sum()).numpy()
+        select_indices = torch.tensor(np.random.choice(len(scores), size=n_memorable_points, replace=False, p=probs))
     else:
         select_indices = torch.argsort(scores, descending=True)[:n_memorable_points]
-    return select_indices.tolist()
+
+    return select_indices
 
 
 def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method, prior_prec=None):
@@ -585,26 +585,23 @@ def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method,
         logits = model(inputs)  # (n, c)
         probs = F.softmax(logits, dim=1) # (n, c)
         if scoring_method in ['lambda', 'leverage']:
-            # compute Hessian traces
             scores = _compute_hessian_traces(probs)
         elif scoring_method == 'residual':
-            # compute residuals
             scores = _compute_residuals(probs, targets)
         elif scoring_method == 'error':
-            # compute errors (i.e. logits times residuals)
             scores = _compute_errors(logits, probs, targets)
         all_scores.append(scores)  # [(n,)]
-    all_scores = torch.cat(all_scores).cpu()
+    all_scores = torch.cat(all_scores)
 
     if scoring_method == 'leverage':
         assert prior_prec is not None
         # compute leverage scores
-        all_scores = _compute_leverage_scores(model, no_shuffle_loader, all_scores, prior_prec).cpu()
+        all_scores = _compute_leverage_scores(model, no_shuffle_loader, all_scores, prior_prec)
 
     if hasattr(dataset, 'get_task_indices'):
         all_scores = all_scores[dataset.get_task_indices()]
 
-    return all_scores   # (n,)
+    return all_scores.cpu()   # (n,)
 
 
 def _compute_hessian_traces(probs):
