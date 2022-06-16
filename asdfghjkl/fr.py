@@ -10,7 +10,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from .precondition import KFAC, DiagNaturalGradient
 from .fisher import FISHER_EXACT, FISHER_MC
-from .kernel import batch, empirical_implicit_ntk, empirical_class_wise_direct_ntk, get_preconditioned_kernel_fn
+from .kernel import batch, empirical_implicit_ntk, empirical_class_wise_direct_ntk, get_preconditioned_kernel_fn, empirical_direct_ntk, empirical_class_wise_hadamard_ntk
 from .utils import add_value_to_diagonal, nvtx_range
 
 
@@ -365,6 +365,7 @@ class FROMP:
                                                         is_distributed,
                                                         self.n_memorable_points_sub,
                                                         self.prior_prec,
+                                                        self.eps,
                                                         make_mem_train_loader)
 
         self.observed_tasks.append(PastTask(memorable_points,
@@ -432,6 +433,7 @@ def collect_memorable_points(model,
                              is_distributed=False,
                              n_memorable_points_sub=None,
                              prior_prec=None,
+                             eps=None,
                              make_mem_train_loader=None):
     device = next(model.parameters()).device
 
@@ -462,24 +464,26 @@ def collect_memorable_points(model,
         collect_method[_type] = _collect_memorable_points if 'global' in _select_method else _collect_memorable_points_class_balanced
         sample_points[_type] = 'sample' in _select_method
 
-    memorable_points_kwargs = dict(model=model, data_loader=data_loader, dataset=dataset, device=device, prior_prec=prior_prec)
+    memorable_points_kwargs = dict(model=model, data_loader=data_loader, dataset=dataset, device=device, prior_prec=prior_prec, eps=eps)
     if n_memorable_points >= n_task_data:
         # Use ALL data points as memorable points
         memorable_points_indices = list(range(n_task_data))
     else:
         print(f"Collecting {n_memorable_points}/{n_task_data} {memory_select_method} memory points...")
-        memorable_points_indices = collect_method['memory'](**memorable_points_kwargs,
+        dataset_scores = _compute_dataset_scores(**memorable_points_kwargs, scoring_method=select_method['memory'])
+        memorable_points_indices = collect_method['memory'](dataset=dataset,
+                                                            dataset_scores=dataset_scores,
                                                             n_memorable_points=n_memorable_points,
-                                                            memory_select_method=select_method['memory'],
                                                             sample_points=sample_points['memory'])
     memorable_points_types = [TYPE_MEMORABLE_PAST] * n_memorable_points
 
     # append points for NN error correction
     if use_nn_error_correction and memory_residual_frac > 0:
         print(f"Collecting {n_error_correction_points}/{n_task_data} {correction_select_method} error correction points...")
-        error_correction_points_indices = collect_method['correction'](**memorable_points_kwargs,
+        dataset_scores = _compute_dataset_scores(**memorable_points_kwargs, scoring_method=select_method['correction'])
+        error_correction_points_indices = collect_method['correction'](dataset=dataset,
+                                                                       dataset_scores=dataset_scores,
                                                                        n_memorable_points=n_error_correction_points,
-                                                                       memory_select_method=select_method['correction'],
                                                                        sample_points=sample_points['correction'])
         memorable_points_indices += error_correction_points_indices
         memorable_points_types += [TYPE_ERROR_CORRECTION] * n_error_correction_points
@@ -512,7 +516,7 @@ def collect_memorable_points(model,
     return memorable_points, memorable_points_indices, memorable_points_indices_global, memorable_points_true_targets, memorable_points_types
 
 
-def _collect_memorable_points_class_balanced(model, data_loader, dataset, device, prior_prec, n_memorable_points, memory_select_method, sample_points):
+def _collect_memorable_points_class_balanced(dataset, dataset_scores, n_memorable_points, sample_points):
     """ collect memorable points (class-balanced) """
 
     # extract dataset targets
@@ -523,27 +527,21 @@ def _collect_memorable_points_class_balanced(model, data_loader, dataset, device
     else:
         targets = torch.tensor([d[1] for d in dataset])
 
-    # compute dataset scores
-    scores = _compute_dataset_scores(model, data_loader, dataset, device, memory_select_method, prior_prec)
-
     # for each class, select the data points with the highest scores
     classes = targets.unique()
     n_memorable_points_per_class = int(n_memorable_points / len(classes))
     memorable_points_indices = []
     for cls in classes:
         class_indices = (targets == cls).nonzero(as_tuple=False).flatten()
-        select_indices = select_memory_indices(scores[class_indices], n_memorable_points_per_class, sample_points)
+        select_indices = select_memory_indices(dataset_scores[class_indices], n_memorable_points_per_class, sample_points)
         memorable_points_indices.append(class_indices[select_indices])
 
     return torch.cat(memorable_points_indices).tolist()
 
 
-def _collect_memorable_points(model, data_loader, dataset, device, prior_prec, n_memorable_points, memory_select_method, sample_points):
+def _collect_memorable_points(dataset, dataset_scores, n_memorable_points, sample_points):
     """ collect memorable points (not class-balanced) """
-
-    scores = _compute_dataset_scores(model, data_loader, dataset, device, memory_select_method, prior_prec)
-    select_indices = select_memory_indices(scores, n_memorable_points, sample_points)
-    return select_indices.tolist()
+    return select_memory_indices(dataset_scores, n_memorable_points, sample_points).tolist()
 
 
 def select_memory_indices(scores, n_memorable_points, sample_points):
@@ -559,7 +557,7 @@ def select_memory_indices(scores, n_memorable_points, sample_points):
     return select_indices
 
 
-def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method, prior_prec=None):
+def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method, prior_prec=None, eps=None):
     """ compute scores for selecting memorable points with the given method """
 
     assert scoring_method in ['lambda', 'leverage', 'residual', 'error', 'random']
@@ -571,8 +569,13 @@ def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method,
         return torch.tensor(np.random.rand(n_task_data))   # (n,)
 
     # create a data loader w/o shuffling so that indices in the dataset are stored
-    no_shuffle_loader = DataLoader(dataset,
-                                   batch_size=data_loader.batch_size,
+    batch_size = 1250 if scoring_method == 'leverage' else data_loader.batch_size
+    if hasattr(dataset, 'get_task_indices'):
+        dataset_ = torch.utils.data.Subset(dataset, dataset.get_task_indices())
+    else:
+        dataset_ = dataset
+    no_shuffle_loader = DataLoader(dataset_,
+                                   batch_size=batch_size,
                                    num_workers=data_loader.num_workers,
                                    pin_memory=True,
                                    drop_last=False,
@@ -594,12 +597,12 @@ def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method,
     all_scores = torch.cat(all_scores)
 
     if scoring_method == 'leverage':
-        assert prior_prec is not None
-        # compute leverage scores
-        all_scores = _compute_leverage_scores(model, no_shuffle_loader, all_scores, prior_prec)
-
-    if hasattr(dataset, 'get_task_indices'):
-        all_scores = all_scores[dataset.get_task_indices()]
+        assert prior_prec is not None and eps is not None
+        if len(dataset) < 30000:
+            all_scores = _compute_leverage_scores(model, no_shuffle_loader, all_scores, prior_prec, None, None, eps)
+        else:
+            print(f"Computing leverage-scores class-wise for efficiency (N={len(dataset)})...")
+            all_scores = _compute_leverage_scores_class_wise(model, dataset, no_shuffle_loader.batch_size, all_scores, prior_prec, eps)
 
     return all_scores.cpu()   # (n,)
 
@@ -611,14 +614,45 @@ def _compute_hessian_traces(probs):
     return diag_hessian.sum(dim=1)          # (n,)
 
 
-def _compute_leverage_scores(model, data_loader, lambdas, prior_prec, eps=1e-8):
+def _compute_leverage_scores_class_wise(model, dataset, batch_size, lambdas, prior_prec, eps=1e-8):
+    """ compute leverage scores (class-wise) for selecting memorable points using the leverage method """
+
+    # extract dataset targets
+    if hasattr(dataset, 'get_hard_task_targets'):
+        targets = torch.tensor(dataset.get_hard_task_targets())
+    elif hasattr(dataset, 'targets'):
+        targets = torch.tensor(dataset.targets)
+    else:
+        targets = torch.tensor([d[1] for d in dataset])
+
+    # for each class, compute the leverage scores of all data points
+    classes = targets.unique()
+    leverage_scores = torch.zeros(len(targets), device=lambdas.device)
+    for cls in classes:
+        class_indices = (targets == cls).nonzero(as_tuple=False).flatten()
+        inputs_class = dataset.get_data(class_indices)
+        scores = _compute_leverage_scores(model, None, lambdas[class_indices], prior_prec, inputs_class, batch_size, eps)
+        leverage_scores[class_indices] = scores
+
+    return leverage_scores
+
+
+def _compute_leverage_scores(model, data_loader, lambdas, prior_prec, dataset=None, batch_size=None, eps=1e-8, kernel_fn=empirical_class_wise_hadamard_ntk):
     """ compute leverage scores for selecting memorable points using the leverage method """
 
-    kernel_fn = empirical_class_wise_direct_ntk
-    kernel = batch(kernel_fn, model, data_loader)   # (n, n, c)
-    kernel = torch.sum(kernel, dim=-1)  # (n, n)
-    kernel_plus_ridge = torch.linalg.inverse(torch.diag(lambdas + eps)) * prior_prec + kernel  # (n, n)
-    kernel_inv = torch.linalg.inverse(kernel_plus_ridge)   # (n, n)
+    assert not (data_loader is not None and dataset is not None)
+    assert not (data_loader is None and dataset is None)
+    assert not (dataset is not None and batch_size is None)
+
+    with torch.enable_grad():
+        if dataset is not None:
+            kernel = batch(kernel_fn, model, dataset, batch_size=batch_size)   # (n, n)
+        else:
+            kernel = batch(kernel_fn, model, data_loader)   # (n, n)
+
+    kernel_plus_ridge = kernel.clone()  # (n, n)
+    kernel_plus_ridge.diagonal().add_(prior_prec / (lambdas + eps))    # (n, n)
+    kernel_inv = torch.inverse(kernel_plus_ridge)   # (n, n)
     return torch.einsum('ij,ji->i', kernel, kernel_inv)  # (n,)
 
 
