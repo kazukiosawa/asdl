@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from ..utils import im2col_2d
+from ..utils import im2col_2d, original_requires_grad
 from .operation import Operation
 
 
@@ -78,9 +78,16 @@ class Conv2d(Operation):
         m = in_data.transpose(0, 1).flatten(
             start_dim=1
         )  # (c_in)(kernel_size) x n(out_size)
-        return torch.matmul(
+        kron_A = torch.matmul(
             m, m.T
         ).div(out_size)  # (c_in)(kernel_size) x (c_in)(kernel_size)
+        if original_requires_grad(module, 'bias'):
+            column_ext = m.sum(dim=1, keepdim=True).div(out_size)  # (c_in)(kernel_size) x 1
+            kron_A = torch.cat([kron_A, column_ext], dim=1)  # (c_in)(kernel_size) x {(c_in)(kernel_size) + 1}
+            row_ext = torch.cat([m.sum(dim=1).div(out_size),
+                                 m.new_tensor(in_data.shape[0]).view(1)]).view(1, -1)  # 1 x {(c_in)(kernel_size) + 1}
+            kron_A = torch.cat([kron_A, row_ext], dim=0)   # {(c_in)(kernel_size) + 1} x {(c_in)(kernel_size) + 1}
+        return kron_A
 
     @staticmethod
     def cov_kron_B(module, out_grads):

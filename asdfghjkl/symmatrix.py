@@ -438,12 +438,23 @@ class Kron:
     def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
         mat_A = self.A_inv if use_inv else self.A
         mat_B = self.B_inv if use_inv else self.B
-        vec_weight_2d = vec_weight.view(self.B_dim, -1)
-        mvp_w = mat_B.mm(vec_weight_2d).mm(mat_A).view_as(vec_weight)
+        vec_w, vec_b = vec_weight, vec_bias
+        if vec_b is not None and vec_w.ndim > vec_b.ndim:
+            if vec_w.ndim == 4: # Conv2d
+                vec_w = vec_w.flatten(start_dim=1)
+            vec_b = vec_b.view(vec_b.shape + (1,))
+        vec = [vec_w, vec_b]
+        vec = torch.cat([v for v in vec if v is not None], dim=1)
+        vec_2d = vec.view(self.B_dim, -1)
+        mvp_vec = mat_B.mm(vec_2d).mm(mat_A).view_as(vec)
+        if vec_bias is not None:
+            mvp_w = mvp_vec[:, :-1].view_as(vec_weight)
+        else:
+            mvp_w = mvp_vec.view_as(vec_weight)
         if inplace:
             vec_weight.copy_(mvp_w)
         if vec_bias is not None:
-            mvp_b = mat_B.mv(vec_bias)
+            mvp_b = mvp_vec[:, -1].view_as(vec_bias)
             if inplace:
                 vec_bias.copy_(mvp_b)
             return mvp_w, mvp_b
