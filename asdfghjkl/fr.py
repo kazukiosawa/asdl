@@ -271,6 +271,7 @@ class FROMP:
                  memory_residual_frac=0.5,
                  use_nn_error_correction=False,
                  correction_select_method="residual_descend",
+                 n_error_correction_points=10,
                  ggn_shape='diag',
                  ggn_type='exact',
                  #prior_prec=1e-5,
@@ -301,6 +302,7 @@ class FROMP:
         self.memory_residual_frac = memory_residual_frac
         self.use_nn_error_correction = use_nn_error_correction
         self.correction_select_method = correction_select_method
+        self.n_error_correction_points = n_error_correction_points
         self.use_identity_kernel = use_identity_kernel
         self.use_temp_correction = use_temp_correction
         self.penalty_type = penalty_type
@@ -363,6 +365,7 @@ class FROMP:
                                                         self.memory_residual_frac,
                                                         self.use_nn_error_correction,
                                                         self.correction_select_method,
+                                                        self.n_error_correction_points,
                                                         memorable_points_as_tensor,
                                                         is_distributed,
                                                         self.n_memorable_points_sub,
@@ -428,9 +431,10 @@ def collect_memorable_points(model,
                              n_memorable_points,
                              memorable_points_frac,
                              memory_select_method="lambda_descend",
-                             memory_residual_frac=1.0,
+                             memory_residual_frac=None,
                              use_nn_error_correction=False,
                              correction_select_method="residual_descend",
+                             n_error_correction_points=None,
                              as_tensor=True,
                              is_distributed=False,
                              n_memorable_points_sub=None,
@@ -440,6 +444,8 @@ def collect_memorable_points(model,
     device = next(model.parameters()).device
 
     assert data_loader.batch_size is not None, 'DataLoader w/o batch_size is not supported.'
+    assert not (use_nn_error_correction and (memory_residual_frac is None and n_error_correction_points is None))
+
     if is_distributed:
         indices = range(dist.get_rank(), len(dataset), dist.get_world_size())
         dataset = Subset(dataset, indices)
@@ -454,9 +460,10 @@ def collect_memorable_points(model,
     n_task_data = dataset.get_n_task_data() if getattr(dataset, 'get_n_task_data') else len(dataset)
     if n_memorable_points is None:
         n_memorable_points = int(memorable_points_frac * n_task_data)
-    if use_nn_error_correction and memory_residual_frac > 0:
-        n_error_correction_points = int(n_memorable_points * memory_residual_frac)
-        n_memorable_points -= n_error_correction_points
+    if use_nn_error_correction:
+        if n_error_correction_points is None:
+            n_error_correction_points = int(n_memorable_points * memory_residual_frac)
+            n_memorable_points -= n_error_correction_points
 
     select_method = {}
     collect_method = {}
@@ -480,13 +487,14 @@ def collect_memorable_points(model,
     memorable_points_types = [TYPE_MEMORABLE_PAST] * n_memorable_points
 
     # append points for NN error correction
-    if use_nn_error_correction and memory_residual_frac > 0:
+    if use_nn_error_correction:
         print(f"Collecting {n_error_correction_points}/{n_task_data} {correction_select_method} error correction points...")
         dataset_scores = _compute_dataset_scores(**memorable_points_kwargs, scoring_method=select_method['correction'])
         error_correction_points_indices = collect_method['correction'](dataset=dataset,
                                                                        dataset_scores=dataset_scores,
                                                                        n_memorable_points=n_error_correction_points,
-                                                                       sample_points=sample_points['correction'])
+                                                                       sample_points=sample_points['correction'],
+                                                                       exclude_indices=memorable_points_indices)
         memorable_points_indices += error_correction_points_indices
         memorable_points_types += [TYPE_ERROR_CORRECTION] * n_error_correction_points
 
@@ -518,7 +526,7 @@ def collect_memorable_points(model,
     return memorable_points, memorable_points_indices, memorable_points_indices_global, memorable_points_true_targets, memorable_points_types
 
 
-def _collect_memorable_points_class_balanced(dataset, dataset_scores, n_memorable_points, sample_points):
+def _collect_memorable_points_class_balanced(dataset, dataset_scores, n_memorable_points, sample_points, exclude_indices=None):
     """ collect memorable points (class-balanced) """
 
     # extract dataset targets
@@ -535,26 +543,41 @@ def _collect_memorable_points_class_balanced(dataset, dataset_scores, n_memorabl
     memorable_points_indices = []
     for cls in classes:
         class_indices = (targets == cls).nonzero(as_tuple=False).flatten()
-        select_indices = select_memory_indices(dataset_scores[class_indices], n_memorable_points_per_class, sample_points)
-        memorable_points_indices.append(class_indices[select_indices])
+        select_indices = select_memory_indices(dataset_scores[class_indices], n_memorable_points_per_class, sample_points, exclude_indices, class_indices)
+        #memorable_points_indices.append(class_indices[select_indices])
+        memorable_points_indices.append(select_indices)
 
     return torch.cat(memorable_points_indices).tolist()
 
 
-def _collect_memorable_points(dataset, dataset_scores, n_memorable_points, sample_points):
+def _collect_memorable_points(dataset, dataset_scores, n_memorable_points, sample_points, exclude_indices=None):
     """ collect memorable points (not class-balanced) """
-    return select_memory_indices(dataset_scores, n_memorable_points, sample_points).tolist()
+    return select_memory_indices(dataset_scores, n_memorable_points, sample_points, exclude_indices).tolist()
 
 
-def select_memory_indices(scores, n_memorable_points, sample_points):
+def select_memory_indices(scores, n_memorable_points, sample_points, exclude_indices=None, class_indices=None):
     """ select indices of the memory points by either sampling or sorting according to the score """
 
     if sample_points:
+        indices = list(range(len(scores)))
+        indices = class_indices[indices].tolist() if class_indices is not None else indices
+        if exclude_indices is not None:
+            for idx in exclude_indices:
+                if idx in indices:
+                    indices.remove(idx)
+
         import numpy as np
-        probs = (scores / scores.sum()).numpy()
-        select_indices = torch.tensor(np.random.choice(len(scores), size=n_memorable_points, replace=False, p=probs))
+        indices = np.array(indices)
+        probs = (scores[indices] / scores[indices].sum()).numpy()
+        select_indices = torch.tensor(np.random.choice(indices, size=n_memorable_points, replace=False, p=probs))
     else:
-        select_indices = torch.argsort(scores, descending=True)[:n_memorable_points]
+        select_indices = torch.argsort(scores, descending=True)
+        select_indices = (class_indices[select_indices] if class_indices is not None else select_indices).tolist()
+        if exclude_indices is not None:
+            for idx in exclude_indices:
+                if idx in select_indices:
+                    select_indices.remove(idx)
+        select_indices = torch.tensor(select_indices)[:n_memorable_points]
 
     return select_indices
 
