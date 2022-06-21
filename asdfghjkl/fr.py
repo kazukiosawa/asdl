@@ -544,7 +544,6 @@ def _collect_memorable_points_class_balanced(dataset, dataset_scores, n_memorabl
     for cls in classes:
         class_indices = (targets == cls).nonzero(as_tuple=False).flatten()
         select_indices = select_memory_indices(dataset_scores[class_indices], n_memorable_points_per_class, sample_points, exclude_indices, class_indices)
-        #memorable_points_indices.append(class_indices[select_indices])
         memorable_points_indices.append(select_indices)
 
     return torch.cat(memorable_points_indices).tolist()
@@ -558,26 +557,30 @@ def _collect_memorable_points(dataset, dataset_scores, n_memorable_points, sampl
 def select_memory_indices(scores, n_memorable_points, sample_points, exclude_indices=None, class_indices=None):
     """ select indices of the memory points by either sampling or sorting according to the score """
 
-    if sample_points:
-        indices = list(range(len(scores)))
-        indices = class_indices[indices].tolist() if class_indices is not None else indices
-        if exclude_indices is not None:
-            for idx in exclude_indices:
-                if idx in indices:
-                    indices.remove(idx)
+    import numpy as np
 
-        import numpy as np
-        indices = np.array(indices)
-        probs = (scores[indices] / scores[indices].sum()).numpy()
-        select_indices = torch.tensor(np.random.choice(indices, size=n_memorable_points, replace=False, p=probs))
+    # exclude indices
+    indices = list(range(len(scores)))
+    if exclude_indices is not None:
+        _class_indices = indices.copy() if class_indices is None else class_indices.tolist()
+        for idx in exclude_indices:
+            if idx in _class_indices:
+                indices.remove(_class_indices.index(idx))
+    indices = np.array(indices)
+    scores = scores[indices].numpy()
+
+    if sample_points:
+        if scores.min() < 0.0:
+            scores += np.abs(scores.min())
+        probs = scores / scores.sum()
+        select_indices = np.random.choice(indices, size=n_memorable_points, replace=False, p=probs)
     else:
-        select_indices = torch.argsort(scores, descending=True)
-        select_indices = (class_indices[select_indices] if class_indices is not None else select_indices).tolist()
-        if exclude_indices is not None:
-            for idx in exclude_indices:
-                if idx in select_indices:
-                    select_indices.remove(idx)
-        select_indices = torch.tensor(select_indices)[:n_memorable_points]
+        indices_sorted = np.argsort(scores)[-n_memorable_points:]
+        select_indices = indices[indices_sorted]
+
+    select_indices = torch.tensor(select_indices)
+    if class_indices is not None:
+        select_indices = class_indices[select_indices]
 
     return select_indices
 
@@ -681,18 +684,26 @@ def _compute_leverage_scores(model, data_loader, lambdas, prior_prec, dataset=No
     return torch.einsum('ij,ji->i', kernel, kernel_inv)  # (n,)
 
 
+def __compute_residuals(probs, targets):
+    """ helper method to compute the residual for each data point """
+
+    if targets.shape == probs.shape:
+        targets_one_hot = targets
+    else:
+        targets_one_hot = _convert_targets_to_one_hot(targets, probs.shape[1])  # (n, c)
+    return (probs - targets_one_hot.to(probs.device))   # (n, c)
+
+
 def _compute_residuals(probs, targets):
     """ compute residuals for selecting memorable points for NN error correction """
 
-    targets_one_hot = _convert_targets_to_one_hot(targets, probs.shape[1])  # (n, c)
-    return (probs - targets_one_hot.to(probs.device)).abs().sum(dim=1)   # (n,)
+    return __compute_residuals(probs, targets).abs().sum(dim=1)   # (n,)
 
 
 def _compute_errors(logits, probs, targets):
     """ compute errors (i.e. logits times residuals) for selecting memorable points for NN error correction """
 
-    targets_one_hot = _convert_targets_to_one_hot(targets, probs.shape[1])  # (n, c)
-    residuals = (probs - targets_one_hot.to(probs.device)).unsqueeze(2)    # (n, c, 1)
+    residuals = __compute_residuals(probs, targets).unsqueeze(2)    # (n, c, 1)
     logits = logits.unsqueeze(1)    # (n, 1, c)
     return torch.bmm(logits, residuals).flatten() # (n,)
 
