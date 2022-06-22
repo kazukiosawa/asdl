@@ -572,7 +572,7 @@ def select_memory_indices(scores, n_memorable_points, sample_points, exclude_ind
 
     if sample_points:
         if scores.min() < 0.0:
-            scores += np.abs(scores.min())
+            scores += np.abs(scores.min()) * 1.01
         probs = scores / scores.sum()
         select_indices = np.random.choice(indices, size=n_memorable_points, replace=False, p=probs)
     else:
