@@ -460,43 +460,35 @@ def collect_memorable_points(model,
     n_task_data = dataset.get_n_task_data() if getattr(dataset, 'get_n_task_data') else len(dataset)
     if n_memorable_points is None:
         n_memorable_points = int(memorable_points_frac * n_task_data)
-    if use_nn_error_correction:
-        if n_error_correction_points is None:
-            n_error_correction_points = int(n_memorable_points * memory_residual_frac)
-            n_memorable_points -= n_error_correction_points
+    if not use_nn_error_correction:
+        n_error_correction_points = 0
+    elif n_error_correction_points is None:
+        n_error_correction_points = int(memory_residual_frac * n_memorable_points)
+        n_memorable_points -= n_error_correction_points
+    n_points = {'memory': n_memorable_points, 'correction': n_error_correction_points}
 
-    select_method = {}
-    collect_method = {}
-    sample_points = {}
-    for _type, _select_method in [('memory', memory_select_method), ('correction', correction_select_method)]:
-        select_method[_type] = _select_method.split('_')[0]
-        collect_method[_type] = _collect_memorable_points if 'global' in _select_method else _collect_memorable_points_class_balanced
-        sample_points[_type] = 'sample' in _select_method
+    assert n_points["memory"] + n_points["memory"] <= n_task_data,\
+        f'# memory points ({n_points["memory"]} + {n_points["memory"]}) exceeds # data points ({n_task_data})!'
 
     memorable_points_kwargs = dict(model=model, data_loader=data_loader, dataset=dataset, device=device, prior_prec=prior_prec, eps=eps)
-    if n_memorable_points >= n_task_data:
-        # Use ALL data points as memorable points
-        memorable_points_indices = list(range(n_task_data))
-    else:
-        print(f"Collecting {n_memorable_points}/{n_task_data} {memory_select_method} memory points...")
-        dataset_scores = _compute_dataset_scores(**memorable_points_kwargs, scoring_method=select_method['memory'])
-        memorable_points_indices = collect_method['memory'](dataset=dataset,
-                                                            dataset_scores=dataset_scores,
-                                                            n_memorable_points=n_memorable_points,
-                                                            sample_points=sample_points['memory'])
-    memorable_points_types = [TYPE_MEMORABLE_PAST] * n_memorable_points
-
-    # append points for NN error correction
-    if use_nn_error_correction:
-        print(f"Collecting {n_error_correction_points}/{n_task_data} {correction_select_method} error correction points...")
-        dataset_scores = _compute_dataset_scores(**memorable_points_kwargs, scoring_method=select_method['correction'])
-        error_correction_points_indices = collect_method['correction'](dataset=dataset,
-                                                                       dataset_scores=dataset_scores,
-                                                                       n_memorable_points=n_error_correction_points,
-                                                                       sample_points=sample_points['correction'],
-                                                                       exclude_indices=memorable_points_indices)
-        memorable_points_indices += error_correction_points_indices
-        memorable_points_types += [TYPE_ERROR_CORRECTION] * n_error_correction_points
+    memorable_points_indices = []
+    memorable_points_types = []
+    memory_types = ([('correction', correction_select_method)] if use_nn_error_correction else []) + [('memory', memory_select_method)]
+    for memory_type, select_method in memory_types:
+        if n_points[memory_type] == n_task_data - len(memorable_points_indices):
+            print(f"Using all remaining {n_points[memory_type]}/{n_task_data} data points as {memory_type} points.")
+            memorable_points_indices += list(set(range(n_task_data)) - set(memorable_points_indices))
+        else:
+            print(f"Collecting {n_points[memory_type]}/{n_task_data} {select_method} {memory_type} points...")
+            dataset_scores = _compute_dataset_scores(**memorable_points_kwargs, scoring_method=select_method.split('_')[0])
+            collect_method = _collect_memorable_points if 'global' in select_method else _collect_memorable_points_class_balanced
+            memorable_points_indices += collect_method(dataset=dataset,
+                                                       dataset_scores=dataset_scores,
+                                                       n_memorable_points=n_points[memory_type],
+                                                       sample_points='sample' in select_method,
+                                                       exclude_indices=memorable_points_indices)
+        memory_type_id = TYPE_MEMORABLE_PAST if memory_type == 'memory' else TYPE_ERROR_CORRECTION
+        memorable_points_types += [memory_type_id] * n_points[memory_type]
 
     # Convert within-task (i.e. starting at 0) to across-task memorable points indices
     global_mem_idx = lambda idx: dataset.globalize_memory_index(idx) 
@@ -561,7 +553,7 @@ def select_memory_indices(scores, n_memorable_points, sample_points, exclude_ind
 
     # exclude indices
     indices = list(range(len(scores)))
-    if exclude_indices is not None:
+    if exclude_indices is not None and len(exclude_indices) > 0:
         _class_indices = indices.copy() if class_indices is None else class_indices.tolist()
         for idx in exclude_indices:
             if idx in _class_indices:
