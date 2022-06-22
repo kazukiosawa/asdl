@@ -271,7 +271,7 @@ class FROMP:
                  memory_residual_frac=0.5,
                  use_nn_error_correction=False,
                  correction_select_method="residual_descend",
-                 n_error_correction_points=10,
+                 n_error_correction_points=None,
                  ggn_shape='diag',
                  ggn_type='exact',
                  #prior_prec=1e-5,
