@@ -565,7 +565,8 @@ def select_memory_indices(scores, n_memorable_points, sample_points, exclude_ind
         _class_indices = indices.copy() if class_indices is None else class_indices.tolist()
         for idx in exclude_indices:
             if idx in _class_indices:
-                indices.remove(_class_indices.index(idx))
+                _idx = idx if class_indices is None else _class_indices.index(idx)
+                indices.remove(_idx)
     indices = np.array(indices)
     scores = scores[indices].numpy()
 
