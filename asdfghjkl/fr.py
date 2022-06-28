@@ -272,6 +272,7 @@ class FROMP:
                  use_nn_error_correction=False,
                  correction_select_method="residual_descend",
                  n_error_correction_points=None,
+                 choose_m2_as_subset_of_m1=False,
                  ggn_shape='diag',
                  ggn_type='exact',
                  #prior_prec=1e-5,
@@ -303,6 +304,7 @@ class FROMP:
         self.use_nn_error_correction = use_nn_error_correction
         self.correction_select_method = correction_select_method
         self.n_error_correction_points = n_error_correction_points
+        self.choose_m2_as_subset_of_m1 = choose_m2_as_subset_of_m1
         self.use_identity_kernel = use_identity_kernel
         self.use_temp_correction = use_temp_correction
         self.penalty_type = penalty_type
@@ -371,7 +373,8 @@ class FROMP:
                                                         self.n_memorable_points_sub,
                                                         self.prior_prec,
                                                         self.eps,
-                                                        make_mem_train_loader)
+                                                        make_mem_train_loader,
+                                                        self.choose_m2_as_subset_of_m1)
 
         self.observed_tasks.append(PastTask(memorable_points,
                                             class_ids,
@@ -440,7 +443,8 @@ def collect_memorable_points(model,
                              n_memorable_points_sub=None,
                              prior_prec=None,
                              eps=None,
-                             make_mem_train_loader=None):
+                             make_mem_train_loader=None,
+                             choose_m2_as_subset_of_m1=False):
     device = next(model.parameters()).device
 
     assert data_loader.batch_size is not None, 'DataLoader w/o batch_size is not supported.'
@@ -451,11 +455,13 @@ def collect_memorable_points(model,
         dataset = Subset(dataset, indices)
 
     assert memory_select_method in ['lambda_descend', 'leverage_descend', 'random', 'lambda_descend_global', 'leverage_descend_global', 'random_global',
-                                    'lambda_sample', 'leverage_sample', 'lambda_sample_global', 'leverage_sample_global'],\
+                                    'lambda_sample', 'leverage_sample', 'lambda_sample_global', 'leverage_sample_global', 'lambda-residual_sample',
+                                    'lambda-residual_sample_global', 'lambda-residual_descend', 'lambda-residual_descend_global', 'residual_sample', 'residual_sample_global'],\
         'Invalid memorable points selection method.'
     assert correction_select_method in ['residual_descend', 'error_descend', 'random', 'residual_descend_global', 'error_descend_global', 'random_global',
                                         'residual_sample', 'error_sample', 'residual_sample_global', 'error_sample_global'],\
         'Invalid error-correction points selection method.'
+    assert not (choose_m2_as_subset_of_m1 and not use_nn_error_correction), 'Must use NN error correction for this option.'
 
     n_task_data = dataset.get_n_task_data() if getattr(dataset, 'get_n_task_data') else len(dataset)
     if n_memorable_points is None:
@@ -466,27 +472,43 @@ def collect_memorable_points(model,
         n_error_correction_points = int(memory_residual_frac * n_memorable_points)
         n_memorable_points -= n_error_correction_points
     n_points = {'memory': n_memorable_points, 'correction': n_error_correction_points}
+    n_points_total = n_points["memory"] + n_points["correction"]
 
-    assert n_points["memory"] + n_points["memory"] <= n_task_data,\
-        f'# memory points ({n_points["memory"]} + {n_points["memory"]}) exceeds # data points ({n_task_data})!'
+    assert n_points_total <= n_task_data,\
+        f'# memory points ({n_points["memory"]} + {n_points["correction"]}) exceeds # data points ({n_task_data})!'
 
     memorable_points_kwargs = dict(model=model, data_loader=data_loader, dataset=dataset, device=device, prior_prec=prior_prec, eps=eps)
     memorable_points_indices = []
     memorable_points_types = []
-    memory_types = ([('correction', correction_select_method)] if use_nn_error_correction else []) + [('memory', memory_select_method)]
+    if choose_m2_as_subset_of_m1:
+        memory_types = [('memory', correction_select_method), ('correction', memory_select_method)]
+    else:
+        memory_types = ([('correction', correction_select_method)] if use_nn_error_correction else []) + [('memory', memory_select_method)]
     for memory_type, select_method in memory_types:
-        if n_points[memory_type] == n_task_data - len(memorable_points_indices):
-            print(f"Using all remaining {n_points[memory_type]}/{n_task_data} data points as {memory_type} points.")
+        n_points_= n_points_total if choose_m2_as_subset_of_m1 and memory_type == 'memory' else n_points[memory_type]
+        if n_points_ == n_task_data - len(memorable_points_indices):
+            print(f"Using all remaining {n_points_}/{n_task_data} data points as {memory_type} points.")
             memorable_points_indices += list(set(range(n_task_data)) - set(memorable_points_indices))
         else:
-            print(f"Collecting {n_points[memory_type]}/{n_task_data} {select_method} {memory_type} points...")
+            if choose_m2_as_subset_of_m1 and memory_type == 'correction':
+                subset_str = f' from the {n_points_total} memory points'
+                exclude_indices = list(set(range(n_task_data)) - set(memorable_points_indices))
+            else:
+                subset_str = ''
+                exclude_indices = memorable_points_indices 
+
+            print(f"Collecting {n_points_}/{n_task_data} {select_method} {memory_type} points{subset_str}...")
             dataset_scores = _compute_dataset_scores(**memorable_points_kwargs, scoring_method=select_method.split('_')[0])
             collect_method = _collect_memorable_points if 'global' in select_method else _collect_memorable_points_class_balanced
-            memorable_points_indices += collect_method(dataset=dataset,
+            memorable_points_indices_new = collect_method(dataset=dataset,
                                                        dataset_scores=dataset_scores,
-                                                       n_memorable_points=n_points[memory_type],
+                                                       n_memorable_points=n_points_,
                                                        sample_points='sample' in select_method,
-                                                       exclude_indices=memorable_points_indices)
+                                                       exclude_indices=exclude_indices)
+            if choose_m2_as_subset_of_m1 and memory_type == 'correction':
+                memorable_points_indices = list(set(memorable_points_indices) - set(memorable_points_indices_new)) + memorable_points_indices_new
+            else:
+                memorable_points_indices += memorable_points_indices_new
         memory_type_id = TYPE_MEMORABLE_PAST if memory_type == 'memory' else TYPE_ERROR_CORRECTION
         memorable_points_types += [memory_type_id] * n_points[memory_type]
 
@@ -581,7 +603,7 @@ def select_memory_indices(scores, n_memorable_points, sample_points, exclude_ind
 def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method, prior_prec=None, eps=None):
     """ compute scores for selecting memorable points with the given method """
 
-    assert scoring_method in ['lambda', 'leverage', 'residual', 'error', 'random']
+    assert scoring_method in ['lambda', 'leverage', 'residual', 'error', 'random', 'lambda-residual']
 
     if scoring_method == 'random':
         # return random scores
@@ -597,23 +619,30 @@ def _compute_dataset_scores(model, data_loader, dataset, device, scoring_method,
         dataset_ = dataset
     no_shuffle_loader = DataLoader(dataset_,
                                    batch_size=batch_size,
+                                   #batch_size=100,
                                    num_workers=data_loader.num_workers,
                                    pin_memory=True,
                                    drop_last=False,
                                    shuffle=False)
 
+    model.zero_grad()
+
+    from tqdm import tqdm
+
     # compute score for each data point
     all_scores = []
-    for batch in no_shuffle_loader:
+    for batch in tqdm(no_shuffle_loader):
         inputs, targets = batch[0].to(device), batch[1].to(device)
         logits = model(inputs)  # (n, c)
         probs = F.softmax(logits, dim=1) # (n, c)
         if scoring_method in ['lambda', 'leverage']:
             scores = _compute_hessian_traces(probs)
+        elif scoring_method == 'lambda-residual':
+            scores = _compute_lambda_residual(probs, targets)
         elif scoring_method == 'residual':
             scores = _compute_residuals(probs, targets)
         elif scoring_method == 'error':
-            scores = _compute_errors(logits, probs, targets)
+            scores = _compute_errors(logits, probs, targets, model, inputs)
         all_scores.append(scores)  # [(n,)]
     all_scores = torch.cat(all_scores)
 
@@ -633,6 +662,12 @@ def _compute_hessian_traces(probs):
 
     diag_hessian = probs - probs * probs    # (n, c)
     return diag_hessian.sum(dim=1)          # (n,)
+
+
+def _compute_lambda_residual(probs, targets):
+    residuals = __compute_residuals(probs, targets).unsqueeze(2)    # (n, c, 1)
+    lambdas = (probs - probs * probs).unsqueeze(1)  # (n, 1, c)
+    return torch.bmm(lambdas, residuals).flatten()   # (n,)
 
 
 def _compute_leverage_scores_class_wise(model, dataset, batch_size, lambdas, prior_prec, eps=1e-8):
@@ -690,15 +725,49 @@ def __compute_residuals(probs, targets):
 def _compute_residuals(probs, targets):
     """ compute residuals for selecting memorable points for NN error correction """
 
-    return __compute_residuals(probs, targets).abs().sum(dim=1)   # (n,)
+    return torch.linalg.norm(__compute_residuals(probs, targets), dim=1)   # (n,)
 
 
-def _compute_errors(logits, probs, targets):
+def _compute_errors(logits, probs, targets, model, inputs):
     """ compute errors (i.e. logits times residuals) for selecting memorable points for NN error correction """
 
     residuals = __compute_residuals(probs, targets).unsqueeze(2)    # (n, c, 1)
-    logits = logits.unsqueeze(1)    # (n, 1, c)
-    return torch.bmm(logits, residuals).flatten() # (n,)
+    Js = _compute_jacobian(model, inputs, residuals)   # (n, p)
+    errors = torch.linalg.norm(Js, dim=1)   # (n,)
+    return errors
+
+
+def _compute_jacobian(model, inputs, residuals):
+    """ compute Jacobians nabla_w f^i_w at w for all given inputs """
+
+    from asdfghjkl.gradient import batch_gradient
+
+    def loss_fn(outputs, targets):
+        return torch.bmm(outputs.unsqueeze(1), residuals).sum()
+
+    batch_gradient(model, loss_fn, inputs, None).detach()
+    return _get_batch_grad(model)
+
+
+def _flatten_after_batch(tensor: torch.Tensor):
+    if tensor.ndim == 1:
+        return tensor.unsqueeze(-1)
+    else:
+        return tensor.flatten(start_dim=1)
+
+
+def _get_batch_grad(model):
+    batch_grads = list()
+    for module in model.modules():
+        if hasattr(module, 'op_results'):
+            res = module.op_results['batch_grads']
+            if 'weight' in res:
+                batch_grads.append(_flatten_after_batch(res['weight']))
+            if 'bias' in res:
+                batch_grads.append(_flatten_after_batch(res['bias']))
+            if len(set(res.keys()) - {'weight', 'bias'}) > 0:
+                raise ValueError(f'Invalid parameter keys {res.keys()}')
+    return torch.cat(batch_grads, dim=1)
 
 
 def _convert_targets_to_one_hot(targets, one_hot_len):
