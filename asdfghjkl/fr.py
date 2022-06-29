@@ -481,7 +481,7 @@ def collect_memorable_points(model,
     memorable_points_indices = []
     memorable_points_types = []
     if choose_m2_as_subset_of_m1:
-        memory_types = [('memory', correction_select_method), ('correction', memory_select_method)]
+        memory_types = [('memory', memory_select_method), ('correction', correction_select_method)]
     else:
         memory_types = ([('correction', correction_select_method)] if use_nn_error_correction else []) + [('memory', memory_select_method)]
     for memory_type, select_method in memory_types:
