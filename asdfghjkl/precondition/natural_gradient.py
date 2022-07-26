@@ -479,6 +479,8 @@ class NaturalGradient:
         assert module_partitions is not None, 'module_partitions is not specified.'
         try:
             module = next(m for name, m in self.named_modules_for_curvature if name == module_name)
+            if module not in self.partitioned_modules:
+                return []
             dst = next(i for i, partition in enumerate(module_partitions) if module in partition)
             if self.sync_group is not None:
                 dst = self.sync_group_ranks[dst]
