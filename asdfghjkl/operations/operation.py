@@ -549,13 +549,13 @@ class OperationContext:
                             self.accumulate_result(module, diag_b, OP_COV_DIAG, 'bias')
 
     def calc_cov_kron(self, module, clear_in_out=False):
-        self.calc_cov(module, SHAPE_KRON, clear_in_out)
+        self.calc_cov(module, shape=SHAPE_KRON, clear_in_out=clear_in_out)
 
     def calc_cov_unit_wise(self, module, clear_in_out=False):
-        self.calc_cov(module, SHAPE_UNIT_WISE, clear_in_out)
+        self.calc_cov(module, shape=SHAPE_UNIT_WISE, clear_in_out=clear_in_out)
 
     def calc_cov_diag(self, module, clear_in_out=False):
-        self.calc_cov(module, SHAPE_DIAG, clear_in_out)
+        self.calc_cov(module, shape=SHAPE_DIAG, clear_in_out=clear_in_out)
 
     def cov_symmatrix(self, module, pop=False):
         kwargs = dict(data=self.get_result(module, OP_COV, pop=pop),
