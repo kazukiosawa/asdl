@@ -139,12 +139,10 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
 
     train_kwargs = {'batch_size': args.batch_size, 'drop_last': True}
-    test_kwargs = {'batch_size': args.test_batch_size}
-    cuda_kwargs = {'num_workers': args.num_workers,
-                   'pin_memory': True,
-                   'shuffle': True}
-    train_kwargs.update(cuda_kwargs)
-    test_kwargs.update(cuda_kwargs)
+    test_kwargs = {'batch_size': args.test_batch_size, 'shuffle': False}
+    common_kwargs = {'num_workers': args.num_workers, 'pin_memory': True}
+    train_kwargs.update(common_kwargs)
+    test_kwargs.update(common_kwargs)
 
     transform = transforms.Compose([
         transforms.ToTensor(),
