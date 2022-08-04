@@ -1,7 +1,7 @@
 import torch
 from .symmatrix import SymMatrix, Diag
 from .matrices import SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_DIAG, HESSIAN, MatrixManager
-from .mvp import power_method, conjugate_gradient_method, quadratic_form
+from .mvp import power_method, conjugate_gradient_method
 from .vector import ParamVector, reduce_vectors
 
 __all__ = [
@@ -217,7 +217,6 @@ def hessian_quadratic_form(
 def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
     model.zero_grad()
     loss = loss_fn(model(inputs), targets)
-    device = next(model.parameters()).device
     params = [p for p in model.parameters() if p.requires_grad]
 
     # full
