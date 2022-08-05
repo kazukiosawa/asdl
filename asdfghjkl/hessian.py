@@ -8,6 +8,7 @@ from .vector import ParamVector, reduce_vectors
 
 __all__ = [
     'calculate_hessian',
+    'get_full_hessian',
     'hvp',
     'hessian_eig',
     'hessian_free',
@@ -110,6 +111,13 @@ def calculate_hessian(model,
 
     if is_distributed:
         h.reduce_matrices(is_master=is_master, all_reduce=all_reduce)
+    return h
+
+
+def get_full_hessian(model, loss_fn, inputs=None, targets=None, data_loader=None, **kwargs):
+    h = calculate_hessian(model, loss_fn, SHAPE_FULL,
+                          inputs=inputs, targets=targets, data_loader=data_loader, **kwargs)
+    return getattr(model, h.hess_attr).data
 
 
 def hvp(model,
