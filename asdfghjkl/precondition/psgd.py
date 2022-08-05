@@ -73,51 +73,6 @@ Replaced deprecated functions to the last ones
 """
 
 
-@torch.jit.script
-def update_precond_dense(Q, dxs, dgs, step=0.01, _tiny=1.2e-38):
-    # type: (Tensor, List[Tensor], List[Tensor], float, float) -> Tensor
-    """
-    update dense preconditioner P = Q^T*Q
-    Q: Cholesky factor of preconditioner with positive diagonal entries
-    dxs: list of perturbations of parameters
-    dgs: list of perturbations of gradients
-    step: update step size normalized to range [0, 1]
-    _tiny: an offset to avoid division by zero
-    """
-    dx = torch.cat([torch.reshape(x, [-1, 1]) for x in dxs])
-    dg = torch.cat([torch.reshape(g, [-1, 1]) for g in dgs])
-
-    a = Q.mm(dg)
-    b = torch.triangular_solve(dx, Q, upper=True, transpose=True)[0]
-
-    grad = torch.triu(a.mm(a.t()) - b.mm(b.t()))
-    step0 = step / (grad.abs().max() + _tiny)
-
-    return Q - step0 * grad.mm(Q)
-
-
-@torch.jit.script
-def precond_grad_dense(Q, grads):
-    # type: (Tensor, List[Tensor]) -> List[Tensor]
-    """
-    return preconditioned gradient using dense preconditioner
-    Q: Cholesky factor of preconditioner
-    grads: list of gradients
-    """
-    grad = [torch.reshape(g, [-1, 1]) for g in grads]
-    lens = [g.shape[0] for g in grad]
-    grad = torch.cat(grad)
-    grad = Q.t().mm(Q.mm(grad))
-
-    pre_grads = []
-    idx = 0
-    for i in range(len(grads)):
-        pre_grads.append(torch.reshape(grad[idx: idx + lens[i]], grads[i].shape))
-        idx = idx + lens[i]
-
-    return pre_grads
-
-
 def update_precond_kron(Ql, Qr, dX, dG, step=0.01, _tiny=1.2e-38):
     """
     Update Kronecker product preconditioner P = kron_prod(Qr^T*Qr, Ql^T*Ql)
