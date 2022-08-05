@@ -9,6 +9,7 @@ from .vector import ParamVector, reduce_vectors
 __all__ = [
     'calculate_hessian',
     'get_hessian',
+    'get_abs_hessian',
     'hvp',
     'hessian_eig',
     'hessian_free',
@@ -29,6 +30,12 @@ class HessianManager(MatrixManager):
     def tmp_hess_attr(self):
         return f'tmp_{HESSIAN}'
 
+    def zero_hessian(self):
+        attr = self.hess_attr
+        for module in self._model.modules():
+            if hasattr(module, attr):
+                delattr(module, attr)
+
     def extract_tmp_hessian(self, module: nn.Module):
         tmp_hessian = getattr(module, self.tmp_hess_attr, None)
         if tmp_hessian is not None:
@@ -42,9 +49,14 @@ class HessianManager(MatrixManager):
                           targets=None,
                           data_loader=None,
                           data_average=False,
+                          accumulate=False,
                           scale=1.):
         model = self._model
         device = next(model.parameters()).device
+
+        if not accumulate:
+            # set Hessian zero
+            self.zero_hessian()
 
         def hessian_for_one_batch(x, t):
             x = x.to(device)
@@ -90,6 +102,7 @@ def calculate_hessian(model,
                       inputs=None,
                       targets=None,
                       data_loader=None,
+                      accumulate=False,
                       is_distributed=False,
                       all_reduce=False,
                       is_master=True,
@@ -107,7 +120,8 @@ def calculate_hessian(model,
                         inputs=inputs,
                         targets=targets,
                         data_loader=data_loader,
-                        data_average=data_average)
+                        data_average=data_average,
+                        accumulate=accumulate)
 
     if is_distributed:
         h.reduce_matrices(is_master=is_master, all_reduce=all_reduce)
@@ -118,6 +132,12 @@ def get_hessian(model, loss_fn, inputs=None, targets=None, data_loader=None, **k
     h = calculate_hessian(model, loss_fn, SHAPE_FULL,
                           inputs=inputs, targets=targets, data_loader=data_loader, **kwargs)
     return getattr(model, h.hess_attr).data
+
+
+def get_abs_hessian(model, loss_fn, inputs=None, targets=None, data_loader=None, **kwargs):
+    hess = get_hessian(model, loss_fn, inputs=inputs, targets=targets, data_loader=data_loader, **kwargs)
+    L, Q = torch.linalg.eigh(hess)
+    return Q @ torch.abs(torch.diag(L)) @ Q.T
 
 
 def hvp(model,
