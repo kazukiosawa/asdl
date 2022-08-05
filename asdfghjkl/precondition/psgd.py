@@ -56,10 +56,10 @@ class KronPreconditoner:
                     G = torch.cat([G, grads.pop(0).unsqueeze(-1)], dim=1)
                 G = precond_grad_kron(*self.cholesky_factors[module], G)
                 if module.bias is not None:
-                    module.weight.grad.data = G[:, :-1].view_as(module.weight)
-                    module.bias.grad.data = G[:, -1].view_as(module.bias)
+                    module.weight.grad.copy_(G[:, :-1].view_as(module.weight))
+                    module.bias.grad.copy_(G[:, -1].view_as(module.bias))
                 else:
-                    module.weight.grad.data = G.view_as(module.weight)
+                    module.weight.grad.copy_(G.view_as(module.weight))
                 del G
             assert len(grads) == 0
 
