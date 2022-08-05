@@ -39,7 +39,7 @@ class Preconditoner:
         self._update_preconditioner(vs, Hvs)
 
     @torch.no_grad()
-    def _update_preconditioner(self, vs: List[Tensor], Hvs: List[Tensor]):
+    def _update_preconditioner(self, dxs: List[Tensor], dgs: List[Tensor]):
         raise NotImplementedError
 
     @torch.no_grad()
@@ -58,9 +58,9 @@ class FullPreconditioner(Preconditoner):
             self.cholesky_factor = init
 
     @torch.no_grad()
-    def _update_preconditioner(self, vs: List[Tensor], Hvs: List[Tensor], eps=1.2e-38):
-        dx = parameters_to_vector(vs)
-        dg = parameters_to_vector(Hvs)
+    def _update_preconditioner(self, dxs: List[Tensor], dgs: List[Tensor], eps=1.2e-38):
+        dx = parameters_to_vector(dxs)
+        dg = parameters_to_vector(dgs)
         Q = self.cholesky_factor
 
         a = Q.mv(dg)
@@ -93,20 +93,20 @@ class KronPreconditoner(Preconditoner):
             self.cholesky_factors[module] = (Ql, Qr)
 
     @torch.no_grad()
-    def _update_preconditioner(self, vs: List[Tensor], Hvs: List[Tensor]):
+    def _update_preconditioner(self, dxs: List[Tensor], dgs: List[Tensor]):
         for module in self.model.children():
-            dX = vs.pop(0)
-            dG = Hvs.pop(0)
+            dX = dxs.pop(0)
+            dG = dgs.pop(0)
             if isinstance(module, nn.Conv2d):
                 dX = dX.flatten(start_dim=1)
                 dG = dG.flatten(start_dim=1)
             if module.bias is not None:
-                dX = torch.cat([dX, vs.pop(0).unsqueeze(-1)], dim=1)
-                dG = torch.cat([dG, Hvs.pop(0).unsqueeze(-1)], dim=1)
+                dX = torch.cat([dX, dxs.pop(0).unsqueeze(-1)], dim=1)
+                dG = torch.cat([dG, dgs.pop(0).unsqueeze(-1)], dim=1)
             update_precond_kron(*self.cholesky_factors[module], dX, dG, step=self.lr)
             del dX, dG
-        assert len(vs) == 0
-        assert len(Hvs) == 0
+        assert len(dxs) == 0
+        assert len(dgs) == 0
 
     @torch.no_grad()
     def precondition(self):
