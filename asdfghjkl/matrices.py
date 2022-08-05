@@ -2,6 +2,7 @@ import os
 import copy
 
 import torch
+import torch.nn as nn
 import torch.distributed as dist
 
 from .symmatrix import SymMatrix
@@ -46,7 +47,7 @@ def _requires_matrix(module: torch.nn.Module):
 
 class MatrixManager:
     def __init__(self, model, matrix_types, scale=1., smoothing_weight=None):
-        self._model = model
+        self._model: nn.Module = model
         self._device = next(model.parameters()).device
         if isinstance(matrix_types, str):
             matrix_types = [matrix_types]
