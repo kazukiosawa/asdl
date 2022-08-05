@@ -134,9 +134,10 @@ def get_hessian(model, loss_fn, inputs=None, targets=None, data_loader=None, **k
     return getattr(model, h.hess_attr).data
 
 
-def get_abs_hessian(model, loss_fn, inputs=None, targets=None, data_loader=None, **kwargs):
-    hess = get_hessian(model, loss_fn, inputs=inputs, targets=targets, data_loader=data_loader, **kwargs)
-    L, Q = torch.linalg.eigh(hess)
+def get_abs_hessian(model=None, loss_fn=None, inputs=None, targets=None, data_loader=None, hessian=None, **kwargs):
+    if hessian is None:
+        hessian = get_hessian(model, loss_fn, inputs=inputs, targets=targets, data_loader=data_loader, **kwargs)
+    L, Q = torch.linalg.eigh(hessian)
     return Q @ torch.abs(torch.diag(L)) @ Q.T
 
 
