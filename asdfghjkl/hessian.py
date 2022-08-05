@@ -7,7 +7,7 @@ from .mvp import power_method, conjugate_gradient_method
 from .vector import ParamVector, reduce_vectors
 
 __all__ = [
-    'hessian',
+    'calculate_hessian',
     'hvp',
     'hessian_eig',
     'hessian_free',
@@ -16,7 +16,7 @@ __all__ = [
 _supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_DIAG]
 
 
-class Hessian(MatrixManager):
+class HessianManager(MatrixManager):
     def __init__(self, model):
         super().__init__(model, HESSIAN)
 
@@ -83,16 +83,16 @@ class Hessian(MatrixManager):
             dst_hessian += new_hessian
 
 
-def hessian(model,
-            loss_fn,
-            hessian_shapes=SHAPE_FULL,
-            inputs=None,
-            targets=None,
-            data_loader=None,
-            is_distributed=False,
-            all_reduce=False,
-            is_master=True,
-            data_average=False):
+def calculate_hessian(model,
+                      loss_fn,
+                      hessian_shapes=SHAPE_FULL,
+                      inputs=None,
+                      targets=None,
+                      data_loader=None,
+                      is_distributed=False,
+                      all_reduce=False,
+                      is_master=True,
+                      data_average=False):
     if isinstance(hessian_shapes, str):
         hessian_shapes = [hessian_shapes]
     # remove duplicates
@@ -100,7 +100,7 @@ def hessian(model,
     for hshape in hessian_shapes:
         assert hshape in _supported_shapes, f'Invalid hessian_shape: {hshape}. hessian_shape must be in {_supported_shapes}.'
 
-    h = Hessian(model)
+    h = HessianManager(model)
     h.calculate_hessian(loss_fn,
                         hessian_shapes,
                         inputs=inputs,
@@ -307,7 +307,7 @@ def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets, save_attr
                 _idx += b_numel
             diag = Diag(weight=w_hess, bias=b_hess)
             if hasattr(module, save_attr):
-                module.hessian.diag = diag
+                getattr(module, save_attr).diag = diag
             else:
                 setattr(module, save_attr, SymMatrix(diag=diag))
 
