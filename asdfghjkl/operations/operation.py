@@ -135,6 +135,7 @@ class Operation:
                     A = self.gram_A(module, in_data[:n1], in_data[n1:])
                 if original_requires_grad(module, 'bias'):
                     A += 1.
+                self.accumulate_result(A, OP_GRAM_HADAMARD, 'A')
             elif op_name == OP_RFIM_RELU:
                 self.accumulate_result(self.rfim_relu(module, in_data, out_data), OP_RFIM_RELU)
             elif op_name == OP_RFIM_SOFTMAX:
@@ -185,13 +186,13 @@ class Operation:
                 self.accumulate_result(rst, OP_COV_UNIT_WISE)
             elif op_name == OP_GRAM_HADAMARD:
                 assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
-                n_data = in_data.shape[0]
+                n_data = out_grads.shape[0]
                 n1 = self._model_for_kernel.kernel.shape[0]
                 if n_data == n1:
                     B = self.gram_B(module, out_grads, out_grads)
                 else:
                     B = self.gram_B(module, out_grads[:n1], out_grads[n1:])
-                A = self._op_results[OP_GRAM_HADAMARD]['A']
+                A = self.get_result(OP_GRAM_HADAMARD, 'A')
                 self._model_for_kernel.kernel += B.mul(A)
             elif op_name == OP_GRAM_DIRECT:
                 assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_DIRECT}.'
