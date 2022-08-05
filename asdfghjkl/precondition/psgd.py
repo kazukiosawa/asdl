@@ -1,67 +1,126 @@
-from typing import List
+from typing import List, Iterable
 
 import numpy as np
 
 import torch
 import torch.nn as nn
+from torch.nn.utils import vector_to_parameters
 from torch import Tensor
 
 _supported_modules = (nn.Linear, nn.Conv2d)
 
 
-class KronPreconditoner:
+def parameters_to_vector(parameters: Iterable[Tensor]) -> Tensor:
+    # torch.nn.utils.parameters_to_vector uses param.view(-1) which doesn't work
+    # for non-contin
+    vec = []
+    for param in parameters:
+        vec.append(param.reshape(-1))
+    return torch.cat(vec)
 
+
+class Preconditoner:
     def __init__(self, model: nn.Module, lr=0.01):
         self.model = nn.ModuleList([m for m in model.modules() if isinstance(m, _supported_modules)])
-        self.cholesky_factors = {}
         self.lr = lr
-        device = next(model.parameters()).device
-        for module in self.model.children():
-            in_dim = int(np.prod(module.weight.shape[1:]))
-            out_dim = module.weight.shape[0]
-            if module.bias is not None:
-                in_dim += 1
-            Ql = torch.eye(out_dim, device=device)
-            Qr = torch.eye(in_dim, device=device)
-            self.cholesky_factors[module] = (Ql, Qr)
+        self._device = None
+
+    @property
+    def device(self):
+        if self._device is None:
+            self._device = next(self.model.parameters()).device
+        return self._device
 
     def update_preconditioner(self):
         params = list(self.model.parameters())
         grads = [p.grad for p in params]
         vs = [torch.randn_like(p) for p in params]
         Hvs = list(torch.autograd.grad(grads, params, vs))
-        with torch.no_grad():
-            for module in self.model.children():
-                dX = vs.pop(0)
-                dG = Hvs.pop(0)
-                if isinstance(module, nn.Conv2d):
-                    dX = dX.flatten(start_dim=1)
-                    dG = dG.flatten(start_dim=1)
-                if module.bias is not None:
-                    dX = torch.cat([dX, vs.pop(0).unsqueeze(-1)], dim=1)
-                    dG = torch.cat([dG, Hvs.pop(0).unsqueeze(-1)], dim=1)
-                update_precond_kron(*self.cholesky_factors[module], dX, dG, step=self.lr)
-                del dX, dG
-            assert len(vs) == 0
-            assert len(Hvs) == 0
+        self._update_preconditioner(vs, Hvs)
 
+    @torch.no_grad()
+    def _update_preconditioner(self, vs: List[Tensor], Hvs: List[Tensor]):
+        raise NotImplementedError
+
+    @torch.no_grad()
+    def precondition(self):
+        raise NotImplementedError
+
+
+class FullPreconditioner(Preconditoner):
+    def __init__(self, model: nn.Module, lr=0.01):
+        super().__init__(model, lr)
+        num_params = sum([p.numel() for p in self.model.parameters()])
+        self.cholesky_factor = torch.eye(num_params, device=self.device)
+
+    @torch.no_grad()
+    def _update_preconditioner(self, vs: List[Tensor], Hvs: List[Tensor], eps=1.2e-38):
+        dx = parameters_to_vector(vs)
+        dg = parameters_to_vector(Hvs)
+        Q = self.cholesky_factor
+
+        a = Q.mv(dg)
+        b = torch.linalg.solve_triangular(Q.T, dx.unsqueeze(-1), upper=True).squeeze()
+
+        grad = torch.triu(torch.outer(a, a) - torch.outer(b, b))
+        lr0 = self.lr / (grad.abs().max() + eps)
+
+        Q.sub_(grad.mm(Q), alpha=float(lr0))
+
+    @torch.no_grad()
     def precondition(self):
         grads = [p.grad for p in self.model.parameters()]
-        with torch.no_grad():
-            for module in self.model.children():
-                G = grads.pop(0)
-                if isinstance(module, nn.Conv2d):
-                    G = G.flatten(start_dim=1)
-                if module.bias is not None:
-                    G = torch.cat([G, grads.pop(0).unsqueeze(-1)], dim=1)
-                G = precond_grad_kron(*self.cholesky_factors[module], G)
-                if module.bias is not None:
-                    module.weight.grad.copy_(G[:, :-1].view_as(module.weight))
-                    module.bias.grad.copy_(G[:, -1].view_as(module.bias))
-                else:
-                    module.weight.grad.copy_(G.view_as(module.weight))
-                del G
-            assert len(grads) == 0
+        g = parameters_to_vector(grads)
+        Q = self.cholesky_factor
+        vector_to_parameters(Q.T.mv(Q.mv(g)), grads)
+
+
+class KronPreconditoner(Preconditoner):
+    def __init__(self, model: nn.Module, lr=0.01):
+        super().__init__(model, lr)
+        self.cholesky_factors = {}
+        for module in self.model.children():
+            in_dim = int(np.prod(module.weight.shape[1:]))
+            out_dim = module.weight.shape[0]
+            if module.bias is not None:
+                in_dim += 1
+            Ql = torch.eye(out_dim, device=self.device)
+            Qr = torch.eye(in_dim, device=self.device)
+            self.cholesky_factors[module] = (Ql, Qr)
+
+    @torch.no_grad()
+    def _update_preconditioner(self, vs: List[Tensor], Hvs: List[Tensor]):
+        for module in self.model.children():
+            dX = vs.pop(0)
+            dG = Hvs.pop(0)
+            if isinstance(module, nn.Conv2d):
+                dX = dX.flatten(start_dim=1)
+                dG = dG.flatten(start_dim=1)
+            if module.bias is not None:
+                dX = torch.cat([dX, vs.pop(0).unsqueeze(-1)], dim=1)
+                dG = torch.cat([dG, Hvs.pop(0).unsqueeze(-1)], dim=1)
+            update_precond_kron(*self.cholesky_factors[module], dX, dG, step=self.lr)
+            del dX, dG
+        assert len(vs) == 0
+        assert len(Hvs) == 0
+
+    @torch.no_grad()
+    def precondition(self):
+        grads = [p.grad for p in self.model.parameters()]
+        for module in self.model.children():
+            G = grads.pop(0)
+            if isinstance(module, nn.Conv2d):
+                G = G.flatten(start_dim=1)
+            if module.bias is not None:
+                G = torch.cat([G, grads.pop(0).unsqueeze(-1)], dim=1)
+            G = precond_grad_kron(*self.cholesky_factors[module], G)
+            if module.bias is not None:
+                module.weight.grad.copy_(G[:, :-1].view_as(module.weight))
+                module.bias.grad.copy_(G[:, -1].view_as(module.bias))
+            else:
+                module.weight.grad.copy_(G.view_as(module.weight))
+            del G
+        assert len(grads) == 0
 
 
 """
