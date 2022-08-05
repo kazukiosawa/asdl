@@ -12,7 +12,7 @@ _supported_modules = (nn.Linear, nn.Conv2d)
 
 def parameters_to_vector(parameters: Iterable[Tensor]) -> Tensor:
     # torch.nn.utils.parameters_to_vector uses param.view(-1) which doesn't work
-    # for non-contin
+    # with non-contiguous parameters
     vec = []
     for param in parameters:
         vec.append(param.reshape(-1))
