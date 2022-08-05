@@ -1,7 +1,7 @@
 import copy
 
 import torch
-from torch.nn import Linear, Sequential
+import torch.nn as nn
 
 from asdfghjkl import FISHER_EMP
 from asdfghjkl import empirical_natural_gradient, FullNaturalGradient
@@ -13,16 +13,17 @@ batchsize = 2
 dim = 2
 n_layers = 2
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-model = Sequential().to(device)
+model = nn.Sequential().to(device)
 for i in range(n_layers):
-    model.add_module(f'fc{i}', Linear(dim, dim).to(device))
+    model.add_module(f'fc{i}', nn.Linear(dim, dim).to(device))
+    model.add_module(f'bn{i}', nn.BatchNorm1d(dim).to(device))
 
 inputs = torch.randn(datasize, dim)
 targets = torch.tensor([0] * datasize, dtype=torch.long)
 dataset = torch.utils.data.TensorDataset(inputs, targets)
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=batchsize, shuffle=False)
 
-damping = 1e-3
+damping = 1e-2
 model1 = copy.deepcopy(model)
 model2 = copy.deepcopy(model)
 ngd = FullNaturalGradient(model1, fisher_type=FISHER_EMP, damping=damping)

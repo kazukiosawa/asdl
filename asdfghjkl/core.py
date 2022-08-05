@@ -35,6 +35,7 @@ def extend(model,
             op_class = get_op_class(module)
             if op_class is None:
                 continue
+            cxt.register_operation(module, op_class(module, op_names, model_for_kernel=model))
             has_fwd_op = any(op_name in FWD_OPS for op_name in op_names)
             has_bwd_op = any(op_name in BWD_OPS for op_name in op_names)
             has_bwd_op_with_inputs = any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names)
@@ -65,7 +66,6 @@ def extend(model,
                             pass
 
                 handles.append(module.register_full_backward_hook(backward_hook))
-            cxt.register_operation(module, op_class(module, op_names, model_for_kernel=model))
         if not cxt.is_operation_registered(model):
             # register empty operation for parent model
             cxt.register_operation(model, Operation(model, []))
