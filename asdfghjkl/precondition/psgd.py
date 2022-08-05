@@ -178,8 +178,8 @@ def _update_precond_dense_dense(Ql, Qr, dX, dG, step=0.01, _tiny=1.2e-38):
     step1 = step / (torch.max(torch.abs(grad1)) + _tiny)
     step2 = step / (torch.max(torch.abs(grad2)) + _tiny)
 
-    Ql.sub_(step1 * grad1.mm(Ql))
-    Qr.sub_(step2 * grad2.mm(Qr))
+    Ql.sub_(grad1.mm(Ql), alpha=float(step1))
+    Qr.sub_(grad2.mm(Qr), alpha=float(step2))
 #    return Ql - step1 * grad1.mm(Ql), Qr - step2 * grad2.mm(Qr)
 
 
