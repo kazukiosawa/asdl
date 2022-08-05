@@ -1,4 +1,6 @@
 import torch
+import torch.nn as nn
+
 from .symmatrix import SymMatrix, Diag
 from .matrices import SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_DIAG, HESSIAN, MatrixManager
 from .mvp import power_method, conjugate_gradient_method
@@ -18,32 +20,72 @@ class Hessian(MatrixManager):
     def __init__(self, model):
         super().__init__(model, HESSIAN)
 
+    @property
+    def hess_attr(self):
+        return HESSIAN
+
+    @property
+    def tmp_hess_attr(self):
+        return f'tmp_{HESSIAN}'
+
+    def extract_tmp_hessian(self, module: nn.Module):
+        tmp_hessian = getattr(module, self.tmp_hess_attr, None)
+        if tmp_hessian is not None:
+            delattr(module, self.tmp_hess_attr)
+        return tmp_hessian
+
     def calculate_hessian(self,
                           loss_fn,
                           hessian_shapes,
                           inputs=None,
                           targets=None,
                           data_loader=None,
-                          data_average=False):
+                          data_average=False,
+                          scale=1.):
         model = self._model
         device = next(model.parameters()).device
+
+        def hessian_for_one_batch(x, t):
+            x = x.to(device)
+            t = t.to(device)
+            _hessian_for_loss(model, loss_fn, hessian_shapes, x, t, save_attr=self.tmp_hess_attr)
+            self.accumulate(scale)
+
         if data_loader is not None:
-            scale = 1 / len(data_loader.dataset) if data_average else 1
+            if data_average:
+                scale /= len(data_loader.dataset)
             for inputs, targets in data_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
-                _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets)
-                self.accumulate_matrices(scale=scale)
+                hessian_for_one_batch(inputs, targets)
         else:
             assert inputs is not None and targets is not None
-            inputs, targets = inputs.to(device), targets.to(device)
-            _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets)
+            if data_average:
+                scale /= inputs.shape[0]
+            hessian_for_one_batch(inputs, targets)
             scale = 1 / inputs.shape[0] if data_average else 1
-            self.accumulate_matrices(scale=scale)
+
+    def accumulate(self, scale=1.):
+        model = self._model
+        for module in model.modules():
+            self._accumulate_hessian(module, self.extract_tmp_hessian(module), scale)
+        self._accumulate_hessian(model, self.extract_tmp_hessian(model), scale)
+
+    def _accumulate_hessian(self, module: nn.Module, new_hessian, scale=1.):
+        if new_hessian is None:
+            return
+        if scale != 1:
+            new_hessian.mul_(scale)
+        dst_attr = self.hess_attr
+        dst_hessian = getattr(module, dst_attr, None)
+        if dst_hessian is None:
+            setattr(module, dst_attr, new_hessian)
+        else:
+            # this must be __iadd__ to preserve inv
+            dst_hessian += new_hessian
 
 
 def hessian(model,
             loss_fn,
-            hessian_shapes,
+            hessian_shapes=SHAPE_FULL,
             inputs=None,
             targets=None,
             data_loader=None,
@@ -214,7 +256,7 @@ def hessian_quadratic_form(
     return v.dot(g), v.dot(hv)
 
 
-def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
+def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets, save_attr=HESSIAN):
     model.zero_grad()
     loss = loss_fn(model(inputs), targets)
     params = [p for p in model.parameters() if p.requires_grad]
@@ -222,7 +264,7 @@ def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
     # full
     if SHAPE_FULL in hessian_shapes:
         full_hess = _hessian(loss, params)
-        setattr(model, 'hessian', SymMatrix(data=full_hess))
+        setattr(model, save_attr, SymMatrix(data=full_hess))
     else:
         full_hess = None
 
@@ -248,7 +290,7 @@ def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
 
         # block-diagonal
         if SHAPE_LAYER_WISE in hessian_shapes:
-            setattr(module, 'hessian', SymMatrix(data=m_hess))
+            setattr(module, save_attr, SymMatrix(data=m_hess))
 
         # diagonal
         if SHAPE_DIAG in hessian_shapes:
@@ -264,10 +306,10 @@ def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets):
                 b_hess = m_hess[_idx:_idx + b_numel].view_as(b)
                 _idx += b_numel
             diag = Diag(weight=w_hess, bias=b_hess)
-            if hasattr(module, 'hessian'):
-                module._hessian.diag = diag
+            if hasattr(module, save_attr):
+                module.hessian.diag = diag
             else:
-                setattr(module, 'hessian', SymMatrix(diag=diag))
+                setattr(module, save_attr, SymMatrix(diag=diag))
 
 
 # adopted from https://github.com/mariogeiger/hessian/blob/master/hessian/hessian.py
