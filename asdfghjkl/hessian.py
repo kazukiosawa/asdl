@@ -286,7 +286,6 @@ def hessian_quadratic_form(
 
 
 def _hessian_for_loss(model, loss_fn, hessian_shapes, inputs, targets, save_attr=HESSIAN):
-    model.zero_grad()
     loss = loss_fn(model(inputs), targets)
     params = [p for p in model.parameters() if p.requires_grad]
 
