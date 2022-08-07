@@ -49,11 +49,11 @@ class Preconditoner:
 
 
 class FullPreconditioner(Preconditoner):
-    def __init__(self, model: nn.Module, lr=0.01, init=None):
+    def __init__(self, model: nn.Module, lr=0.01, init_scale=1., init=None):
         super().__init__(model, lr)
         num_params = sum([p.numel() for p in self.model.parameters()])
         if init is None:
-            self.cholesky_factor = torch.eye(num_params, device=self.device)
+            self.cholesky_factor = init_scale * torch.eye(num_params, device=self.device)
         else:
             assert init.shape == (num_params, num_params)
             self.cholesky_factor = init
