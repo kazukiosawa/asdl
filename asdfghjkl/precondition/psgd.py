@@ -47,6 +47,20 @@ class Preconditoner:
     def precondition(self):
         raise NotImplementedError
 
+    def criterion(self, n_samples=1, retain_graph=False):
+        params = list(self.model.parameters())
+        grads = [p.grad for p in params]
+        total = 0
+        for i in range(n_samples):
+            vs = [torch.randn_like(p) for p in params]
+            Hvs = list(torch.autograd.grad(grads, params, vs, retain_graph=i < n_samples - 1 or retain_graph))
+            total += self._criterion(vs, Hvs)
+        return total / n_samples
+
+    @torch.no_grad()
+    def _criterion(self, dxs: List[Tensor], dgs: List[Tensor]):
+        raise NotImplementedError
+
 
 class FullPreconditioner(Preconditoner):
     def __init__(self, model: nn.Module, lr=0.01, init_scale=1., init=None):
@@ -78,6 +92,16 @@ class FullPreconditioner(Preconditoner):
         g = parameters_to_vector(grads)
         Q = self.cholesky_factor
         vector_to_parameters(Q.T.mv(Q.mv(g)), grads)
+
+    @torch.no_grad()
+    def _criterion(self, dxs: List[Tensor], dgs: List[Tensor]):
+        dx = parameters_to_vector(dxs)
+        dg = parameters_to_vector(dgs)
+        Q = self.cholesky_factor
+
+        res = dx.dot(solve_triangular(Q, solve_triangular(Q.T, dx.unsqueeze(-1), upper=False), upper=True).squeeze())
+        res += dg.dot(Q.T.mv(Q.mv(dg)))
+        return float(res)
 
 
 class KronPreconditoner(Preconditoner):
