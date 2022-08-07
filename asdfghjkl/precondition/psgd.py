@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 from torch.nn.utils import vector_to_parameters
 from torch import Tensor
+from torch.linalg import solve_triangular
 
 _supported_modules = (nn.Linear, nn.Conv2d)
 
@@ -64,7 +65,7 @@ class FullPreconditioner(Preconditoner):
         Q = self.cholesky_factor
 
         a = Q.mv(dg)
-        b = torch.linalg.solve_triangular(Q.T, dx.unsqueeze(-1), upper=True).squeeze()
+        b = solve_triangular(Q.T, dx.unsqueeze(-1), upper=False).squeeze()
 
         grad = torch.triu(torch.outer(a, a) - torch.outer(b, b))
         lr0 = self.lr / (grad.abs().max() + eps)
@@ -229,11 +230,7 @@ def _update_precond_dense_dense(Ql, Qr, dX, dG, step=0.01, _tiny=1.2e-38):
     Qr *= rho
 
     A = Ql.mm(dG.mm(Qr.t()))
-    Bt = torch.linalg.solve_triangular(Ql,
-                                       torch.linalg.solve_triangular(Qr, dX.t(), upper=True).t(),
-                                       upper=True)
-#    Bt = torch.triangular_solve((torch.triangular_solve(dX.t(), Qr, upper=True, transpose=True))[0].t(),
-#                                Ql, upper=True, transpose=True)[0]
+    Bt = solve_triangular(Ql, solve_triangular(Qr, dX.t(), upper=True).t(), upper=True)
 
     grad1 = torch.triu(A.mm(A.T) - Bt.mm(Bt.T))
     grad2 = torch.triu(A.T.mm(A) - Bt.T.mm(Bt))
@@ -243,7 +240,6 @@ def _update_precond_dense_dense(Ql, Qr, dX, dG, step=0.01, _tiny=1.2e-38):
 
     Ql.sub_(grad1.mm(Ql), alpha=float(step1))
     Qr.sub_(grad2.mm(Qr), alpha=float(step2))
-#    return Ql - step1 * grad1.mm(Ql), Qr - step2 * grad2.mm(Qr)
 
 
 @torch.jit.script
