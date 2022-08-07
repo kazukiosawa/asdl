@@ -6,6 +6,7 @@ import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils import parameters_to_vector, vector_to_parameters
 import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -24,6 +25,8 @@ OPTIM_NGD = 'ngd'
 OPTIM_WOODBURY_NGD = 'woodbury_ngd'
 OPTIM_WOODBURY_NGD2 = 'woodbury_ngd2'
 OPTIM_PSGD = 'psgd'
+OPTIM_NEWTON = 'newton'
+OPTIM_ABS_NEWTON = 'abs_newton'
 
 
 def main():
@@ -64,6 +67,19 @@ def train(epoch):
                 p.grad = g
             psgd.update_preconditioner()
             psgd.precondition()
+        elif args.optim in [OPTIM_NEWTON, OPTIM_ABS_NEWTON]:
+            outputs = model(inputs)
+            loss = F.cross_entropy(outputs, targets)
+            loss.backward()
+            grads = [p.grad for p in model.parameters()]
+            if args.optim == OPTIM_NEWTON:
+                hessian = asdl.get_hessian(model, F.cross_entropy, inputs, targets)
+            else:
+                hessian = asdl.get_abs_hessian(model, F.cross_entropy, inputs, targets)
+            diag = torch.diagonal(hessian)
+            diag += args.damping
+            g = parameters_to_vector(grads)
+            vector_to_parameters(torch.linalg.solve(hessian, g), grads)
         else:
             outputs = model(inputs)
             loss = F.cross_entropy(outputs, targets)
@@ -119,7 +135,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=1e-2,
                         help='learning rate')
     parser.add_argument('--weight_decay', type=float, default=0)
-    parser.add_argument('--optim', choices=[OPTIM_SGD, OPTIM_ADAM, OPTIM_NGD, OPTIM_WOODBURY_NGD, OPTIM_WOODBURY_NGD2, OPTIM_PSGD], default=OPTIM_NGD)
+    parser.add_argument('--optim', default=OPTIM_NGD)
     parser.add_argument('--fisher_type', choices=[FISHER_EXACT, FISHER_MC, FISHER_EMP], default=FISHER_EXACT)
     parser.add_argument('--fisher_shape', choices=[SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG], default=SHAPE_FULL)
     parser.add_argument('--damping', type=float, default=1e-3)
