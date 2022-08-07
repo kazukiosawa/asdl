@@ -32,11 +32,11 @@ class Preconditoner:
             self._device = next(self.model.parameters()).device
         return self._device
 
-    def update_preconditioner(self):
+    def update_preconditioner(self, retain_graph=False):
         params = list(self.model.parameters())
         grads = [p.grad for p in params]
         vs = [torch.randn_like(p) for p in params]
-        Hvs = list(torch.autograd.grad(grads, params, vs))
+        Hvs = list(torch.autograd.grad(grads, params, vs, retain_graph=retain_graph))
         self._update_preconditioner(vs, Hvs)
 
     @torch.no_grad()
