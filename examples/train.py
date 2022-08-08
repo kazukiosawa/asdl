@@ -15,7 +15,7 @@ import asdfghjkl as asdl
 from asdfghjkl import FISHER_EXACT, FISHER_MC, FISHER_EMP
 from asdfghjkl import SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG
 from asdfghjkl import empirical_natural_gradient, empirical_natural_gradient2
-from asdfghjkl.precondition.psgd import KronPreconditoner
+from asdfghjkl.precondition.psgd import FullPreconditioner, KronPreconditoner
 
 import wandb
 
@@ -24,7 +24,8 @@ OPTIM_ADAM = 'adam'
 OPTIM_NGD = 'ngd'
 OPTIM_WOODBURY_NGD = 'woodbury_ngd'
 OPTIM_WOODBURY_NGD2 = 'woodbury_ngd2'
-OPTIM_PSGD = 'psgd'
+OPTIM_FULL_PSGD = 'full_psgd'
+OPTIM_KRON_PSGD = 'kron_psgd'
 OPTIM_NEWTON = 'newton'
 OPTIM_ABS_NEWTON = 'abs_newton'
 
@@ -59,7 +60,7 @@ def train(epoch):
             loss = empirical_natural_gradient(model, inputs, targets, damping=args.damping)
         elif args.optim == OPTIM_WOODBURY_NGD2:
             loss = empirical_natural_gradient2(model, inputs, targets, damping=args.damping)
-        elif args.optim == OPTIM_PSGD:
+        elif args.optim in [OPTIM_FULL_PSGD, OPTIM_KRON_PSGD]:
             outputs = model(inputs)
             loss = F.cross_entropy(outputs, targets)
             grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=True)
@@ -192,7 +193,9 @@ if __name__ == '__main__':
                                    fisher_type=args.fisher_type,
                                    fisher_shape=fisher_shape,
                                    damping=args.damping)
-    elif args.optim == OPTIM_PSGD:
+    elif args.optim == OPTIM_FULL_PSGD:
+        psgd = FullPreconditioner(model)
+    elif args.optim == OPTIM_KRON_PSGD:
         psgd = KronPreconditoner(model)
 
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs * num_steps_per_epoch)
