@@ -82,9 +82,9 @@ class FullPreconditioner(Preconditoner):
         b = solve_triangular(Q.T, dx.unsqueeze(-1), upper=False).squeeze()
 
         grad = torch.triu(torch.outer(a, a) - torch.outer(b, b))
-        lr0 = self.lr / (grad.abs().max() + eps)
+        lr = self.lr / (grad.abs().max() + eps)
 
-        Q.sub_(grad.mm(Q), alpha=float(lr0))
+        Q.sub_(grad.mm(Q), alpha=float(lr))
 
     @torch.no_grad()
     def precondition(self):
