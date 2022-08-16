@@ -46,6 +46,7 @@ class NaturalGradient:
         module_partitions: List[List[nn.Module]] = None,
         record_mode=False,
         nvtx_tag='',
+        logit_idx=0,
         **kwargs
     ):
         from torch.nn.parallel import DistributedDataParallel as DDP
@@ -97,6 +98,7 @@ class NaturalGradient:
         self.sync_group = sync_group
         self.sync_group_ranks = sync_group_ranks
         self.record_mode = record_mode
+        self.logit_idx = logit_idx
         self._nvtx_tag = nvtx_tag
 
         self.curvature_sync_handles = []
@@ -233,6 +235,8 @@ class NaturalGradient:
                                                        accumulate=accumulate,
                                                        data_average=data_average,
                                                        calc_emp_loss_grad=calc_emp_loss_grad,
+                                                       ignore_modules=self.ignore_modules,
+                                                       logit_idx=self.logit_idx,
                                                        seed=seed,
                                                        scale=scale,
                                                        stream=stream)

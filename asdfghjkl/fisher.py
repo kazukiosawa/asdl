@@ -86,8 +86,10 @@ class FisherManager(MatrixManager):
                          data_average=True,
                          accumulate=False,
                          calc_emp_loss_grad=False,
+                         ignore_modules=None,
                          seed=None,
                          scale=1.,
+                         logit_idx=0,
                          stream: Stream = None):
         model = self._model
         device = self._device
@@ -109,7 +111,7 @@ class FisherManager(MatrixManager):
             if seed:
                 torch.random.manual_seed(seed)
 
-            with no_centered_cov(model, fisher_shapes, cvp=fvp, vectors=vec, stream=stream) as cxt:
+            with no_centered_cov(model, fisher_shapes, ignore_modules=ignore_modules, cvp=fvp, vectors=vec, stream=stream) as cxt:
                 def closure(loss_expr, retain_graph=False):
                     cxt.clear_batch_grads()
                     loss = loss_expr()
@@ -124,6 +126,8 @@ class FisherManager(MatrixManager):
                         total_loss += float(loss)
 
                 y = model(x)
+                if isinstance(y, (list, tuple)):
+                    y = y[logit_idx]
                 self._fisher_core(closure, y, t)
                 self.accumulate(cxt, scale, fvp=fvp)
 
@@ -323,6 +327,7 @@ class FisherExactCrossEntropy(_FisherCrossEntropy):
 
     def _fisher_core(self, closure, outputs, unused):
         log_probs = F.log_softmax(outputs, dim=1)
+        log_probs = log_probs.view(-1, log_probs.size(-1))
         n, n_classes = log_probs.shape
         with torch.no_grad():
             probs = F.softmax(outputs, dim=1)
@@ -331,7 +336,7 @@ class FisherExactCrossEntropy(_FisherCrossEntropy):
             targets = torch.tensor([i] * n, device=outputs.device)
 
             def loss_expr():
-                loss = F.nll_loss(log_probs, targets, reduction='none')
+                loss = F.nll_loss(log_probs, targets, reduction='none', ignore_index=-1)
                 return loss.mul(sqrt_probs[:, i]).sum()
             closure(loss_expr, retain_graph=i < n_classes - 1)
 
@@ -348,7 +353,8 @@ class FisherMCCrossEntropy(_FisherCrossEntropy):
         for i in range(self.n_mc_samples):
             with torch.no_grad():
                 targets = dist.sample()
-            closure(lambda: F.nll_loss(log_probs, targets, reduction='sum') / self.n_mc_samples,
+            closure(lambda: F.nll_loss(log_probs.view(-1, log_probs.size(-1)),
+                                       targets.view(-1), reduction='sum', ignore_index=-1) / self.n_mc_samples,
                     retain_graph=i < self.n_mc_samples - 1)
 
 
@@ -358,7 +364,8 @@ class FisherEmpCrossEntropy(_FisherCrossEntropy):
 
     def _fisher_core(self, closure, outputs, targets):
         log_probs = F.log_softmax(outputs, dim=1)
-        closure(lambda: F.nll_loss(log_probs, targets, reduction='sum'),
+        closure(lambda: F.nll_loss(log_probs.view(-1, log_probs.size(-1)),
+                                   targets.view(-1), reduction='sum', ignore_index=-1),
                 retain_graph=False)
 
 
@@ -438,6 +445,8 @@ def calculate_fisher(
         data_average=True,
         calc_emp_loss_grad=False,
         return_loss=False,
+        ignore_modules=None,
+        logit_idx=0,
         seed=None,
         scale=1.,
         **kwargs
@@ -454,6 +463,8 @@ def calculate_fisher(
         accumulate=accumulate,
         data_average=data_average,
         calc_emp_loss_grad=calc_emp_loss_grad,
+        ignore_modules=ignore_modules,
+        logit_idx=logit_idx,
         seed=seed,
         scale=scale)
     if is_distributed:

@@ -28,17 +28,17 @@ def extend(model,
     stream_cxt = torch.cuda.stream(stream) if torch.cuda.is_available() and stream is not None else nullcontext()
 
     try:
-        for module, op_names in module_wise_assignments(model, *op_names, ignore_modules=ignore_modules, map_rule=map_rule):
-            if len(op_names) == 0:
+        for module, _op_names in module_wise_assignments(model, *op_names, ignore_modules=ignore_modules, map_rule=map_rule):
+            if len(_op_names) == 0:
                 # no operation is assigned
                 continue
             op_class = get_op_class(module)
             if op_class is None:
                 continue
-            cxt.register_operation(module, op_class(module, op_names, model_for_kernel=model))
-            has_fwd_op = any(op_name in FWD_OPS for op_name in op_names)
-            has_bwd_op = any(op_name in BWD_OPS for op_name in op_names)
-            has_bwd_op_with_inputs = any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names)
+            cxt.register_operation(module, op_class(module, _op_names, model_for_kernel=model))
+            has_fwd_op = any(op_name in FWD_OPS for op_name in _op_names)
+            has_bwd_op = any(op_name in BWD_OPS for op_name in _op_names)
+            has_bwd_op_with_inputs = any(op_name in BWD_OPS_WITH_INPUTS for op_name in _op_names)
 
             # register hooks and operations for child modules
             if has_fwd_op or has_bwd_op_with_inputs:
@@ -239,7 +239,7 @@ def module_wise_assignments(model, *assign_rules, ignore_modules=None, map_rule=
         else:
             if len(common_asgmts) == 0:
                 continue
-            yield *module_info, common_asgmts
+            yield *module_info, common_asgmts.copy()
 
 
 def modules_to_assign(model, value, *assign_rules, ignore_modules=None, named=False):
