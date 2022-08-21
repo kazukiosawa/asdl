@@ -37,21 +37,21 @@ def cholesky_solve(A, b, eps=1e-8):
 
 
 @dataclass
-class SmwEmpiricalNaturalGradientMakerConfig:
+class SmwEmpNaturalGradientMakerConfig:
     data_size: int
     damping: float = 1.e-5
     data_average: bool = True
 
 
-class SmwEmpiricalNaturalGradientMaker(GradientMaker):
+class SmwEmpNaturalGradientMaker(GradientMaker):
     def __init__(self, model, config=None, data_size: int = None):
         super().__init__(model)
         if config is None:
             assert data_size is not None, f'data_size has to be specified ' \
                                           f'when config is not given.'
-            config = SmwEmpiricalNaturalGradientMakerConfig(data_size=data_size)
+            config = SmwEmpNaturalGradientMakerConfig(data_size=data_size)
         else:
-            assert isinstance(config, SmwEmpiricalNaturalGradientMakerConfig)
+            assert isinstance(config, SmwEmpNaturalGradientMakerConfig)
         self.config = config
 
     def forward_and_backward(self) -> Tuple[Tensor, Tensor]:
