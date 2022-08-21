@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 from ..core import extend
 from ..operations import OP_GRAM_HADAMARD
-from .grad_maker import GradientMaker
+from ..grad_maker import GradientMaker
 
 torch_function_class = F.cross_entropy.__class__
 

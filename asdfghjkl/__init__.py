@@ -6,6 +6,7 @@ from .operations import *
 from .core import *
 from .gradient import *
 from .mvp import *
+from .grad_maker import *
 from .fisher import *
 from .hessian import *
 from .precondition import *

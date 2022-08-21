@@ -3,7 +3,7 @@ from typing import Tuple
 from torch import Tensor
 import torch.nn as nn
 
-from ..utils import DummyObject, GetFirstItem, GetItem
+from .utils import DummyObject, GetFirstItem, GetItem
 
 __all__ = ['GradientMaker']
 
