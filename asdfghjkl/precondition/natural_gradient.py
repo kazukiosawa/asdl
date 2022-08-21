@@ -46,11 +46,6 @@ class NaturalGradientMakerConfig:
 
 
 class NaturalGradientMaker:
-    """
-    Args:
-        model: base model that contains multiple modules
-        fisher_shape: shape of Fisher
-    """
     def __init__(self, model, config):
         from torch.nn.parallel import DistributedDataParallel as DDP
         assert not isinstance(model, DDP), f'{DDP} is not supported.'
