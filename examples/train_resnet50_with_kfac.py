@@ -10,7 +10,7 @@ from torch.utils.data import RandomSampler, DataLoader
 import torchvision
 from torchvision import transforms
 
-from asdfghjkl import KFAC
+from asdfghjkl import KfacGradientMaker
 from asdfghjkl import SHAPE_KRON
 from asdfghjkl.fisher import LOSS_CROSS_ENTROPY
 
@@ -212,10 +212,10 @@ if __name__ == '__main__':
                           lr=args.lr,
                           momentum=args.momentum,
                           weight_decay=args.weight_decay)
-    kfac = KFAC(model,
+    kfac = KfacGradientMaker(model,
                 'fisher_emp',
-                loss_type=LOSS_CROSS_ENTROPY,
-                ignore_modules=[nn.BatchNorm1d, nn.BatchNorm2d])
+                             loss_type=LOSS_CROSS_ENTROPY,
+                             ignore_modules=[nn.BatchNorm1d, nn.BatchNorm2d])
     for module in kfac.modules_for(SHAPE_KRON):
         print(f"Registered {module}")
 

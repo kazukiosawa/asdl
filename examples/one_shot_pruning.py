@@ -11,7 +11,7 @@ import torchvision
 from torchvision.datasets import MNIST
 
 from asdfghjkl.vector import ParamVector
-from asdfghjkl import KFAC
+from asdfghjkl import KfacGradientMaker
 from asdfghjkl import SHAPE_KRON
 
 MODEL_URL = "https://github.com/Cecilwang/models/raw/main/net-mnist-0.9320"
@@ -94,7 +94,7 @@ def main():
     test(model, test_loader, args, "Pretrain")
 
     # pruning
-    ng = KFAC(model, "fisher_emp")
+    ng = KfacGradientMaker(model, "fisher_emp")
 
     param_vector = [p for p in ng.parameters_for(SHAPE_KRON)]
     param_vector = ParamVector(param_vector, [x.data for x in param_vector])

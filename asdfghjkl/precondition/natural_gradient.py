@@ -22,8 +22,8 @@ _invalid_ema_decay = -1
 _module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG]
 
 __all__ = [
-    'NaturalGradient', 'FullNaturalGradient', 'LayerWiseNaturalGradient', 'KFAC',
-    'UnitWiseNaturalGradient', 'DiagNaturalGradient', 'EmpiricalNaturalGradient'
+    'NaturalGradientMaker', 'FullNaturalGradientMaker', 'LayerWiseNaturalGradientMaker', 'KfacGradientMaker',
+    'UnitWiseNaturalGradientMaker', 'DiagNaturalGradientMaker', 'EmpNaturalGradientMaker'
 ]
 
 
@@ -45,7 +45,7 @@ class NaturalGradientMakerConfig:
     nvtx_tag: str = '',
 
 
-class NaturalGradient:
+class NaturalGradientMaker:
     """
     Args:
         model: base model that contains multiple modules
@@ -621,19 +621,19 @@ class NaturalGradient:
                 vector_to_parameters(packed_grads, grads)
 
 
-class FullNaturalGradient(NaturalGradient):
+class FullNaturalGradientMaker(NaturalGradientMaker):
     def __init__(self, model, config: NaturalGradientMakerConfig):
         config.fisher_shape = SHAPE_FULL
         super().__init__(model, config)
 
 
-class LayerWiseNaturalGradient(NaturalGradient):
+class LayerWiseNaturalGradientMaker(NaturalGradientMaker):
     def __init__(self, model, config: NaturalGradientMakerConfig):
         config.fisher_shape = SHAPE_LAYER_WISE
         super().__init__(model, config)
 
 
-class KFAC(NaturalGradient):
+class KfacGradientMaker(NaturalGradientMaker):
     def __init__(self, model, config: NaturalGradientMakerConfig):
         config.fisher_shape = [SHAPE_KRON,
                                (nn.BatchNorm1d, SHAPE_UNIT_WISE),
@@ -642,19 +642,19 @@ class KFAC(NaturalGradient):
         super().__init__(model, config)
 
 
-class UnitWiseNaturalGradient(NaturalGradient):
+class UnitWiseNaturalGradientMaker(NaturalGradientMaker):
     def __init__(self, model, config: NaturalGradientMakerConfig):
         config.fisher_shape = SHAPE_UNIT_WISE
         super().__init__(model, config)
 
 
-class DiagNaturalGradient(NaturalGradient):
+class DiagNaturalGradientMaker(NaturalGradientMaker):
     def __init__(self, model, config: NaturalGradientMakerConfig):
         config.fisher_shape = SHAPE_DIAG
         super().__init__(model, config)
 
 
-class EmpiricalNaturalGradient(NaturalGradient):
+class EmpNaturalGradientMaker(NaturalGradientMaker):
     def __init__(self, model, config: NaturalGradientMakerConfig):
         config.fisher_type = FISHER_EMP
         super().__init__(model, config)

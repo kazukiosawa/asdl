@@ -8,7 +8,7 @@ from torch.utils.data import Subset
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from .precondition import KFAC, DiagNaturalGradient
+from .precondition import KfacGradientMaker, DiagNaturalGradientMaker
 from .fisher import FISHER_EXACT, FISHER_MC
 from .kernel import batch, empirical_implicit_ntk, empirical_class_wise_direct_ntk, get_preconditioned_kernel_fn
 
@@ -18,7 +18,7 @@ __all__ = [
 ]
 
 
-_precond_classes = {'kron': KFAC, 'diag': DiagNaturalGradient}
+_precond_classes = {'kron': KfacGradientMaker, 'diag': DiagNaturalGradientMaker}
 _fisher_types = {'exact': FISHER_EXACT, 'mc': FISHER_MC}
 _kernel_fns = {'implicit': empirical_implicit_ntk, 'class_wise': empirical_class_wise_direct_ntk}
 

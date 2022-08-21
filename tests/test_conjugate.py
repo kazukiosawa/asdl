@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from asdfghjkl import FISHER_EXACT, FISHER_MC, FISHER_EMP
 from asdfghjkl import SHAPE_FULL, SHAPE_LAYER_WISE
 from asdfghjkl import fisher_free_for_cross_entropy
-from asdfghjkl import FullNaturalGradient, LayerWiseNaturalGradient
+from asdfghjkl import FullNaturalGradientMaker, LayerWiseNaturalGradientMaker
 
 
 def _relative_error(v1: torch.tensor, v2: torch.tensor):
@@ -122,9 +122,9 @@ class TestCG(unittest.TestCase):
             seed = int(torch.rand(1) * 100)  # for MC sampling
             torch.manual_seed(seed)
 
-            if ng_fn == FullNaturalGradient:
+            if ng_fn == FullNaturalGradientMaker:
                 fisher_shape = SHAPE_FULL
-            elif ng_fn == LayerWiseNaturalGradient:
+            elif ng_fn == LayerWiseNaturalGradientMaker:
                 fisher_shape = SHAPE_LAYER_WISE
             else:
                 return
@@ -133,7 +133,7 @@ class TestCG(unittest.TestCase):
             ng2 = _get_ng_by_conjugate_gradient_method(fisher_type, fisher_shape, seed)
             self._assert_almost_equal(ng, ng2)
 
-        for ng_class in [FullNaturalGradient, LayerWiseNaturalGradient]:
+        for ng_class in [FullNaturalGradientMaker, LayerWiseNaturalGradientMaker]:
             for ftype in [FISHER_EXACT, FISHER_MC, FISHER_EMP]:
                 _test(ng_class, ftype)
 

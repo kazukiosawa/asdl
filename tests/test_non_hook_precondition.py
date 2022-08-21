@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.nn.utils import parameters_to_vector
 
 import asdfghjkl as asdl
-from asdfghjkl import FISHER_EMP, LOSS_MSE, LOSS_CROSS_ENTROPY, NaturalGradient
+from asdfghjkl import FISHER_EMP, LOSS_MSE, LOSS_CROSS_ENTROPY, NaturalGradientMaker
 
 
 def convnet(n_dim, n_channels, n_classes=10, kernel_size=3):
@@ -58,19 +58,19 @@ for loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]:
     else:
         loss_fn = nn.CrossEntropyLoss(reduction='sum')
 
-    ngd1 = NaturalGradient(model1,
-                           fisher_type=FISHER_EMP,
-                           fisher_shape=fisher_shape,
-                           loss_type=loss_type)
+    ngd1 = NaturalGradientMaker(model1,
+                                fisher_type=FISHER_EMP,
+                                fisher_shape=fisher_shape,
+                                loss_type=loss_type)
     model1.zero_grad()
     for i in range(n_iters):
         ngd1.accumulate_curvature(xs[i], ys[i], data_average=False, calc_emp_loss_grad=True)
     ngd1.update_inv()
     ngd1.precondition()
 
-    ngd2 = NaturalGradient(model2,
-                           fisher_type=FISHER_EMP,
-                           fisher_shape=fisher_shape)
+    ngd2 = NaturalGradientMaker(model2,
+                                fisher_type=FISHER_EMP,
+                                fisher_shape=fisher_shape)
     model2.zero_grad()
     for i in range(n_iters):
         with asdl.save_inputs_outgrads(model2) as cxt:
@@ -80,9 +80,9 @@ for loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]:
     ngd2.update_inv()
     ngd2.precondition()
 
-    ngd3 = NaturalGradient(model3,
-                           fisher_type=FISHER_EMP,
-                           fisher_shape=fisher_shape)
+    ngd3 = NaturalGradientMaker(model3,
+                                fisher_type=FISHER_EMP,
+                                fisher_shape=fisher_shape)
     with asdl.save_inputs_outgrads(model3) as cxt:
         model3.zero_grad()
         for i in range(n_iters):

@@ -10,7 +10,7 @@ import torch.distributed as dist
 
 from .core import extend, save_inputs_outgrads
 from .operations import *
-from .precondition import NaturalGradient
+from .precondition import NaturalGradientMaker
 from .utils import skip_param_grad
 
 
@@ -279,7 +279,7 @@ def empirical_direct_ntk(model, x1, x2=None):
         return torch.einsum('ncp,mdp->nmcd', j1, j2)  # n1 x n2 x c x c
 
 
-def empirical_implicit_ntk(model, x1, x2=None, precond: NaturalGradient = None):
+def empirical_implicit_ntk(model, x1, x2=None, precond: NaturalGradientMaker = None):
     n1 = x1.shape[0]
     y1 = model(x1)
     n_classes = y1.shape[-1]
@@ -311,7 +311,7 @@ def empirical_implicit_ntk(model, x1, x2=None, precond: NaturalGradient = None):
     return ntk  # n1 x n2 x c x c
 
 
-def get_preconditioned_kernel_fn(kernel_fn, precond: NaturalGradient):
+def get_preconditioned_kernel_fn(kernel_fn, precond: NaturalGradientMaker):
     return partial(kernel_fn, precond=precond)
 
 

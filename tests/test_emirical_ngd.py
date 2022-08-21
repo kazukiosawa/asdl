@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from asdfghjkl import FISHER_EMP
-from asdfghjkl import empirical_natural_gradient, FullNaturalGradient
+from asdfghjkl import empirical_natural_gradient, FullNaturalGradientMaker
 
 
 torch.random.manual_seed(0)
@@ -26,7 +26,7 @@ dataloader = torch.utils.data.DataLoader(dataset, batch_size=batchsize, shuffle=
 damping = 1e-2
 model1 = copy.deepcopy(model)
 model2 = copy.deepcopy(model)
-ngd = FullNaturalGradient(model1, fisher_type=FISHER_EMP, damping=damping)
+ngd = FullNaturalGradientMaker(model1, fisher_type=FISHER_EMP, damping=damping)
 optim1 = torch.optim.SGD(model1.parameters(), lr=1)
 optim2 = torch.optim.SGD(model2.parameters(), lr=1)
 

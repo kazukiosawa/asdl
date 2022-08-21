@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 from asdfghjkl import FISHER_EXACT, FISHER_MC, FISHER_EMP, LOSS_MSE, LOSS_CROSS_ENTROPY
 from asdfghjkl import SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG
-from asdfghjkl import NaturalGradient, FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient
+from asdfghjkl import NaturalGradientMaker, FullNaturalGradientMaker, LayerWiseNaturalGradientMaker, KfacGradientMaker, DiagNaturalGradientMaker
 
 
 def convnet(n_dim, n_channels, n_classes=10, kernel_size=3):
@@ -37,7 +37,7 @@ def assert_equal(tensor1, tensor2, msg=''):
     assert torch.equal(tensor1, tensor2), f'{msg} tensor1: {tensor1.norm().item()}, tensor2: {tensor2.norm().item()}, relative_diff: {relative_norm}'
 
 
-ngd_classes = [FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient]
+ngd_classes = [FullNaturalGradientMaker, LayerWiseNaturalGradientMaker, KfacGradientMaker, DiagNaturalGradientMaker]
 shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG]
 
 for ngd_cls, shape in zip(ngd_classes, shapes):
@@ -54,12 +54,12 @@ for ngd_cls, shape in zip(ngd_classes, shapes):
 
             # class-wise shape selection
             fisher_shape = [(nn.Linear, shape), (nn.Conv2d, shape)]
-            ngd1 = NaturalGradient(model1, fisher_type, fisher_shape, loss_type)
+            ngd1 = NaturalGradientMaker(model1, fisher_type, fisher_shape, loss_type)
             assert set(ngd1.modules_for(shape)) == set([model1.conv1, model1.conv2, model1.linear])
 
             # module-wise shape selection
             fisher_shape = [(model1.conv1, shape), (model1.conv2, shape), (model1.linear, shape)]
-            ngd1 = NaturalGradient(model1, fisher_type, fisher_shape, loss_type)
+            ngd1 = NaturalGradientMaker(model1, fisher_type, fisher_shape, loss_type)
             assert set(ngd1.modules_for(shape)) == set([model1.conv1, model1.conv2, model1.linear])
 
             ngd2 = ngd_cls(model2, fisher_type, loss_type)
@@ -77,7 +77,7 @@ for ngd_cls, shape in zip(ngd_classes, shapes):
             ngd2.update_inv()
             ngd2.precondition()
 
-            if ngd_cls == FullNaturalGradient:
+            if ngd_cls == FullNaturalGradientMaker:
                 f1 = getattr(model1, fisher_type)
                 f2 = getattr(model2, fisher_type)
                 assert_equal(f1.data, f2.data, 'full_data')
@@ -87,10 +87,10 @@ for ngd_cls, shape in zip(ngd_classes, shapes):
                     if isinstance(m1, (nn.Conv2d, nn.Linear)):
                         f1 = getattr(m1, fisher_type)
                         f2 = getattr(m2, fisher_type)
-                        if ngd_cls == LayerWiseNaturalGradient:
+                        if ngd_cls == LayerWiseNaturalGradientMaker:
                             assert_equal(f1.data, f2.data, 'lw_data')
                             assert_equal(f1.inv, f2.inv, 'lw_inv')
-                        elif ngd_cls == KFAC:
+                        elif ngd_cls == KfacGradientMaker:
                             assert_equal(f1.kron.A, f2.kron.A, 'A')
                             assert_equal(f1.kron.B, f2.kron.B, 'B')
                             assert_equal(f1.kron.A_inv, f2.kron.A_inv, 'A_inv')

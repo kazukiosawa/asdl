@@ -6,7 +6,7 @@ from torch import nn
 from torch.nn.functional import cross_entropy
 
 from asdfghjkl import FISHER_EMP
-from asdfghjkl import FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient
+from asdfghjkl import FullNaturalGradientMaker, LayerWiseNaturalGradientMaker, KfacGradientMaker, DiagNaturalGradientMaker
 
 
 def convnet(n_dim, n_channels, n_classes=10, kernel_size=3):
@@ -56,7 +56,7 @@ model1 = convnet(32, 16)
 model2 = copy.deepcopy(model1)
 
 model1.zero_grad(set_to_none=True)
-ngd1 = FullNaturalGradient(model1, FISHER_EMP)
+ngd1 = FullNaturalGradientMaker(model1, FISHER_EMP)
 ngd1.refresh_curvature(x, y, calc_emp_loss_grad=True)
 
 model2.zero_grad(set_to_none=True)
@@ -68,7 +68,7 @@ for p1, p2 in zip(model1.parameters(), model2.parameters()):
 
 
 # time fisher_emp w/ and w/o param.grad vs loss.backward()
-for ng_cls in [FullNaturalGradient, LayerWiseNaturalGradient, KFAC, DiagNaturalGradient]:
+for ng_cls in [FullNaturalGradientMaker, LayerWiseNaturalGradientMaker, KfacGradientMaker, DiagNaturalGradientMaker]:
     print(ng_cls.__name__)
 
     def fisher_emp_and_param_grad():

@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import torchvision
 from torchvision import transforms
 
-from asdfghjkl import KFAC, data_loader_gradient
+from asdfghjkl import KfacGradientMaker, data_loader_gradient
 from asdfghjkl import PseudoBatchLoaderGenerator
 from asdfghjkl.fisher import LOSS_CROSS_ENTROPY
 
@@ -67,7 +67,7 @@ def _train_by_kfac(fisher_type):
     model.to(device)
 
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
-    ng = KFAC(model, fisher_type, loss_type=LOSS_CROSS_ENTROPY)
+    ng = KfacGradientMaker(model, fisher_type, loss_type=LOSS_CROSS_ENTROPY)
 
     # 1 epoch training
     for i, pseudo_batch_loader in enumerate(psl_generator):

@@ -189,10 +189,10 @@ if __name__ == '__main__':
     ngd = psgd = None
     if args.optim == OPTIM_NGD:
         fisher_shape = [args.fisher_shape]
-        ngd = asdl.NaturalGradient(model,
-                                   fisher_type=args.fisher_type,
-                                   fisher_shape=fisher_shape,
-                                   damping=args.damping)
+        ngd = asdl.NaturalGradientMaker(model,
+                                        fisher_type=args.fisher_type,
+                                        fisher_shape=fisher_shape,
+                                        damping=args.damping)
     elif args.optim == OPTIM_FULL_PSGD:
         psgd = FullPreconditioner(model)
     elif args.optim == OPTIM_KRON_PSGD:

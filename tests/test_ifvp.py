@@ -5,7 +5,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from asdfghjkl import FISHER_EMP, SHAPE_FULL, SHAPE_LAYER_WISE
-from asdfghjkl import NaturalGradient, LayerWiseNaturalGradient, woodbury_ifvp
+from asdfghjkl import NaturalGradientMaker, LayerWiseNaturalGradientMaker, woodbury_ifvp
 
 
 def _relative_error(v1: torch.tensor, v2: torch.tensor):
@@ -115,7 +115,7 @@ class TestIFVP(unittest.TestCase):
             ng2 = _get_ng_by_woodbury(fisher_shape)
             self._assert_almost_equal(ng, ng2)
 
-        _test(NaturalGradient, SHAPE_FULL)
+        _test(NaturalGradientMaker, SHAPE_FULL)
 
     def _assert_almost_equal(self, v1, v2):
         cos = _cosine_similarity(v1, v2)

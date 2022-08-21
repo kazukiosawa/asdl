@@ -6,7 +6,7 @@ import torch
 from torch.nn.functional import mse_loss
 import torchvision
 
-from asdfghjkl import KFAC, FISHER_EMP, LOSS_MSE
+from asdfghjkl import KfacGradientMaker, FISHER_EMP, LOSS_MSE
 from asdfghjkl import empirical_natural_gradient
 from asdfghjkl import LBFGS
 from asdfghjkl.precondition import Shampoo
@@ -100,7 +100,7 @@ def time_shampoo():
 
 
 def time_kfac():
-    ng = KFAC(model, FISHER_EMP, loss_type=LOSS_MSE, damping=1.)
+    ng = KfacGradientMaker(model, FISHER_EMP, loss_type=LOSS_MSE, damping=1.)
     optimizer = torch.optim.SGD(model.parameters(), lr=1)
 
     def fwd_bwd_upd_curv():
