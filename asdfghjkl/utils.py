@@ -1,6 +1,4 @@
 from contextlib import contextmanager
-from dataclasses import dataclass
-from typing import Any, Tuple, Dict
 
 import torch
 from torch import nn
@@ -12,8 +10,7 @@ _REQUIRES_GRAD_ATTR = '_original_requires_grad'
 __all__ = [
     'original_requires_grad', 'record_original_requires_grad',
     'restore_original_requires_grad', 'skip_param_grad', 'im2col_2d',
-    'im2col_2d_slow', 'cholesky_inv', 'PseudoBatchLoaderGenerator',
-    'DummyObject', 'GetFirstItem', 'GetItem', 'GetAttr', 'Call'
+    'im2col_2d_slow', 'cholesky_inv', 'PseudoBatchLoaderGenerator'
 ]
 
 
@@ -156,61 +153,3 @@ class PseudoBatchLoaderGenerator:
 
     def __len__(self) -> int:
         return len(self.pseudo_batch_sampler)
-
-
-@dataclass
-class GetFirstItem:
-    pass
-
-
-@dataclass
-class GetItem:
-    item: Any
-
-
-@dataclass
-class GetAttr:
-    item: Any
-
-
-@dataclass
-class Call:
-    args: Tuple[Any]
-    kwargs: Dict[str, Any]
-
-
-class DummyObject:
-    def __init__(self, operators=None):
-        if operators is None:
-            operators = []
-        self._operators = operators
-
-    def __getitem__(self, item):
-        return DummyObject(self._operators + [GetItem(item)])
-
-    def __getattr__(self, item):
-        return DummyObject(self._operators + [GetAttr(item)])
-
-    def __call__(self, *args, **kwargs):
-        return DummyObject(self._operators + [Call(args, kwargs)])
-
-    def eval(self, base_value):
-        rst = base_value
-
-        def mapping(value):
-            if isinstance(value, DummyObject):
-                return value.eval(base_value)
-            return value
-
-        for operator in self._operators:
-            if isinstance(operator, GetFirstItem):
-                rst = rst[0] if isinstance(rst, (tuple, list)) else rst
-            elif isinstance(operator, GetItem):
-                rst = rst[operator.item]
-            elif isinstance(operator, GetAttr):
-                rst = getattr(rst, operator.item)
-            elif isinstance(operator, Call):
-                args = [mapping(arg) for arg in operator.args]
-                kwargs = {k: mapping(v) for k, v in operator.kwargs.items()}
-                rst = rst(*args, **kwargs)
-        return rst
