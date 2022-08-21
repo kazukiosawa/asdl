@@ -68,10 +68,10 @@ class DummyObject:
 class GradientMaker:
     def __init__(self, model: nn.Module):
         self.model = model
-        self._model_output = None
         self._model_fn = None
         self._model_args = ()
         self._model_kwargs = dict()
+        self._model_output = None
         self._loss_fn = None
         self._loss_fn_args = ()
         self._loss_fn_kwargs = dict()
