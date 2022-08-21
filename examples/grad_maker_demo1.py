@@ -18,7 +18,7 @@ class NetworkA(nn.Module):
         if targets is not None:
             loss = F.cross_entropy(logits, targets)
             if flip:
-                return loss, loss  # returns a tuple of (loss, logits)
+                return loss, logits  # returns a tuple of (loss, logits)
             return logits, loss  # returns a tuple of (logits, loss)
         return logits  # returns only logits
 
@@ -28,7 +28,7 @@ x = torch.randn(bs, 5)
 t = torch.tensor([0] * bs, dtype=torch.long)
 
 ###########################################################
-# Example 1: the model returns a tuple of logits and loss
+# Example 1: the model returns a tuple (logits, loss)
 ###########################################################
 model1 = NetworkA()
 model2 = copy.deepcopy(model1)
@@ -80,7 +80,7 @@ torch.testing.assert_close(g1, g2)
 
 
 ###########################################################
-# Example 3: the model returns a tuple of loss and logits
+# Example 3: the model returns a tuple (loss, logits)
 ###########################################################
 model1 = NetworkA()
 model2 = copy.deepcopy(model1)
@@ -96,7 +96,7 @@ loss1.backward()
 # GradientMaker
 dummy_y = grad_maker.setup_model_call(model2, x, targets=t, flip=True)
 grad_maker.setup_loss_repr(dummy_y[0])
-logits2, loss2 = grad_maker.forward_and_backward()
+loss2, logits2 = grad_maker.forward_and_backward()
 
 g1 = parameters_to_vector([p.grad for p in model1.parameters()])
 g2 = parameters_to_vector([p.grad for p in model2.parameters()])
