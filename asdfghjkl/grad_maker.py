@@ -105,17 +105,14 @@ class GradientMaker:
             return self._model_output, self._loss
 
     def _forward(self):
-        self._call_model_fn()
-        if self._loss_fn is None:
-            self._loss = self._dummy_loss.eval(self._model_output)
-        else:
-            self._loss = self._call_loss_fn()
-
-    def _call_model_fn(self):
         assert self._model_fn is not None, \
             f'model_fn is not specified. Call {GradientMaker.setup_model_call} ' \
             f'before calling {GradientMaker.forward_and_backward}.'
         self._model_output = self._model_fn(*self._model_args, **self._model_kwargs)
+        if self._loss_fn is None:
+            self._loss = self._dummy_loss.eval(self._model_output)
+        else:
+            self._loss = self._call_loss_fn()
 
     def _get_mapped_loss_fn_args_kwargs(self):
         def mapping(value):
