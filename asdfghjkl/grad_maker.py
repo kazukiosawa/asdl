@@ -76,7 +76,7 @@ class GradientMaker:
         self._loss_fn_args = ()
         self._loss_fn_kwargs = dict()
         self._dummy_logits = DummyObject([GetFirstItem()])
-        self._dummy_loss = DummyObject([GetItem(1)])
+        self._dummy_loss = DummyObject([GetItem(1)])  # default: logits, loss = model_fn(*args, **kwargs)
 
     def setup_model_call(self, model_fn, *args, **kwargs):
         self._model_fn = model_fn
