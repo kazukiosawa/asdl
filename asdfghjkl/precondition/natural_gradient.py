@@ -1,6 +1,7 @@
 import warnings
 from typing import Callable, List
 from contextlib import nullcontext
+from dataclasses import dataclass
 
 import torch
 from torch import nn
@@ -14,6 +15,7 @@ from ..matrices import *
 from ..symmatrix import SymMatrix
 from ..vector import ParamVector
 from ..fisher import LOSS_CROSS_ENTROPY, get_fisher_class
+from . import GradientMaker
 
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 _invalid_ema_decay = -1
@@ -25,47 +27,45 @@ __all__ = [
 ]
 
 
+@dataclass
+class NaturalGradientMakerConfig:
+    fisher_type: str = FISHER_EXACT,
+    fisher_shape: str = SHAPE_FULL,
+    loss_type: str = LOSS_CROSS_ENTROPY,
+    damping: float = 1e-5,
+    ema_decay: float = _invalid_ema_decay,
+    grad_scale: float = 1.,
+    upd_curvature_interval: int = 1,
+    upd_inv_interval: int = 1,
+    ignore_modules: List[any] = None,
+    sync_group: dist.ProcessGroup = None,
+    sync_group_ranks: List[int] = None,
+    module_partitions: List[List[nn.Module]] = None,
+    record_mode: bool = False,
+    nvtx_tag: str = '',
+
+
 class NaturalGradient:
     """
     Args:
         model: base model that contains multiple modules
         fisher_shape: shape of Fisher
     """
-    def __init__(
-        self,
-        model,
-        fisher_type=FISHER_EXACT,
-        fisher_shape=SHAPE_FULL,
-        loss_type=LOSS_CROSS_ENTROPY,
-        damping=1e-5,
-        ema_decay=_invalid_ema_decay,
-        grad_scale=1.,
-        ignore_modules=None,
-        sync_group: dist.ProcessGroup = None,
-        sync_group_ranks: List[int] = None,
-        module_partitions: List[List[nn.Module]] = None,
-        record_mode=False,
-        nvtx_tag='',
-        logit_idx=0,
-        **kwargs
-    ):
+    def __init__(self, model, config):
         from torch.nn.parallel import DistributedDataParallel as DDP
         assert not isinstance(model, DDP), f'{DDP} is not supported.'
         del DDP
         self.model = model
-        self.fisher_type = fisher_type
-        self.loss_type = loss_type
-        self.damping = damping
-        self.ema_decay = ema_decay
-        self.grad_scale = grad_scale
-        if isinstance(fisher_shape, str):
-            fisher_shape = [fisher_shape]
+        assert isinstance(config, NaturalGradientMakerConfig)
+        if isinstance(config.fisher_shape, str):
+            config.fisher_shape = [config.fisher_shape]
+        self.config = config
         self.named_modules_for_curvature = []
         self.modules_for_curvature = []
         self.shape_for = {}
         for name, module, shapes in module_wise_assignments(model,
-                                                            *fisher_shape,
-                                                            ignore_modules=ignore_modules,
+                                                            *config.fisher_shape,
+                                                            ignore_modules=config.ignore_modules,
                                                             named=True):
             assert len(shapes) == 1, f'Each module has to be assigned one Fisher shape. ' \
                                      f'{name} is assigned {len(shapes)} shapes.'
@@ -73,8 +73,10 @@ class NaturalGradient:
             self.named_modules_for_curvature.append((name, module))
             self.shape_for[module] = shapes[0]
             self.shape_for[name] = shapes[0]
-        self.ignore_modules = ignore_modules
         self._named_modules_for = {}
+
+        module_partitions = config.module_partitions
+        sync_group = config.sync_group
         if module_partitions is not None:
             assert dist.is_initialized(), 'torch.distributed has to be initialized ' \
                                           'when module_partitions is specified.'
@@ -86,20 +88,13 @@ class NaturalGradient:
         else:
             self.partitioned_modules = []
             self.num_modules_per_partition = None
-        self.module_partitions = module_partitions
 
-        self.fisher_shape = fisher_shape
-        fisher_cls = get_fisher_class(fisher_type, loss_type)
-        self.fisher_manager = fisher_cls(model, **kwargs)
+        fisher_cls = get_fisher_class(config.fisher_type, config.loss_type)
+        self.fisher_manager = fisher_cls(model)
 
         if sync_group is not None:
-            assert sync_group_ranks is not None
-            assert sync_group.size() == len(sync_group_ranks)
-        self.sync_group = sync_group
-        self.sync_group_ranks = sync_group_ranks
-        self.record_mode = record_mode
-        self.logit_idx = logit_idx
-        self._nvtx_tag = nvtx_tag
+            assert config.sync_group_ranks is not None
+            assert sync_group.size() == len(config.sync_group_ranks)
 
         self.curvature_sync_handles = []
         self.grad_sync_handles = []
@@ -110,8 +105,8 @@ class NaturalGradient:
         if shape not in self._named_modules_for:
             self._named_modules_for[shape] = list(modules_to_assign(self.model,
                                                                     shape,
-                                                                    *self.fisher_shape,
-                                                                    ignore_modules=self.ignore_modules,
+                                                                    *self.config.fisher_shape,
+                                                                    ignore_modules=self.config.ignore_modules,
                                                                     named=True))
         return self._named_modules_for[shape]
 
@@ -126,7 +121,7 @@ class NaturalGradient:
 
     @property
     def _fisher_attr(self):
-        return self.fisher_type
+        return self.config.fisher_type
 
     def _get_module_fisher(self, module, postfix=None):
         if postfix is None:
@@ -172,10 +167,10 @@ class NaturalGradient:
             fisher.mul_(scale)
 
     def nvtx_tag(self, keyword):
-        if self.record_mode:
-            return f':{keyword}' + self._nvtx_tag
+        if self.config.record_mode:
+            return f':{keyword}' + self.config.nvtx_tag
         else:
-            return '' + self._nvtx_tag
+            return '' + self.config.nvtx_tag
 
     @nvtx.range('update_curvature')
     def update_curvature(self,
@@ -196,19 +191,19 @@ class NaturalGradient:
                          kron=None,
                          no_save=False):
         if ema_decay is None:
-            ema_decay = self.ema_decay
+            ema_decay = self.config.ema_decay
         if ema_decay != _invalid_ema_decay:
             accumulate = True
             scale *= ema_decay
             self._scale_fisher(1 - ema_decay)
 
         if cxt is not None or closure is not None:
-            assert self.fisher_type == FISHER_EMP, f'fisher_type needs to be {FISHER_EMP} ' \
+            assert self.config.fisher_type == FISHER_EMP, f'fisher_type needs to be {FISHER_EMP} ' \
                                                    f'for computation based on {OperationContext} or a closure.'
             if not accumulate:
                 self.fisher_manager.zero_fisher()
             if cxt is None:
-                with no_centered_cov(self.model, self.fisher_shape, ignore_modules=self.ignore_modules, stream=stream) as cxt:
+                with no_centered_cov(self.model, self.config.fisher_shape, ignore_modules=self.config.ignore_modules, stream=stream) as cxt:
                     closure()
                     if not no_save:
                         self.save_curvature(cxt, scale)
@@ -228,15 +223,14 @@ class NaturalGradient:
                             if not no_save:
                                 self.save_curvature(cxt, scale, module=module)
         else:
-            rst = self.fisher_manager.calculate_fisher(self.fisher_shape,
+            rst = self.fisher_manager.calculate_fisher(self.config.fisher_shape,
                                                        inputs=inputs,
                                                        targets=targets,
                                                        data_loader=data_loader,
                                                        accumulate=accumulate,
                                                        data_average=data_average,
                                                        calc_emp_loss_grad=calc_emp_loss_grad,
-                                                       ignore_modules=self.ignore_modules,
-                                                       logit_idx=self.logit_idx,
+                                                       ignore_modules=self.config.ignore_modules,
                                                        seed=seed,
                                                        scale=scale,
                                                        stream=stream)
@@ -293,8 +287,8 @@ class NaturalGradient:
                           num_batches=None,
                           kron=None,
                           no_save=False):
-        if self.ema_decay != _invalid_ema_decay:
-            warnings.warn(f'ema_decay ({self.ema_decay}) will be ignored.')
+        if self.config.ema_decay != _invalid_ema_decay:
+            warnings.warn(f'ema_decay ({self.config.ema_decay}) will be ignored.')
         return self.update_curvature(inputs=inputs,
                                      targets=targets,
                                      data_loader=data_loader,
@@ -317,7 +311,7 @@ class NaturalGradient:
         if kron is None:
             kron = ['A', 'B']
         if damping is None:
-            damping = self.damping
+            damping = self.config.damping
 
         for shape in _module_level_shapes:
             for name, module in self.named_modules_for(shape):
@@ -326,10 +320,10 @@ class NaturalGradient:
                         continue
                     if partition_aware and module in self.partitioned_modules:
                         partition_id = self.partitioned_modules.index(module) // self.num_modules_per_partition
-                        module_id_in_partition = self.module_partitions[partition_id].index(module)
+                        module_id_in_partition = self.config.module_partitions[partition_id].index(module)
                         rank_in_group = dist.get_rank(self.sync_group)
-                        modified_partition_id = (partition_id + rank_in_group) % len(self.module_partitions)
-                        module = self.module_partitions[modified_partition_id][module_id_in_partition]
+                        modified_partition_id = (partition_id + rank_in_group) % len(self.config.module_partitions)
+                        module = self.config.module_partitions[modified_partition_id][module_id_in_partition]
 
                 matrix = self._get_module_symmatrix(module, shape)
                 if matrix is None:
@@ -374,7 +368,7 @@ class NaturalGradient:
     @nvtx.range('precondition')
     def precondition(self, vectors: ParamVector = None, grad_scale=None):
         if grad_scale is None:
-            grad_scale = self.grad_scale
+            grad_scale = self.config.grad_scale
         for shape in _module_level_shapes:
             for module in self.modules_for(shape):
                 if not self.is_module_for_inv_and_precondition(module):
@@ -394,7 +388,7 @@ class NaturalGradient:
     def precondition_module(self, module, shape=None, vectors: ParamVector = None,
                             vec_weight: torch.Tensor = None, vec_bias: torch.Tensor = None, grad_scale=None):
         if grad_scale is None:
-            grad_scale = self.grad_scale
+            grad_scale = self.config.grad_scale
         if shape is None:
             for s in _module_level_shapes:
                 if module in self.modules_for(s):
@@ -422,7 +416,7 @@ class NaturalGradient:
     def is_module_for_inv_and_precondition(self, module: nn.Module):
         if module not in self.modules_for_curvature:
             return False
-        module_partitions = self.module_partitions
+        module_partitions = self.config.module_partitions
         if module_partitions is None:
             return True
         if module not in self.partitioned_modules:
@@ -436,7 +430,7 @@ class NaturalGradient:
         if not enabled:
             return
         handles = []
-        if self.module_partitions is not None:
+        if self.config.module_partitions is not None:
             if module_name is not None:
                 handles += self.reduce_curvature(module_name, kron=kron, diag=diag, with_grad=with_grad)
             else:
@@ -451,20 +445,20 @@ class NaturalGradient:
     def sync_grad_pre_precondition(self, enabled=True, async_op=False):
         if not enabled:
             return
-        if self.module_partitions is not None:
+        if self.config.module_partitions is not None:
             self.reduce_scatter_grad(async_op=async_op)
         self.all_reduce_undivided_grad(async_op=async_op)
 
     def sync_grad_post_precondition(self, enabled=True, async_op=False):
         if not enabled:
             return
-        if self.module_partitions is not None:
+        if self.config.module_partitions is not None:
             self.all_gather_grad(async_op=async_op)
         self.all_reduce_no_curvature_grad(async_op=async_op)
 
     @nvtx.range('reduce_scatter_curvature')
     def reduce_scatter_curvature(self, kron=None, diag=None, with_grad=False):
-        module_partitions = self.module_partitions
+        module_partitions = self.config.module_partitions
         assert module_partitions is not None, 'module_partitions is not specified.'
         handles = []
         for shape in _module_level_shapes:
@@ -479,15 +473,15 @@ class NaturalGradient:
 
     @nvtx.range('reduce_curvature')
     def reduce_curvature(self, module_name, kron=None, diag=None, with_grad=False):
-        module_partitions = self.module_partitions
+        module_partitions = self.config.module_partitions
         assert module_partitions is not None, 'module_partitions is not specified.'
         try:
             module = next(m for name, m in self.named_modules_for_curvature if name == module_name)
             if module not in self.partitioned_modules:
                 return []
             dst = next(i for i, partition in enumerate(module_partitions) if module in partition)
-            if self.sync_group is not None:
-                dst = self.sync_group_ranks[dst]
+            if self.config.sync_group is not None:
+                dst = self.config.sync_group_ranks[dst]
         except StopIteration:
             return []
         keys_list = self._keys_list_from_shape(self.shape_for[module], kron=kron, diag=diag)
@@ -498,7 +492,7 @@ class NaturalGradient:
                                                          all_reduce=False,
                                                          dst=dst,
                                                          with_grad=with_grad,
-                                                         group=self.sync_group,
+                                                         group=self.config.sync_group,
                                                          async_op=True)
         return handles
 
@@ -519,7 +513,7 @@ class NaturalGradient:
                                                              *keys,
                                                              all_reduce=True,
                                                              with_grad=with_grad,
-                                                             group=self.sync_group,
+                                                             group=self.config.sync_group,
                                                              async_op=True)
         return handles
 
@@ -552,10 +546,10 @@ class NaturalGradient:
 
     def _scatter_or_gather_grad(self, scatter_or_gather, async_op=False):
         assert dist.is_initialized()
-        group = self.sync_group
+        group = self.config.sync_group
         world_size = dist.get_world_size(group)
         rank = dist.get_rank(group)
-        module_partitions = self.module_partitions
+        module_partitions = self.config.module_partitions
         assert module_partitions is not None, 'module_partitions is not specified.'
         assert len(module_partitions) == world_size
         num_modules_per_partition = len(module_partitions[0])
@@ -602,7 +596,7 @@ class NaturalGradient:
         if len(grads) == 0:
             return
         packed_tensor = parameters_to_vector(grads)
-        handle = dist.all_reduce(packed_tensor, group=self.sync_group, async_op=async_op)
+        handle = dist.all_reduce(packed_tensor, group=self.config.sync_group, async_op=async_op)
         if async_op:
             self.grad_sync_handles.append(handle)
             self.grads.append(grads)
@@ -628,92 +622,42 @@ class NaturalGradient:
 
 
 class FullNaturalGradient(NaturalGradient):
-    def __init__(self,
-                 model,
-                 fisher_type=FISHER_EXACT,
-                 loss_type=LOSS_CROSS_ENTROPY,
-                 damping=1e-5,
-                 ema_decay=_invalid_ema_decay,
-                 **kwargs):
-        super().__init__(model, fisher_type, SHAPE_FULL, loss_type, damping, ema_decay, **kwargs)
+    def __init__(self, model, config: NaturalGradientMakerConfig):
+        config.fisher_shape = SHAPE_FULL
+        super().__init__(model, config)
 
 
 class LayerWiseNaturalGradient(NaturalGradient):
-    def __init__(self,
-                 model,
-                 fisher_type=FISHER_EXACT,
-                 loss_type=LOSS_CROSS_ENTROPY,
-                 damping=1e-5,
-                 ema_decay=_invalid_ema_decay,
-                 ignore_modules=None,
-                 **kwargs):
-        super().__init__(model, fisher_type, SHAPE_LAYER_WISE, loss_type, damping, ema_decay, ignore_modules=ignore_modules, **kwargs)
+    def __init__(self, model, config: NaturalGradientMakerConfig):
+        config.fisher_shape = SHAPE_LAYER_WISE
+        super().__init__(model, config)
 
 
 class KFAC(NaturalGradient):
-    def __init__(self,
-                 model,
-                 fisher_type=FISHER_EXACT,
-                 loss_type=LOSS_CROSS_ENTROPY,
-                 damping=1e-5,
-                 ema_decay=_invalid_ema_decay,
-                 ignore_modules=None,
-                 **kwargs):
-        fisher_shape = [SHAPE_KRON,
-                        (nn.BatchNorm1d, SHAPE_UNIT_WISE),
-                        (nn.BatchNorm2d, SHAPE_UNIT_WISE)]
-        super().__init__(model, fisher_type, fisher_shape, loss_type, damping, ema_decay, ignore_modules=ignore_modules, **kwargs)
+    def __init__(self, model, config: NaturalGradientMakerConfig):
+        config.fisher_shape = [SHAPE_KRON,
+                               (nn.BatchNorm1d, SHAPE_UNIT_WISE),
+                               (nn.BatchNorm2d, SHAPE_UNIT_WISE),
+                               (nn.LayerNorm, SHAPE_UNIT_WISE)]
+        super().__init__(model, config)
 
 
 class UnitWiseNaturalGradient(NaturalGradient):
-    def __init__(self,
-                 model,
-                 fisher_type=FISHER_EXACT,
-                 loss_type=LOSS_CROSS_ENTROPY,
-                 damping=1e-5,
-                 ema_decay=_invalid_ema_decay,
-                 ignore_modules=None,
-                 **kwargs,):
-        super().__init__(model, fisher_type, SHAPE_UNIT_WISE, loss_type, damping, ema_decay, ignore_modules=ignore_modules, **kwargs)
+    def __init__(self, model, config: NaturalGradientMakerConfig):
+        config.fisher_shape = SHAPE_UNIT_WISE
+        super().__init__(model, config)
 
 
 class DiagNaturalGradient(NaturalGradient):
-    def __init__(self,
-                 model,
-                 fisher_type=FISHER_EXACT,
-                 loss_type=LOSS_CROSS_ENTROPY,
-                 damping=1e-5,
-                 ema_decay=_invalid_ema_decay,
-                 ignore_modules=None,
-                 **kwargs):
-        super().__init__(model, fisher_type, SHAPE_DIAG, loss_type, damping, ema_decay, ignore_modules=ignore_modules, **kwargs)
+    def __init__(self, model, config: NaturalGradientMakerConfig):
+        config.fisher_shape = SHAPE_DIAG
+        super().__init__(model, config)
 
 
 class EmpiricalNaturalGradient(NaturalGradient):
-    def __init__(self,
-                 model,
-                 fisher_shape=SHAPE_FULL,
-                 damping=1e-5,
-                 ema_decay=_invalid_ema_decay,
-                 grad_scale=1.,
-                 ignore_modules=None,
-                 sync_group: dist.ProcessGroup = None,
-                 module_partitions: List[List[nn.Module]] = None,
-                 record_mode=False,
-                 nvtx_tag='',
-                 **kwargs):
-        super().__init__(model,
-                         fisher_type=FISHER_EMP,
-                         fisher_shape=fisher_shape,
-                         damping=damping,
-                         ema_decay=ema_decay,
-                         grad_scale=grad_scale,
-                         ignore_modules=ignore_modules,
-                         sync_group=sync_group,
-                         module_partitions=module_partitions,
-                         record_mode=record_mode,
-                         nvtx_tag=nvtx_tag,
-                         **kwargs)
+    def __init__(self, model, config: NaturalGradientMakerConfig):
+        config.fisher_type = FISHER_EMP
+        super().__init__(model, config)
 
 
 def _bias_requires_grad(module):
