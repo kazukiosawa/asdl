@@ -44,14 +44,9 @@ class SmwEmpNaturalGradientMakerConfig:
 
 
 class SmwEmpNaturalGradientMaker(GradientMaker):
-    def __init__(self, model, config=None, data_size: int = None):
+    def __init__(self, model, config):
         super().__init__(model)
-        if config is None:
-            assert data_size is not None, f'data_size has to be specified ' \
-                                          f'when config is not given.'
-            config = SmwEmpNaturalGradientMakerConfig(data_size=data_size)
-        else:
-            assert isinstance(config, SmwEmpNaturalGradientMakerConfig)
+        assert isinstance(config, SmwEmpNaturalGradientMakerConfig)
         self.config = config
 
     def forward_and_backward(self) -> Tuple[Tensor, Tensor]:
