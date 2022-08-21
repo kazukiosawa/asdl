@@ -75,7 +75,6 @@ class GradientMaker:
         self._loss_fn = None
         self._loss_fn_args = ()
         self._loss_fn_kwargs = dict()
-        self._dummy_logits = DummyObject([GetFirstItem()])
         self._dummy_loss = DummyObject([GetItem(1)])  # default: logits, loss = model_fn(*args, **kwargs)
 
     def setup_model_call(self, model_fn, *args, **kwargs):
@@ -89,28 +88,20 @@ class GradientMaker:
         self._loss_fn_args = args
         self._loss_fn_kwargs = kwargs
 
-    def setup_logits_repr(self, dummy_logits: DummyObject):
-        assert isinstance(dummy_logits, DummyObject), \
-            f'dummy_logits has to be an {DummyObject}, not {type(dummy_logits)}.'
-        self._dummy_logits = dummy_logits
-
-    def get_logits(self, base_value):
-        return self._dummy_logits.eval(base_value)
-
     def setup_loss_repr(self, dummy_loss: DummyObject):
         assert isinstance(dummy_loss, DummyObject), \
             f'dummy_loss has to be an {DummyObject}, not {type(dummy_loss)}.'
         self._dummy_loss = dummy_loss
 
-    def get_loss(self, base_value):
-        return self._dummy_loss.eval(base_value)
+    def extract_loss_from_model_output(self):
+        return self._dummy_loss.eval(self._model_output)
 
     def forward_and_backward(self) -> Union[Tuple[Any, Tensor], Any]:
         # Performs a simple gradient calculation.
         # A child class should override this function.
         rst = self._forward()
         if self._loss_fn is None:
-            loss = self.get_loss(rst)
+            loss = self.extract_loss_from_model_output()
         else:
             _, loss = rst
         loss.backward()
