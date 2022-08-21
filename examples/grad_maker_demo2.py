@@ -52,16 +52,16 @@ model1.zero_grad()
 model2.zero_grad()
 
 # standard
-y = model1(x)
-logits1 = y.logits
+y1 = model1(x)
+logits1 = y1.logits
 loss1 = F.cross_entropy(logits1.view(-1, logits1.size(-1)), t.view(-1), ignore_index=-1)
 loss1.backward()
 
 # GradientMaker
-y = grad_maker.setup_model_call(model2, x)
-grad_maker.setup_logits_repr(y.logits)
-grad_maker.setup_loss_call(F.cross_entropy, y.logits.view(-1, y.logits.size(-1)), t.view(-1), ignore_index=-1)
-logits2, loss2 = grad_maker.forward_and_backward()
+dummy_y = grad_maker.setup_model_call(model2, x)
+grad_maker.setup_loss_call(F.cross_entropy, dummy_y.logits.view(-1, dummy_y.logits.size(-1)), t.view(-1), ignore_index=-1)
+y2, loss2 = grad_maker.forward_and_backward()
+logits2 = y2.logits
 
 g1 = parameters_to_vector([p.grad for p in model1.parameters()])
 g2 = parameters_to_vector([p.grad for p in model2.parameters()])
@@ -81,16 +81,13 @@ model1.zero_grad()
 model2.zero_grad()
 
 # standard
-y = model1(x, targets=t, return_dict=False)
-logits1 = y[1]
-loss1 = y[0]
+loss1, logits1, _ = model1(x, targets=t, return_dict=False)
 loss1.backward()
 
 # GradientMaker
-y = grad_maker.setup_model_call(model2, x, targets=t, return_dict=False)
-grad_maker.setup_logits_repr(y[1])
-grad_maker.setup_loss_repr(y[0])
-logits2, loss2 = grad_maker.forward_and_backward()
+dummy_y = grad_maker.setup_model_call(model2, x, targets=t, return_dict=False)
+grad_maker.setup_loss_repr(dummy_y[0])
+loss2, logits2, _ = grad_maker.forward_and_backward()
 
 g1 = parameters_to_vector([p.grad for p in model1.parameters()])
 g2 = parameters_to_vector([p.grad for p in model2.parameters()])

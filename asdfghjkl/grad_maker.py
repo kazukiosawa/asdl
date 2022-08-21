@@ -1,4 +1,4 @@
-from typing import Any, Tuple, Dict
+from typing import Any, Tuple, Dict, Union
 from dataclasses import dataclass
 
 from torch import Tensor
@@ -99,22 +99,24 @@ class GradientMaker:
             f'dummy_loss has to be an {DummyObject}, not {type(dummy_loss)}.'
         self._dummy_loss = dummy_loss
 
-    def forward_and_backward(self) -> Tuple[Tensor, Tensor]:
+    def forward_and_backward(self) -> Union[Tuple[Any, Tensor], Any]:
         # Performs a simple gradient calculation.
         # A child class should override this function.
-        logits, loss = self._forward()
-        loss.backward()
-        return logits, loss
-
-    def _forward(self) -> Tuple[Tensor, Tensor]:
-        self._call_model_fn()
-        output = self._model_output
-        logits = self._dummy_logits.eval(output)
+        output = self._forward()
         if self._loss_fn is None:
             loss = self._dummy_loss.eval(output)
         else:
-            loss = self._call_loss_fn()
-        return logits, loss
+            _, loss = output
+        loss.backward()
+        return output
+
+    def _forward(self) -> Union[Tuple[Any, Tensor], Any]:
+        self._call_model_fn()
+        model_output = self._model_output
+        if self._loss_fn is None:
+            return model_output
+        loss = self._call_loss_fn()
+        return model_output, loss
 
     def _call_model_fn(self):
         assert self._model_fn is not None, \
