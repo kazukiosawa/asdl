@@ -72,11 +72,13 @@ class GradientMaker:
         self._model_args = ()
         self._model_kwargs = dict()
         self._model_output = None
+        self._logits: Tensor = None
         self._loss_fn = None
         self._loss_fn_args = ()
         self._loss_fn_kwargs = dict()
         self._loss: Tensor = None
-        self._dummy_loss = DummyObject([GetItem(1)])  # default: logits, loss = model_fn(*args, **kwargs)
+        self._dummy_loss = DummyObject([GetItem(1)])  # default: logits, loss = model_fn()
+        self._dummy_logits = DummyObject([GetFirstItem()])
 
     def setup_model_call(self, model_fn, *args, **kwargs):
         self._model_fn = model_fn
@@ -94,6 +96,11 @@ class GradientMaker:
             f'dummy_loss has to be an {DummyObject}, not {type(dummy_loss)}.'
         self._dummy_loss = dummy_loss
 
+    def setup_logits_repr(self, dummy_logits: DummyObject):
+        assert isinstance(dummy_logits, DummyObject), \
+            f'dummy_loss has to be an {DummyObject}, not {type(dummy_logits)}.'
+        self._dummy_logits = dummy_logits
+
     def forward_and_backward(self) -> Union[Tuple[Any, Tensor], Any]:
         # Performs a simple gradient calculation.
         # A child class should override this function.
@@ -109,6 +116,7 @@ class GradientMaker:
             f'model_fn is not specified. Call {GradientMaker.setup_model_call} ' \
             f'before calling {GradientMaker.forward_and_backward}.'
         self._model_output = self._model_fn(*self._model_args, **self._model_kwargs)
+        self._logits = self._dummy_logits.eval(self._model_output)
         if self._loss_fn is None:
             self._loss = self._dummy_loss.eval(self._model_output)
         else:
