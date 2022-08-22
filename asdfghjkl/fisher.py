@@ -1,15 +1,17 @@
 from functools import partial
-from typing import List, Union
+from typing import List, Union, Any, Tuple
+from dataclasses import dataclass
 import numpy as np
 
 import torch
+from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.cuda import Stream
 import torch.distributed as dist
 
 from .core import no_centered_cov
 from .utils import skip_param_grad
+from .grad_maker import GradientMaker, DummyObject
 from .matrices import *
 from .vector import ParamVector, reduce_vectors
 from .mvp import power_method, stochastic_lanczos_quadrature, conjugate_gradient_method, quadratic_form
@@ -40,7 +42,7 @@ __all__ = [
     'fisher_quadratic_form_for_mse',
     'LOSS_CROSS_ENTROPY',
     'LOSS_MSE',
-    'FisherManager',
+    'FisherMaker',
     'get_fisher_class',
 ]
 
@@ -49,129 +51,83 @@ _supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, 
 _supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_LAYER_WISE]
 
 
-class FisherManager(MatrixManager):
-    def __init__(self, model, fisher_type):
-        super().__init__(model, fisher_type)
-        self.fisher_type = fisher_type
+@dataclass
+class FisherMakerConfig:
+    fisher_type: str
+    fisher_shapes: List[Any]
+    fisher_attr: str = 'fisher'
+    fvp_attr: str = 'fvp'
+    fvp: bool = False,
+    data_average: bool = True
+    accumulate: bool = False
+    calc_emp_loss_grad: bool = False
+    ignore_modules: List[Any] = None
+    seed: int = None
+    scale: float = 1.
+    n_mc_samples: int = 1
+    var: float = 1.
 
-    @property
-    def is_fisher_emp(self):
-        return self.fisher_type == FISHER_EMP
 
-    @property
-    def loss_fn(self):
-        raise NotImplementedError
-
-    @property
-    def fisher_attr(self):
-        return self.fisher_type
-
-    @property
-    def fvp_attr(self):
-        return f'{self.fisher_type}_fvp'
+class FisherMaker(GradientMaker):
+    def __init__(self, model, config):
+        super().__init__(model)
+        self.config: FisherMakerConfig = config
 
     def zero_fisher(self, fvp=False):
-        attr = self.fvp_attr if fvp else self.fisher_attr
-        for module in self._model.modules():
+        attr = self.config.fvp_attr if fvp else self.config.fisher_attr
+        for module in self.model.modules():
             if hasattr(module, attr):
                 delattr(module, attr)
 
-    def calculate_fisher(self,
-                         fisher_shapes,
-                         inputs: torch.Tensor = None,
-                         targets: torch.Tensor = None,
-                         data_loader: torch.utils.data.DataLoader = None,
-                         fvp=False,
-                         vec: ParamVector = None,
-                         data_average=True,
-                         accumulate=False,
-                         calc_emp_loss_grad=False,
-                         ignore_modules=None,
-                         seed=None,
-                         scale=1.,
-                         logit_idx=0,
-                         stream: Stream = None):
-        model = self._model
-        device = self._device
-        if isinstance(fisher_shapes, str):
-            fisher_shapes = [fisher_shapes]
+    def forward_and_backward(self, vec: ParamVector = None) -> Union[Tuple[Any, Tensor], Any]:
+        model = self.model
+        is_fisher_emp = self.config.fisher_type == FISHER_EMP
+        fisher_shapes = self.config.fisher_shapes
+        ignore_modules = self.config.ignore_modules
+        fvp = self.config.fvp
+        calc_emp_loss_grad = self.config.calc_emp_loss_grad
+        seed = self.config.seed
+        scale = self.config.scale
 
-        if not accumulate:
+        if not self.config.accumulate:
             # set Fisher/FVP zero
             self.zero_fisher(fvp=fvp)
 
-        total_loss = 0
-        calc_emp_loss_grad_with_fisher = calc_emp_loss_grad and self.is_fisher_emp
-        calc_emp_loss_grad_after_fisher = calc_emp_loss_grad and not self.is_fisher_emp
+        if seed:
+            torch.random.manual_seed(seed)
 
-        def fisher_for_one_batch(x, t=None):
-            x = x.to(device)
-            if t is not None:
-                t = t.to(device)
-            if seed:
-                torch.random.manual_seed(seed)
-
-            with no_centered_cov(model, fisher_shapes, ignore_modules=ignore_modules, cvp=fvp, vectors=vec, stream=stream) as cxt:
-                def closure(loss_expr, retain_graph=False):
+        with no_centered_cov(model, fisher_shapes, ignore_modules=ignore_modules, cvp=fvp, vectors=vec) as cxt:
+            self._forward()
+            emp_loss = self._loss
+            if is_fisher_emp:
+                cxt.clear_batch_grads()
+                with skip_param_grad(model, disable=not calc_emp_loss_grad):
+                    emp_loss.backward()
+            else:
+                def closure(nll_expr, retain_graph=False):
                     cxt.clear_batch_grads()
-                    loss = loss_expr()
-                    with skip_param_grad(model, disable=calc_emp_loss_grad_with_fisher):
-                        loss.backward(retain_graph=retain_graph or calc_emp_loss_grad_after_fisher)
+                    with skip_param_grad(model):
+                        nll_expr().backward(retain_graph=retain_graph or calc_emp_loss_grad)
                     if fvp:
                         cxt.calc_full_cvp(model)
                     else:
                         cxt.calc_full_cov(model)
-                    if not calc_emp_loss_grad_after_fisher:
-                        nonlocal total_loss
-                        total_loss += float(loss)
+                self._fisher_loop(closure)
+            self.accumulate(cxt, scale, fvp=fvp)
 
-                y = model(x)
-                if isinstance(y, (list, tuple)):
-                    y = y[logit_idx]
-                self._fisher_core(closure, y, t)
-                self.accumulate(cxt, scale, fvp=fvp)
+        if calc_emp_loss_grad and not is_fisher_emp:
+            emp_loss.backward()
 
-            if calc_emp_loss_grad_after_fisher:
-                assert t is not None
-                emp_loss = self.loss_fn(y, t)
-                emp_loss.backward()
-                nonlocal total_loss
-                total_loss += float(emp_loss)
-
-            return y
-
-        outputs = None
-        if data_loader is not None:
-            # calculate fisher/fvp for the data_loader
-            data_size = len(data_loader.dataset)
-            if data_average:
-                scale /= data_size
-            for inputs, targets in data_loader:
-                outputs = fisher_for_one_batch(inputs, targets)
+        if self._loss_fn is None:
+            return self._model_output
         else:
-            # calculate fisher/fvp for a single batch
-            assert inputs is not None
-            data_size = inputs.shape[0]
-            if data_average:
-                scale /= data_size
-            outputs = fisher_for_one_batch(inputs, targets)
+            return self._model_output, self._loss
 
-        if calc_emp_loss_grad and data_average:
-            # divide gradients by data size
-            # (every loss function returns the sum of loss, not the average)
-            for p in model.parameters():
-                if p.grad is not None:
-                    p.grad.div_(data_size)
-
-        if data_average:
-            total_loss /= data_size
-        return total_loss, outputs
-
-    def _fisher_core(self, closure, outputs, targets):
+    def _fisher_loop(self, closure):
         raise NotImplementedError
 
     def accumulate(self, cxt, scale=1., target_module=None, target_module_name=None, fvp=False):
-        model = self._model
+        model = self.model
         for name, module in model.named_modules():
             if target_module is not None and module != target_module:
                 continue
@@ -200,7 +156,7 @@ class FisherManager(MatrixManager):
             return
         if scale != 1:
             new_fisher.mul_(scale)
-        dst_attr = self.fvp_attr if fvp else self.fisher_attr
+        dst_attr = self.config.fvp_attr if fvp else self.config.fisher_attr
         dst_fisher = getattr(module, dst_attr, None)
         if dst_fisher is None:
             setattr(module, dst_attr, new_fisher)
@@ -212,7 +168,7 @@ class FisherManager(MatrixManager):
         self._accumulate_fisher(module, new_fisher, scale, fvp=True)
 
     def get_fisher_tensor(self, module: nn.Module, *keys) -> Union[torch.Tensor, None]:
-        fisher = getattr(module, self.fisher_attr, None)
+        fisher = getattr(module, self.config.fisher_attr, None)
         if fisher is None:
             return None
         data = fisher
@@ -287,26 +243,26 @@ class FisherManager(MatrixManager):
     def reduce_fvp(self, fisher_shape, is_master=True, all_reduce=False):
         v = self.load_fvp(fisher_shape)
         v = reduce_vectors(v, is_master, all_reduce)
-        attr = self.fvp_attr
+        attr = self.config.fvp_attr
         if fisher_shape == SHAPE_FULL:
-            setattr(self._model, attr, v)
+            setattr(self.model, attr, v)
         else:
-            for module in self._model.modules():
+            for module in self.model.modules():
                 if hasattr(module, attr):
                     setattr(module, attr, v.get_vectors_by_module(module))
 
     def load_fvp(self, fisher_shape: str) -> ParamVector:
         if fisher_shape == SHAPE_FULL:
-            v = getattr(self._model, self.fvp_attr, None)
+            v = getattr(self.model, self.config.fvp_attr, None)
             if v is None:
                 return None
             return v.copy()
         else:
             rst = None
-            for module in self._model.modules():
-                if module == self._model:
+            for module in self.model.modules():
+                if module == self.model:
                     continue
-                v = getattr(module, self.fvp_attr, None)
+                v = getattr(module, self.config.fvp_attr, None)
                 if v is not None:
                     if rst is None:
                         rst = v.copy()
@@ -315,117 +271,76 @@ class FisherManager(MatrixManager):
             return rst
 
 
-class _FisherCrossEntropy(FisherManager):
-    @property
-    def loss_fn(self):
-        return partial(F.cross_entropy, reduction='sum')
-
-
-class FisherExactCrossEntropy(_FisherCrossEntropy):
-    def __init__(self, model):
-        super().__init__(model, FISHER_EXACT)
-
-    def _fisher_core(self, closure, outputs, unused):
-        log_probs = F.log_softmax(outputs, dim=1)
+class FisherExactCrossEntropy(FisherMaker):
+    def _fisher_loop(self, closure):
+        logits = self._logits
+        log_probs = F.log_softmax(logits, dim=-1)
         log_probs = log_probs.view(-1, log_probs.size(-1))
         n, n_classes = log_probs.shape
         with torch.no_grad():
-            probs = F.softmax(outputs, dim=1)
+            probs = F.softmax(logits, dim=-1)
             sqrt_probs = torch.sqrt(probs)
         for i in range(n_classes):
-            targets = torch.tensor([i] * n, device=outputs.device)
+            targets = torch.tensor([i] * n, device=logits.device)
 
-            def loss_expr():
-                loss = F.nll_loss(log_probs, targets, reduction='none', ignore_index=-1)
-                return loss.mul(sqrt_probs[:, i]).sum()
-            closure(loss_expr, retain_graph=i < n_classes - 1)
+            def nll_expr():
+                nll = F.nll_loss(log_probs, targets, reduction='none', ignore_index=-1)
+                return nll.mul(sqrt_probs[:, i]).sum()
+            closure(nll_expr, retain_graph=i < n_classes - 1)
 
 
-class FisherMCCrossEntropy(_FisherCrossEntropy):
-    def __init__(self, model, n_mc_samples=1):
-        super().__init__(model, FISHER_MC)
-        self.n_mc_samples = n_mc_samples
-
-    def _fisher_core(self, closure, outputs, unused):
-        probs = F.softmax(outputs, dim=1)
-        log_probs = F.log_softmax(outputs, dim=1)
+class FisherMCCrossEntropy(FisherMaker):
+    def _fisher_loop(self, closure):
+        logits = self._logits
+        log_probs = F.log_softmax(logits, dim=-1)
+        n_mc_samples = self.config.n_mc_samples
+        probs = F.softmax(logits, dim=-1)
+        log_probs = F.log_softmax(logits, dim=-1)
         dist = torch.distributions.Categorical(probs)
-        for i in range(self.n_mc_samples):
+        for i in range(n_mc_samples):
             with torch.no_grad():
                 targets = dist.sample()
             closure(lambda: F.nll_loss(log_probs.view(-1, log_probs.size(-1)),
-                                       targets.view(-1), reduction='sum', ignore_index=-1) / self.n_mc_samples,
-                    retain_graph=i < self.n_mc_samples - 1)
+                                       targets.view(-1), reduction='sum', ignore_index=-1) / n_mc_samples,
+                    retain_graph=i < n_mc_samples - 1)
 
 
-class FisherEmpCrossEntropy(_FisherCrossEntropy):
-    def __init__(self, model):
-        super().__init__(model, FISHER_EMP)
-
-    def _fisher_core(self, closure, outputs, targets):
-        log_probs = F.log_softmax(outputs, dim=1)
-        closure(lambda: F.nll_loss(log_probs.view(-1, log_probs.size(-1)),
-                                   targets.view(-1), reduction='sum', ignore_index=-1),
-                retain_graph=False)
-
-
-class _FisherMSE(FisherManager):
-    @property
-    def loss_fn(self):
-        return lambda x, y: 0.5 * (x - y).norm(dim=1).sum()
-
-
-class FisherExactMSE(_FisherMSE):
-    def __init__(self, model):
-        super().__init__(model, FISHER_EXACT)
-
-    def _fisher_core(self, closure, outputs, unused):
-        _, n_dims = outputs.shape
+class FisherExactMSE(FisherMaker):
+    def _fisher_loop(self, closure):
+        logits = self._logits
+        n_dims = logits.size(-1)
         for i in range(n_dims):
-            closure(lambda: outputs[:, i].sum(), retain_graph=i < n_dims - 1)
+            closure(lambda: logits[:, i].sum(), retain_graph=i < n_dims - 1)
 
 
-class FisherMCMSE(_FisherMSE):
-    def __init__(self, model, n_mc_samples=1, var=0.5):
-        super().__init__(model, FISHER_MC)
-        self.n_mc_samples = n_mc_samples
-        self.var = var
-
-    def _fisher_core(self, closure, outputs, unused):
-        dist = torch.distributions.normal.Normal(outputs, scale=np.sqrt(self.var))
-        for i in range(self.n_mc_samples):
+class FisherMCMSE(FisherMaker):
+    def _fisher_loop(self, closure):
+        logits = self._logits
+        n_mc_samples = self.config.n_mc_samples
+        var = self.config.var
+        dist = torch.distributions.normal.Normal(logits, scale=np.sqrt(var))
+        for i in range(n_mc_samples):
             with torch.no_grad():
                 targets = dist.sample()
-            closure(lambda: 0.5 * F.mse_loss(outputs, targets, reduction='sum') / self.n_mc_samples,
-                    retain_graph=i < self.n_mc_samples - 1)
-
-
-class FisherEmpMSE(_FisherMSE):
-    def __init__(self, model):
-        super().__init__(model, FISHER_EMP)
-
-    def _fisher_core(self, closure, outputs, targets):
-        closure(lambda: 0.5 * F.mse_loss(outputs, targets, reduction='sum'),
-                retain_graph=False)
+            closure(lambda: 0.5 * F.mse_loss(logits, targets, reduction='sum') / n_mc_samples,
+                    retain_graph=i < n_mc_samples - 1)
 
 
 def get_fisher_class(fisher_type, loss_type):
     assert fisher_type in _supported_types
     assert loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]
-    if loss_type == LOSS_CROSS_ENTROPY:
-        if fisher_type == FISHER_EXACT:
+    if fisher_type == FISHER_EMP:
+        return FisherMaker
+    elif fisher_type == FISHER_EXACT:
+        if loss_type == LOSS_CROSS_ENTROPY:
             return FisherExactCrossEntropy
-        elif fisher_type == FISHER_MC:
+        else:
+            return FisherExactMSE
+    else:
+        if loss_type == LOSS_CROSS_ENTROPY:
             return FisherMCCrossEntropy
         else:
-            return FisherEmpCrossEntropy
-    else:
-        if fisher_type == FISHER_EXACT:
-            return FisherExactMSE
-        elif fisher_type == FISHER_MC:
             return FisherMCMSE
-        else:
-            return FisherEmpMSE
 
 
 def calculate_fisher(
