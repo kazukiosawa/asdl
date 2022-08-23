@@ -49,7 +49,7 @@ class FisherMakerConfig:
     data_average: bool = True
     fisher_attr: str = 'fisher'
     fvp_attr: str = 'fvp'
-    fvp: bool = False,
+    fvp: bool = False
     ignore_modules: List[Any] = None
     is_distributed: bool = False
     all_reduce: bool = False
