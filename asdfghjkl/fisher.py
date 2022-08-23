@@ -306,9 +306,7 @@ class FisherMaker(GradientMaker):
                                                          is_distributed=is_distributed,
                                                          random_seed=random_seed
                                                          )
-
         # referenced from https://github.com/amirgholami/PyHessian/blob/master/density_plot.py
-
         eigvals = np.array(eigvals)
         weights = np.array(weights)
 
