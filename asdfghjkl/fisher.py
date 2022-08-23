@@ -94,19 +94,19 @@ class FisherMaker(GradientMaker):
         with no_centered_cov(model, fisher_shapes, ignore_modules=ignore_modules, cvp=fvp, vectors=vec) as cxt:
             self._forward()
             emp_loss = self._loss
-            if self.is_fisher_emp:
+
+            def closure(nll_expr, retain_graph=False):
                 cxt.clear_batch_grads()
-                with skip_param_grad(model, disable=not calc_emp_loss_grad):
-                    emp_loss.backward()
+                with skip_param_grad(model, disable=not calc_emp_loss_grad or not self.is_fisher_emp):
+                    nll_expr().backward(retain_graph=retain_graph or calc_emp_loss_grad)
+                if fvp:
+                    cxt.calc_full_cvp(model)
+                else:
+                    cxt.calc_full_cov(model)
+
+            if self.is_fisher_emp:
+                closure(lambda: emp_loss)
             else:
-                def closure(nll_expr, retain_graph=False):
-                    cxt.clear_batch_grads()
-                    with skip_param_grad(model):
-                        nll_expr().backward(retain_graph=retain_graph or calc_emp_loss_grad)
-                    if fvp:
-                        cxt.calc_full_cvp(model)
-                    else:
-                        cxt.calc_full_cov(model)
                 self._fisher_loop(closure)
             self.accumulate(cxt, scale, fvp=fvp)
 
