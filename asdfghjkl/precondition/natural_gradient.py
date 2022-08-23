@@ -243,7 +243,7 @@ class NaturalGradientMaker(GradientMaker):
                 fisher_maker.setup_loss_repr(self._dummy_loss)
             else:
                 fisher_maker.setup_loss_call(self._loss_fn, *self._loss_fn_args, **self._loss_fn_kwargs)
-            fisher_maker.forward_and_backward(data_size=data_size, scale=scale, accumulate=accumulate, calc_emp_loss_grad=True)
+            fisher_maker.forward_and_backward(data_size=data_size, scale=scale, accumulate=accumulate, calc_loss_grad=True)
             self._model_output = fisher_maker.model_output
             self._loss = fisher_maker.loss
 

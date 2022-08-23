@@ -69,7 +69,7 @@ class FisherMaker(GradientMaker):
                              data_size=1,
                              scale=1.,
                              accumulate=False,
-                             calc_emp_loss_grad=True,
+                             calc_loss_grad=True,
                              vec: ParamVector = None) -> Union[Tuple[Any, Tensor], Any]:
         model = self.model
         fisher_shapes = self.config.fisher_shapes
@@ -89,27 +89,27 @@ class FisherMaker(GradientMaker):
 
         with no_centered_cov(model, fisher_shapes, ignore_modules=ignore_modules, cvp=fvp, vectors=vec) as cxt:
             self._forward()
-            emp_loss = self._loss
+            loss = self._loss
 
             def closure(nll_expr, retain_graph=False):
                 cxt.clear_batch_grads()
-                with skip_param_grad(model, disable=calc_emp_loss_grad and self.is_fisher_emp):
-                    nll_expr().backward(retain_graph=retain_graph or calc_emp_loss_grad)
+                with skip_param_grad(model, disable=calc_loss_grad and self.is_fisher_emp):
+                    nll_expr().backward(retain_graph=retain_graph or calc_loss_grad)
                 if fvp:
                     cxt.calc_full_cvp(model)
                 else:
                     cxt.calc_full_cov(model)
 
             if self.is_fisher_emp:
-                closure(lambda: emp_loss)
+                closure(lambda: loss)
             else:
                 self._fisher_loop(closure)
             self.accumulate(cxt, scale, fvp=fvp)
 
-        if calc_emp_loss_grad and not self.is_fisher_emp:
-            emp_loss.backward()
+        if calc_loss_grad and not self.is_fisher_emp:
+            loss.backward()
 
-        if calc_emp_loss_grad:
+        if calc_loss_grad:
             # divide gradients by data size
             # (every loss function returns the sum of loss, not the average)
             for p in model.parameters():
