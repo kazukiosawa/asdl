@@ -29,7 +29,6 @@ __all__ = [
     'fisher_quadratic_form',
     'LOSS_CROSS_ENTROPY',
     'LOSS_MSE',
-    'FisherMaker',
     'FisherMakerConfig',
     'get_fisher_maker',
 ]
@@ -68,13 +67,16 @@ class FisherMaker(GradientMaker):
             if hasattr(module, attr):
                 delattr(module, attr)
 
+    @property
+    def is_fisher_emp(self):
+        return False
+
     def forward_and_backward(self,
                              scale=1.,
                              accumulate=False,
                              calc_emp_loss_grad=True,
                              vec: ParamVector = None) -> Union[Tuple[Any, Tensor], Any]:
         model = self.model
-        is_fisher_emp = self.config.fisher_type == FISHER_EMP
         fisher_shapes = self.config.fisher_shapes
         if isinstance(fisher_shapes, str):
             fisher_shapes = [fisher_shapes]
@@ -92,7 +94,7 @@ class FisherMaker(GradientMaker):
         with no_centered_cov(model, fisher_shapes, ignore_modules=ignore_modules, cvp=fvp, vectors=vec) as cxt:
             self._forward()
             emp_loss = self._loss
-            if is_fisher_emp:
+            if self.is_fisher_emp:
                 cxt.clear_batch_grads()
                 with skip_param_grad(model, disable=not calc_emp_loss_grad):
                     emp_loss.backward()
@@ -108,7 +110,7 @@ class FisherMaker(GradientMaker):
                 self._fisher_loop(closure)
             self.accumulate(cxt, scale, fvp=fvp)
 
-        if calc_emp_loss_grad and not is_fisher_emp:
+        if calc_emp_loss_grad and not self.is_fisher_emp:
             emp_loss.backward()
 
         if self._loss_fn is None:
@@ -319,12 +321,18 @@ class FisherMCMSE(FisherMaker):
                     retain_graph=i < n_mc_samples - 1)
 
 
+class FisherEmp(FisherMaker):
+    @property
+    def is_fisher_emp(self):
+        return True
+
+
 def get_fisher_maker(model: nn.Module, config: FisherMakerConfig):
     fisher_type = config.fisher_type
     loss_type = config.loss_type
     assert fisher_type in _supported_types
     if fisher_type == FISHER_EMP:
-        return FisherMaker(model, config)
+        return FisherEmp(model, config)
     assert loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]
     if fisher_type == FISHER_EXACT:
         if loss_type == LOSS_CROSS_ENTROPY:
