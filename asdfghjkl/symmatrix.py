@@ -99,19 +99,24 @@ class SymMatrix:
         self.inv = None
 
     def __repr__(self):
-        text = 'SymMatrix('
+        text = ''
         if self.has_data:
-            text += f'data {tuple(self.data.shape)}'
+            text += f'data {tuple(self.data.shape)}, '
         if self.has_kron:
-            text += f'kron.A {tuple(self.kron.A.shape)}, kron.B {tuple(self.kron.B.shape)}'
-        if self.has_unit:
+            if self.kron.has_A:
+                text += f'kron.A {tuple(self.kron.A.shape)}, '
+            if self.kron.has_B:
+                text += f'kron.B {tuple(self.kron.B.shape)}, '
+        if self.has_unit and self.unit.has_data:
             text += f'unit {tuple(self.unit.data.shape)}'
         if self.has_diag:
-            if self.diag.weight is not None:
-                text += f'diag.weight {tuple(self.diag.weight.shape)}'
-            if self.diag.bias is not None:
-                text += f'diag.bias {tuple(self.diag.bias.shape)}'
-        text += ')'
+            if self.diag.has_weight:
+                text += f'diag.weight {tuple(self.diag.weight.shape)}, '
+            if self.diag.has_bias:
+                text += f'diag.bias {tuple(self.diag.bias.shape)}, '
+        if len(text) > 0:
+            text = text[:-2]
+        text = 'SymMatrix(' + text + ')'
         return text
 
     @property
