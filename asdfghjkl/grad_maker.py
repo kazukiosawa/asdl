@@ -101,6 +101,14 @@ class GradientMaker:
             f'dummy_loss has to be an {DummyObject}, not {type(dummy_logits)}.'
         self._dummy_logits = dummy_logits
 
+    @property
+    def model_output(self):
+        return self._model_output
+
+    @property
+    def loss(self):
+        return self._loss
+
     def forward_and_backward(self) -> Union[Tuple[Any, Tensor], Any]:
         # Performs a simple gradient calculation.
         # A child class should override this function.
