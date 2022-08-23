@@ -1,16 +1,17 @@
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import BatchSampler, Subset, DataLoader
+from torch.cuda import nvtx
 
 _REQUIRES_GRAD_ATTR = '_original_requires_grad'
 
 __all__ = [
     'original_requires_grad', 'record_original_requires_grad',
     'restore_original_requires_grad', 'skip_param_grad', 'im2col_2d',
-    'im2col_2d_slow', 'cholesky_inv', 'PseudoBatchLoaderGenerator'
+    'im2col_2d_slow', 'cholesky_inv', 'PseudoBatchLoaderGenerator', 'nvtx_range'
 ]
 
 
@@ -153,3 +154,11 @@ class PseudoBatchLoaderGenerator:
 
     def __len__(self) -> int:
         return len(self.pseudo_batch_sampler)
+
+
+@contextmanager
+def nvtx_range(msg, *args, **kwargs):
+    if torch.cuda.is_available():
+        yield nvtx.range(msg, *args, **kwargs)
+    else:
+        yield nullcontext()

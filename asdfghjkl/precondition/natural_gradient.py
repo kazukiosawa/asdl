@@ -4,10 +4,10 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 from torch import nn
-from torch.cuda import nvtx
 import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 
+from ..utils import nvtx_range
 from ..core import module_wise_assignments, modules_to_assign, no_centered_cov
 from ..operations import OperationContext
 from ..matrices import *
@@ -194,7 +194,7 @@ class NaturalGradientMaker(GradientMaker):
         else:
             return '' + self.config.nvtx_tag
 
-    @nvtx.range('update_curvature')
+    @nvtx_range('update_curvature')
     def update_curvature(self,
                          scale=1.,
                          accumulate=False,
@@ -241,7 +241,7 @@ class NaturalGradientMaker(GradientMaker):
     def save_curvature(self, cxt, scale=1., module=None, module_name=None):
         self.fisher_maker.accumulate(cxt, scale, target_module=module, target_module_name=module_name)
 
-    @nvtx.range('update_inv')
+    @nvtx_range('update_inv')
     def update_inv(self, damping=None, module_name=None, kron=None, zero_curvature=False, partition_aware=False):
         if kron is None:
             kron = ['A', 'B']
@@ -268,25 +268,23 @@ class NaturalGradientMaker(GradientMaker):
                 if shape == SHAPE_KRON:
                     for A_or_B in kron:
                         event += f'_{A_or_B}'
-                nvtx.range_push(event + self.nvtx_tag(name))
 
-                if self.is_module_for_inv_and_precondition(module):
-                    if shape == SHAPE_KRON:
-                        matrix.update_inv(damping, calc_A_inv='A' in kron, calc_B_inv='B' in kron)
-                    else:
-                        matrix.update_inv(damping)
-
-                if zero_curvature:
-                    with torch.no_grad():
+                with nvtx_range(event + self.nvtx_tag(name)):
+                    if self.is_module_for_inv_and_precondition(module):
                         if shape == SHAPE_KRON:
-                            if 'A' in kron:
-                                matrix.A.mul_(0)
-                            if 'B' in kron:
-                                matrix.B.mul_(0)
+                            matrix.update_inv(damping, calc_A_inv='A' in kron, calc_B_inv='B' in kron)
                         else:
-                            matrix.mul_(0)
+                            matrix.update_inv(damping)
 
-                nvtx.range_pop()
+                    if zero_curvature:
+                        with torch.no_grad():
+                            if shape == SHAPE_KRON:
+                                if 'A' in kron:
+                                    matrix.A.mul_(0)
+                                if 'B' in kron:
+                                    matrix.B.mul_(0)
+                            else:
+                                matrix.mul_(0)
 
                 if module_name is not None:
                     break
@@ -298,7 +296,7 @@ class NaturalGradientMaker(GradientMaker):
                 with torch.no_grad():
                     fisher.mul_(0)
 
-    @nvtx.range('precondition')
+    @nvtx_range('precondition')
     def precondition(self, vectors: ParamVector = None, grad_scale=None):
         if grad_scale is None:
             grad_scale = self.config.grad_scale
@@ -358,7 +356,7 @@ class NaturalGradientMaker(GradientMaker):
             rank = dist.get_rank(self.sync_group)
             return module in module_partitions[rank]
 
-    @nvtx.range('sync_curvature')
+    @nvtx_range('sync_curvature')
     def sync_curvature(self, module_name=None, kron=None, diag=None, with_grad=False, enabled=True, async_op=False):
         if not enabled:
             return
@@ -389,7 +387,7 @@ class NaturalGradientMaker(GradientMaker):
             self.all_gather_grad(async_op=async_op)
         self.all_reduce_no_curvature_grad(async_op=async_op)
 
-    @nvtx.range('reduce_scatter_curvature')
+    @nvtx_range('reduce_scatter_curvature')
     def reduce_scatter_curvature(self, kron=None, diag=None, with_grad=False):
         module_partitions = self.config.module_partitions
         assert module_partitions is not None, 'module_partitions is not specified.'
@@ -404,7 +402,7 @@ class NaturalGradientMaker(GradientMaker):
                                                                    async_op=True)
         return handles
 
-    @nvtx.range('reduce_curvature')
+    @nvtx_range('reduce_curvature')
     def reduce_curvature(self, module_name, kron=None, diag=None, with_grad=False):
         module_partitions = self.config.module_partitions
         assert module_partitions is not None, 'module_partitions is not specified.'
@@ -429,7 +427,7 @@ class NaturalGradientMaker(GradientMaker):
                                                        async_op=True)
         return handles
 
-    @nvtx.range('all_reduce_undivided_curvature')
+    @nvtx_range('all_reduce_undivided_curvature')
     def all_reduce_undivided_curvature(self, module_name=None, kron=None, diag=None, with_grad=False):
         modules = []
         for name, module in self.named_modules_for_curvature:
@@ -469,11 +467,11 @@ class NaturalGradientMaker(GradientMaker):
             assert all(w_or_b in ['weight', 'bias'] for w_or_b in diag)
             return [['diag', w_or_b] for w_or_b in diag]
 
-    @nvtx.range('reduce_scatter_grad')
+    @nvtx_range('reduce_scatter_grad')
     def reduce_scatter_grad(self, async_op=False):
         self._scatter_or_gather_grad('scatter', async_op=async_op)
 
-    @nvtx.range('all_gather_grad')
+    @nvtx_range('all_gather_grad')
     def all_gather_grad(self, async_op=False):
         self._scatter_or_gather_grad('gather', async_op=async_op)
 
@@ -512,13 +510,13 @@ class NaturalGradientMaker(GradientMaker):
                     for j in range(world_size):
                         vector_to_parameters(tensor_list[j], grads_list[j])
 
-    @nvtx.range('all_reduce_undivided_grad')
+    @nvtx_range('all_reduce_undivided_grad')
     def all_reduce_undivided_grad(self, async_op=False):
         assert dist.is_initialized()
         module_list = nn.ModuleList([m for m in self.modules_for_curvature if m not in self.partitioned_modules])
         self._all_reduce_grad(module_list, async_op=async_op)
 
-    @nvtx.range('all_reduce_no_curvature_grad')
+    @nvtx_range('all_reduce_no_curvature_grad')
     def all_reduce_no_curvature_grad(self, async_op=False):
         module_list = nn.ModuleList([m for m in self.model.modules()
                                      if len(list(m.children())) == 0 and m not in self.modules_for_curvature])
