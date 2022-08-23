@@ -1,10 +1,10 @@
-from typing import Callable, List
-from contextlib import nullcontext
+from typing import Callable, List, Tuple, Union, Any
 from dataclasses import dataclass
 
 import torch
+from torch import Tensor
 from torch import nn
-from torch.cuda import Stream, nvtx
+from torch.cuda import nvtx
 import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 
@@ -13,8 +13,8 @@ from ..operations import OperationContext
 from ..matrices import *
 from ..symmatrix import SymMatrix
 from ..vector import ParamVector
-from ..fisher import LOSS_CROSS_ENTROPY, get_fisher_class
-from . import GradientMaker
+from ..fisher import LOSS_CROSS_ENTROPY, get_fisher_maker, FisherMakerConfig
+from ..grad_maker import GradientMaker
 
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 _invalid_ema_decay = -1
@@ -28,32 +28,36 @@ __all__ = [
 
 @dataclass
 class NaturalGradientMakerConfig:
-    fisher_type: str = FISHER_EXACT,
-    fisher_shape: str = SHAPE_FULL,
-    loss_type: str = LOSS_CROSS_ENTROPY,
-    damping: float = 1e-5,
-    ema_decay: float = _invalid_ema_decay,
-    grad_scale: float = 1.,
-    upd_curvature_interval: int = 1,
-    upd_inv_interval: int = 1,
-    ignore_modules: List[any] = None,
-    sync_group: dist.ProcessGroup = None,
-    sync_group_ranks: List[int] = None,
-    module_partitions: List[List[nn.Module]] = None,
-    record_mode: bool = False,
-    nvtx_tag: str = '',
+    fisher_type: str = FISHER_EXACT
+    fisher_shape: str = SHAPE_FULL
+    loss_type: str = LOSS_CROSS_ENTROPY
+    damping: float = 1e-5
+    ema_decay: float = _invalid_ema_decay
+    grad_scale: float = 1.
+    upd_curvature_interval: int = 1
+    upd_inv_interval: int = 1
+    ignore_modules: List[any] = None
+    sync_group: dist.ProcessGroup = None
+    sync_group_ranks: List[int] = None
+    module_partitions: List[List[nn.Module]] = None
+    record_mode: bool = False
+    nvtx_tag: str = ''
+    n_mc_samples: int = 1
+    var: float = 1
+    seed: int = None
 
 
-class NaturalGradientMaker:
+class NaturalGradientMaker(GradientMaker):
     def __init__(self, model, config):
         from torch.nn.parallel import DistributedDataParallel as DDP
         assert not isinstance(model, DDP), f'{DDP} is not supported.'
         del DDP
-        self.model = model
+        super().__init__(model)
         assert isinstance(config, NaturalGradientMakerConfig)
         if isinstance(config.fisher_shape, str):
             config.fisher_shape = [config.fisher_shape]
         self.config = config
+
         self.named_modules_for_curvature = []
         self.modules_for_curvature = []
         self.shape_for = {}
@@ -83,8 +87,16 @@ class NaturalGradientMaker:
             self.partitioned_modules = []
             self.num_modules_per_partition = None
 
-        fisher_cls = get_fisher_class(config.fisher_type, config.loss_type)
-        self.fisher_manager = fisher_cls(model)
+        fisher_config = FisherMakerConfig(
+            fisher_type=config.fisher_type,
+            fisher_shapes=config.fisher_shape,
+            loss_type=config.loss_type,
+            n_mc_samples=config.n_mc_samples,
+            var=config.var,
+            seed=config.seed,
+            data_average=True,
+        )
+        self.fisher_maker = get_fisher_maker(model, fisher_config)
 
         if sync_group is not None:
             assert config.sync_group_ranks is not None
@@ -94,6 +106,23 @@ class NaturalGradientMaker:
         self.grad_sync_handles = []
         self.grads = []
         self.packed_grads = []
+
+        self._step = 0
+
+    def forward_and_backward(self, scale=1., accumulate=False) -> Union[Tuple[Any, Tensor], Any]:
+        if self._step % self.config.upd_curvature_interval == 0:
+            self.update_curvature(scale=scale, accumulate=accumulate)
+        else:
+            self._forward()
+            self._loss.backward()
+        if self._step % self.config.upd_inv_interval == 0:
+            self.update_inv()
+        self.precondition()
+        self._step += 1
+        if self._loss_fn is None:
+            return self._model_output
+        else:
+            return self._model_output, self._loss
 
     def named_modules_for(self, shape):
         if shape not in self._named_modules_for:
@@ -168,70 +197,50 @@ class NaturalGradientMaker:
 
     @nvtx.range('update_curvature')
     def update_curvature(self,
-                         inputs=None,
-                         targets=None,
-                         data_loader=None,
+                         scale=1.,
+                         accumulate=False,
+                         calc_emp_loss_grad=True,
                          cxt: OperationContext = None,
                          closure: Callable = None,
-                         accumulate=False,
-                         ema_decay=None,
-                         data_average=True,
-                         calc_emp_loss_grad=False,
-                         seed=None,
-                         scale=1,
-                         stream: Stream = None,
                          module_name=None,
                          num_batches=None,
                          kron=None,
                          no_save=False):
-        if ema_decay is None:
-            ema_decay = self.config.ema_decay
+        config = self.config
+        ema_decay = config.ema_decay
         if ema_decay != _invalid_ema_decay:
             accumulate = True
             scale *= ema_decay
             self._scale_fisher(1 - ema_decay)
 
         if cxt is not None or closure is not None:
-            assert self.config.fisher_type == FISHER_EMP, f'fisher_type needs to be {FISHER_EMP} ' \
+            assert config.fisher_type == FISHER_EMP, f'fisher_type needs to be {FISHER_EMP} ' \
                                                    f'for computation based on {OperationContext} or a closure.'
             if not accumulate:
-                self.fisher_manager.zero_fisher()
+                self.fisher_maker.zero_fisher()
             if cxt is None:
-                with no_centered_cov(self.model, self.config.fisher_shape, ignore_modules=self.config.ignore_modules, stream=stream) as cxt:
+                with no_centered_cov(self.model, config.fisher_shape, ignore_modules=config.ignore_modules) as cxt:
                     closure()
                     if not no_save:
                         self.save_curvature(cxt, scale)
             else:
-                stream_cxt = torch.cuda.stream(stream) if stream is not None else nullcontext()
-                with stream_cxt:
-                    for shape in _module_level_shapes:
-                        for name, module in self.named_modules_for(shape):
-                            if module_name is not None and name != module_name:
-                                continue
-                            cxt.calc_cov(module,
-                                         shape,
-                                         clear_in_out=True,
-                                         kron=kron,
-                                         tag=self.nvtx_tag(name),
-                                         num_batches=num_batches)
-                            if not no_save:
-                                self.save_curvature(cxt, scale, module=module)
+                for shape in _module_level_shapes:
+                    for name, module in self.named_modules_for(shape):
+                        if module_name is not None and name != module_name:
+                            continue
+                        cxt.calc_cov(module,
+                                     shape,
+                                     clear_in_out=True,
+                                     kron=kron,
+                                     tag=self.nvtx_tag(name),
+                                     num_batches=num_batches)
+                        if not no_save:
+                            self.save_curvature(cxt, scale, module=module)
         else:
-            rst = self.fisher_manager.calculate_fisher(self.config.fisher_shape,
-                                                       inputs=inputs,
-                                                       targets=targets,
-                                                       data_loader=data_loader,
-                                                       accumulate=accumulate,
-                                                       data_average=data_average,
-                                                       calc_emp_loss_grad=calc_emp_loss_grad,
-                                                       ignore_modules=self.config.ignore_modules,
-                                                       seed=seed,
-                                                       scale=scale,
-                                                       stream=stream)
-            return rst[0], rst[1]  # loss and outputs
+            self.fisher_maker.forward_and_backward(scale=scale, accumulate=accumulate, calc_emp_loss_grad=calc_emp_loss_grad)
 
     def save_curvature(self, cxt, scale=1., module=None, module_name=None):
-        self.fisher_manager.accumulate(cxt, scale, target_module=module, target_module_name=module_name)
+        self.fisher_maker.accumulate(cxt, scale, target_module=module, target_module_name=module_name)
 
     @nvtx.range('update_inv')
     def update_inv(self, damping=None, module_name=None, kron=None, zero_curvature=False, partition_aware=False):
@@ -391,11 +400,11 @@ class NaturalGradientMaker:
         for shape in _module_level_shapes:
             keys_list = self._keys_list_from_shape(shape, kron=kron, diag=diag)
             for keys in keys_list:
-                handles += self.fisher_manager.reduce_scatter_fisher(module_partitions,
-                                                                     *keys,
-                                                                     with_grad=with_grad,
-                                                                     group=self.sync_group,
-                                                                     async_op=True)
+                handles += self.fisher_maker.reduce_scatter_fisher(module_partitions,
+                                                                   *keys,
+                                                                   with_grad=with_grad,
+                                                                   group=self.sync_group,
+                                                                   async_op=True)
         return handles
 
     @nvtx.range('reduce_curvature')
@@ -414,13 +423,13 @@ class NaturalGradientMaker:
         keys_list = self._keys_list_from_shape(self.shape_for[module], kron=kron, diag=diag)
         handles = []
         for keys in keys_list:
-            handles += self.fisher_manager.reduce_fisher([module],
-                                                         *keys,
-                                                         all_reduce=False,
-                                                         dst=dst,
-                                                         with_grad=with_grad,
-                                                         group=self.config.sync_group,
-                                                         async_op=True)
+            handles += self.fisher_maker.reduce_fisher([module],
+                                                       *keys,
+                                                       all_reduce=False,
+                                                       dst=dst,
+                                                       with_grad=with_grad,
+                                                       group=self.config.sync_group,
+                                                       async_op=True)
         return handles
 
     @nvtx.range('all_reduce_undivided_curvature')
@@ -436,12 +445,12 @@ class NaturalGradientMaker:
         for shape in _module_level_shapes:
             keys_list = self._keys_list_from_shape(shape, kron=kron, diag=diag)
             for keys in keys_list:
-                handles += self.fisher_manager.reduce_fisher(modules,
-                                                             *keys,
-                                                             all_reduce=True,
-                                                             with_grad=with_grad,
-                                                             group=self.config.sync_group,
-                                                             async_op=True)
+                handles += self.fisher_maker.reduce_fisher(modules,
+                                                           *keys,
+                                                           all_reduce=True,
+                                                           with_grad=with_grad,
+                                                           group=self.config.sync_group,
+                                                           async_op=True)
         return handles
 
     @staticmethod

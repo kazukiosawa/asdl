@@ -44,20 +44,17 @@ class FisherMakerConfig:
     fisher_type: str
     fisher_shapes: List[Any]
     loss_type: str
+    n_mc_samples: int = 1
+    var: float = 1.
+    seed: int = None
+    data_average: bool = True
     fisher_attr: str = 'fisher'
     fvp_attr: str = 'fvp'
     fvp: bool = False,
-    data_average: bool = True
-    accumulate: bool = False
-    calc_emp_loss_grad: bool = False
     ignore_modules: List[Any] = None
-    seed: int = None
-    scale: float = 1.
-    n_mc_samples: int = 1
-    var: float = 1.
-    is_distributed: bool = False,
-    all_reduce: bool = False,
-    is_master: bool = True,
+    is_distributed: bool = False
+    all_reduce: bool = False
+    is_master: bool = True
 
 
 class FisherMaker(GradientMaker):
@@ -71,17 +68,19 @@ class FisherMaker(GradientMaker):
             if hasattr(module, attr):
                 delattr(module, attr)
 
-    def forward_and_backward(self, vec: ParamVector = None) -> Union[Tuple[Any, Tensor], Any]:
+    def forward_and_backward(self,
+                             scale=1.,
+                             accumulate=False,
+                             calc_emp_loss_grad=True,
+                             vec: ParamVector = None) -> Union[Tuple[Any, Tensor], Any]:
         model = self.model
         is_fisher_emp = self.config.fisher_type == FISHER_EMP
         fisher_shapes = self.config.fisher_shapes
         ignore_modules = self.config.ignore_modules
         fvp = self.config.fvp
-        calc_emp_loss_grad = self.config.calc_emp_loss_grad
         seed = self.config.seed
-        scale = self.config.scale
 
-        if not self.config.accumulate:
+        if not accumulate:
             # set Fisher/FVP zero
             self.zero_fisher(fvp=fvp)
 
