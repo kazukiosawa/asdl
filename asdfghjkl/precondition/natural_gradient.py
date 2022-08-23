@@ -29,7 +29,7 @@ __all__ = [
 @dataclass
 class NaturalGradientMakerConfig:
     fisher_type: str = FISHER_EXACT
-    fisher_shape: str = SHAPE_FULL
+    fisher_shape: Union[str, List[Any]] = SHAPE_FULL
     loss_type: str = LOSS_CROSS_ENTROPY
     damping: float = 1e-5
     ema_decay: float = _invalid_ema_decay
