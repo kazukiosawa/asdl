@@ -42,7 +42,6 @@ def cholesky_solve(A, b, eps=1e-8):
 class SmwEmpNaturalGradientMakerConfig:
     data_size: int
     damping: float = 1.e-5
-    data_average: bool = True
 
 
 class SmwEmpNaturalGradientMaker(GradientMaker):
@@ -51,10 +50,9 @@ class SmwEmpNaturalGradientMaker(GradientMaker):
         assert isinstance(config, SmwEmpNaturalGradientMakerConfig)
         self.config = config
 
-    def forward_and_backward(self) -> Tuple[Tensor, Tensor]:
+    def forward_and_backward(self, data_size, data_average=True) -> Tuple[Tensor, Tensor]:
         model = self.model
-        n = self.config.data_size
-        data_average = self.config.data_average
+        n = data_size
         damping = self.config.damping
 
         with extend(model, OP_GRAM_HADAMARD):
