@@ -30,6 +30,7 @@ __all__ = [
     'LOSS_CROSS_ENTROPY',
     'LOSS_MSE',
     'FisherMaker',
+    'FisherMakerConfig',
     'get_fisher_maker',
 ]
 
