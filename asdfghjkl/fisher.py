@@ -76,6 +76,8 @@ class FisherMaker(GradientMaker):
         model = self.model
         is_fisher_emp = self.config.fisher_type == FISHER_EMP
         fisher_shapes = self.config.fisher_shapes
+        if isinstance(fisher_shapes, str):
+            fisher_shapes = [fisher_shapes]
         ignore_modules = self.config.ignore_modules
         fvp = self.config.fvp
         seed = self.config.seed
