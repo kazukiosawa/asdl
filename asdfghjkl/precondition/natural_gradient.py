@@ -94,7 +94,6 @@ class NaturalGradientMaker(GradientMaker):
             n_mc_samples=config.n_mc_samples,
             var=config.var,
             seed=config.seed,
-            data_average=True,
         )
         self.fisher_maker = get_fisher_maker(model, fisher_config)
 
