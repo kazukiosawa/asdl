@@ -22,11 +22,6 @@ LOSS_CROSS_ENTROPY = 'cross_entropy'
 LOSS_MSE = 'mse'
 
 __all__ = [
-    'calculate_fisher',
-    'fisher_eig',
-    'fisher_esd',
-    'fisher_free',
-    'fisher_quadratic_form',
     'LOSS_CROSS_ENTROPY',
     'LOSS_MSE',
     'FisherMakerConfig',
@@ -265,6 +260,117 @@ class FisherMaker(GradientMaker):
                         rst.extend(v.copy())
             return rst
 
+    def _get_fvp_fn(self):
+        def fvp_fn(vec: ParamVector) -> ParamVector:
+            self.forward_and_backward(vec=vec)
+            return self.load_fvp(self.config.fisher_shapes[0])
+        return fvp_fn
+
+    def fisher_eig(self,
+                   top_n=1,
+                   max_iters=100,
+                   tol=1e-3,
+                   is_distributed=False,
+                   print_progress=False
+                   ):
+        # for making MC samplings at each iteration deterministic
+        random_seed = torch.rand(1) * 100 if self.config.fisher_type == FISHER_MC else None
+
+        eigvals, eigvecs = power_method(self._get_fvp_fn(),
+                                        self.model,
+                                        top_n=top_n,
+                                        max_iters=max_iters,
+                                        tol=tol,
+                                        is_distributed=is_distributed,
+                                        print_progress=print_progress,
+                                        random_seed=random_seed
+                                        )
+
+        return eigvals, eigvecs
+
+    def fisher_esd(self,
+                   n_v=1,
+                   num_iter=100,
+                   num_bins=10000,
+                   sigma_squared=1e-5,
+                   overhead=None,
+                   is_distributed=False
+                   ):
+        # for making MC samplings at each iteration deterministic
+        random_seed = torch.rand(1) * 100 if self.config.fisher_type == FISHER_MC else None
+
+        eigvals, weights = stochastic_lanczos_quadrature(self._get_fvp_fn(),
+                                                         self.model,
+                                                         n_v=n_v,
+                                                         num_iter=num_iter,
+                                                         is_distributed=is_distributed,
+                                                         random_seed=random_seed
+                                                         )
+
+        # referenced from https://github.com/amirgholami/PyHessian/blob/master/density_plot.py
+
+        eigvals = np.array(eigvals)
+        weights = np.array(weights)
+
+        lambda_max = np.mean(np.max(eigvals, axis=1), axis=0)
+        lambda_min = np.mean(np.min(eigvals, axis=1), axis=0)
+
+        sigma_squared = sigma_squared * max(1, (lambda_max - lambda_min))
+        if overhead is None:
+            overhead = np.sqrt(sigma_squared)
+
+        range_max = lambda_max + overhead
+        range_min = np.maximum(0., lambda_min - overhead)
+
+        grids = np.linspace(range_min, range_max, num=num_bins)
+
+        density_output = np.zeros((n_v, num_bins))
+
+        for i in range(n_v):
+            for j in range(num_bins):
+                x = grids[j]
+                tmp_result = np.exp(-(x - eigvals[i, :])**2 / (2.0 * sigma_squared)) / np.sqrt(2 * np.pi * sigma_squared)
+                density_output[i, j] = np.sum(tmp_result * weights[i, :])
+        density = np.mean(density_output, axis=0)
+        normalization = np.sum(density) * (grids[1] - grids[0])
+        density = density / normalization
+        return density, grids
+
+    def fisher_free(self,
+                    b=None,
+                    init_x=None,
+                    damping=1e-3,
+                    max_iters=None,
+                    tol=1e-8,
+                    preconditioner=None,
+                    print_progress=False,
+                    random_seed=None
+                    ) -> ParamVector:
+        if b is None:
+            grads = {p: p.grad for p in self.model.parameters() if p.requires_grad}
+            b = ParamVector(grads.keys(), grads.values())
+
+        # for making MC samplings at each iteration deterministic
+        if self.config.fisher_type == FISHER_MC and random_seed is None:
+            random_seed = int(torch.rand(1) * 100)
+
+        return conjugate_gradient_method(self._get_fvp_fn(),
+                                         b,
+                                         init_x=init_x,
+                                         damping=damping,
+                                         max_iters=max_iters,
+                                         tol=tol,
+                                         preconditioner=preconditioner,
+                                         print_progress=print_progress,
+                                         random_seed=random_seed)
+
+    def fisher_quadratic_form(self, vec: ParamVector = None):
+        if vec is None:
+            grads = {p: p.grad for p in self.model.parameters() if p.requires_grad}
+            vec = ParamVector(grads.keys(), grads.values())
+
+        return quadratic_form(self._get_fvp_fn(), vec)
+
 
 class FisherExactCrossEntropy(FisherMaker):
     def _fisher_loop(self, closure):
@@ -346,139 +452,3 @@ def get_fisher_maker(model: nn.Module, config: FisherMakerConfig):
             return FisherMCMSE(model, config)
 
 
-def calculate_fisher(model: nn.Module, config: FisherMakerConfig, vec: ParamVector = None, return_rst=False):
-    fisher_maker = get_fisher_maker(model, config)
-    rst = fisher_maker.forward_and_backward(vec)
-    if return_rst:
-        return fisher_maker, rst
-    else:
-        return fisher_maker
-
-
-def _get_fvp_fn(model: nn.Module, config: FisherMakerConfig):
-
-    def fvp_fn(vec: ParamVector) -> ParamVector:
-        f = calculate_fisher(model, config, vec)
-        return f.load_fvp(config.fisher_shapes[0])
-
-    return fvp_fn
-
-
-def fisher_eig(
-        model: nn.Module,
-        config: FisherMakerConfig,
-        top_n=1,
-        max_iters=100,
-        tol=1e-3,
-        is_distributed=False,
-        print_progress=False,
-):
-    # for making MC samplings at each iteration deterministic
-    random_seed = torch.rand(1) * 100 if config.fisher_type == FISHER_MC else None
-
-    eigvals, eigvecs = power_method(_get_fvp_fn(model, config),
-                                    model,
-                                    top_n=top_n,
-                                    max_iters=max_iters,
-                                    tol=tol,
-                                    is_distributed=is_distributed,
-                                    print_progress=print_progress,
-                                    random_seed=random_seed
-                                    )
-
-    return eigvals, eigvecs
-
-
-def fisher_esd(
-        model,
-        config: FisherMakerConfig,
-        n_v=1,
-        num_iter=100,
-        num_bins=10000,
-        sigma_squared=1e-5,
-        overhead=None,
-        is_distributed=False,
-):
-    # for making MC samplings at each iteration deterministic
-    random_seed = torch.rand(1) * 100 if config.fisher_type == FISHER_MC else None
-
-    eigvals, weights = stochastic_lanczos_quadrature(_get_fvp_fn(model, config),
-                                                     model,
-                                                     n_v=n_v,
-                                                     num_iter=num_iter,
-                                                     is_distributed=is_distributed,
-                                                     random_seed=random_seed
-                                                     )
-
-    # referenced from https://github.com/amirgholami/PyHessian/blob/master/density_plot.py
-
-    eigvals = np.array(eigvals)
-    weights = np.array(weights)
-
-    lambda_max = np.mean(np.max(eigvals, axis=1), axis=0)
-    lambda_min = np.mean(np.min(eigvals, axis=1), axis=0)
-    
-    sigma_squared = sigma_squared * max(1, (lambda_max - lambda_min))
-    if overhead is None:
-        overhead = np.sqrt(sigma_squared)
-    
-    range_max = lambda_max + overhead
-    range_min = np.maximum(0., lambda_min - overhead)
-
-    grids = np.linspace(range_min, range_max, num=num_bins)
-
-    density_output = np.zeros((n_v, num_bins))
-
-    for i in range(n_v):
-        for j in range(num_bins):
-            x = grids[j]
-            tmp_result = np.exp(-(x - eigvals[i, :])**2 / (2.0 * sigma_squared)) / np.sqrt(2 * np.pi * sigma_squared)
-            density_output[i, j] = np.sum(tmp_result * weights[i, :])
-    density = np.mean(density_output, axis=0)
-    normalization = np.sum(density) * (grids[1] - grids[0])
-    density = density / normalization
-    return density, grids
-
-
-def fisher_free(
-        model: nn.Module,
-        config: FisherMakerConfig,
-        b=None,
-        init_x=None,
-        damping=1e-3,
-        max_iters=None,
-        tol=1e-8,
-        preconditioner=None,
-        print_progress=False,
-        random_seed=None,
-) -> ParamVector:
-    if b is None:
-        grads = {p: p.grad for p in model.parameters() if p.requires_grad}
-        b = ParamVector(grads.keys(), grads.values())
-
-    # for making MC samplings at each iteration deterministic
-    if config.fisher_type == FISHER_MC and random_seed is None:
-        random_seed = int(torch.rand(1) * 100)
-
-    return conjugate_gradient_method(_get_fvp_fn(model, config),
-                                     b,
-                                     init_x=init_x,
-                                     damping=damping,
-                                     max_iters=max_iters,
-                                     tol=tol,
-                                     preconditioner=preconditioner,
-                                     print_progress=print_progress,
-                                     random_seed=random_seed)
-
-
-def fisher_quadratic_form(
-        model: nn.Module,
-        config: FisherMakerConfig,
-        v=None,
-        **kwargs
-):
-    if v is None:
-        grads = {p: p.grad for p in model.parameters() if p.requires_grad}
-        v = ParamVector(grads.keys(), grads.values())
-
-    return quadratic_form(_get_fvp_fn(model, config), v, **kwargs)
