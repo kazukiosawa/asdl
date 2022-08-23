@@ -206,6 +206,8 @@ class NaturalGradientMaker(GradientMaker):
                          kron=None,
                          no_save=False):
         config = self.config
+        fisher_maker = self.fisher_maker
+
         ema_decay = config.ema_decay
         if ema_decay != _invalid_ema_decay:
             accumulate = True
@@ -216,7 +218,7 @@ class NaturalGradientMaker(GradientMaker):
             assert config.fisher_type == FISHER_EMP, f'fisher_type needs to be {FISHER_EMP} ' \
                                                    f'for computation based on {OperationContext} or a closure.'
             if not accumulate:
-                self.fisher_maker.zero_fisher()
+                fisher_maker.zero_fisher()
             if cxt is None:
                 with no_centered_cov(self.model, config.fisher_shape, ignore_modules=config.ignore_modules) as cxt:
                     closure()
@@ -236,7 +238,12 @@ class NaturalGradientMaker(GradientMaker):
                         if not no_save:
                             self.save_curvature(cxt, scale, module=module)
         else:
-            self.fisher_maker.forward_and_backward(scale=scale, accumulate=accumulate, calc_emp_loss_grad=calc_emp_loss_grad)
+            fisher_maker.setup_model_call(self._model_fn, *self._model_args, **self._model_kwargs)
+            if self._loss_fn is None:
+                fisher_maker.setup_loss_repr(self._dummy_loss)
+            else:
+                fisher_maker.setup_loss_call(self._loss_fn, *self._loss_fn_args, **self._loss_fn_kwargs)
+            fisher_maker.forward_and_backward(scale=scale, accumulate=accumulate, calc_emp_loss_grad=calc_emp_loss_grad)
 
     def save_curvature(self, cxt, scale=1., module=None, module_name=None):
         self.fisher_maker.accumulate(cxt, scale, target_module=module, target_module_name=module_name)
