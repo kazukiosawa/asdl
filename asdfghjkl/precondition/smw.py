@@ -50,7 +50,12 @@ class SmwEmpNaturalGradientMaker(GradientMaker):
         assert isinstance(config, SmwEmpNaturalGradientMakerConfig)
         self.config = config
 
-    def forward_and_backward(self, data_size=_required, data_average=True) -> Tuple[Tensor, Tensor]:
+    def forward_and_backward(self, data_size=_required) -> Tuple[Tensor, Tensor]:
+        assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
+        if isinstance(self._loss_fn, nn.Module):
+            data_average = self._loss_fn.reduction == 'mean'
+        else:
+            data_average = self._loss_fn_kwargs.get('reduction', None) == 'mean'
         model = self.model
         if data_size == _required:
             raise ValueError('data_size has to be specified.')
