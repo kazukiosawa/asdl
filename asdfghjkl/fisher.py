@@ -43,7 +43,7 @@ _supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_LAYER_WISE]
 class FisherMakerConfig:
     fisher_type: str
     fisher_shapes: List[Any]
-    loss_type: str
+    loss_type: str = None
     n_mc_samples: int = 1
     var: float = 1.
     seed: int = None
@@ -321,10 +321,10 @@ def get_fisher_maker(model: nn.Module, config: FisherMakerConfig):
     fisher_type = config.fisher_type
     loss_type = config.loss_type
     assert fisher_type in _supported_types
-    assert loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]
     if fisher_type == FISHER_EMP:
         return FisherMaker(model, config)
-    elif fisher_type == FISHER_EXACT:
+    assert loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]
+    if fisher_type == FISHER_EXACT:
         if loss_type == LOSS_CROSS_ENTROPY:
             return FisherExactCrossEntropy(model, config)
         else:
