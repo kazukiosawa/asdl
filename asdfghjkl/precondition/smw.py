@@ -12,6 +12,8 @@ from ..grad_maker import GradientMaker
 
 torch_function_class = F.cross_entropy.__class__
 
+__all__ = ['SmwEmpNaturalGradientMakerConfig', 'SmwEmpNaturalGradientMaker']
+
 
 def has_reduction(func):
     if isinstance(func, nn.Module):
