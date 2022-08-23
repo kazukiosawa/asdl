@@ -1,4 +1,3 @@
-from functools import partial
 from typing import List, Union, Any, Tuple
 from dataclasses import dataclass
 import numpy as np
@@ -11,7 +10,7 @@ import torch.distributed as dist
 
 from .core import no_centered_cov
 from .utils import skip_param_grad
-from .grad_maker import GradientMaker, DummyObject
+from .grad_maker import GradientMaker
 from .matrices import *
 from .vector import ParamVector, reduce_vectors
 from .mvp import power_method, stochastic_lanczos_quadrature, conjugate_gradient_method, quadratic_form
@@ -24,26 +23,14 @@ LOSS_MSE = 'mse'
 
 __all__ = [
     'calculate_fisher',
-    'fisher_for_cross_entropy',
-    'fisher_for_mse',
-    'fvp_for_cross_entropy',
-    'fvp_for_mse',
     'fisher_eig',
-    'fisher_eig_for_cross_entropy',
-    'fisher_eig_for_mse',
     'fisher_esd',
-    'fisher_esd_for_cross_entropy',
-    'fisher_esd_for_mse',
     'fisher_free',
-    'fisher_free_for_cross_entropy',
-    'fisher_free_for_mse',
     'fisher_quadratic_form',
-    'fisher_quadratic_form_for_cross_entropy',
-    'fisher_quadratic_form_for_mse',
     'LOSS_CROSS_ENTROPY',
     'LOSS_MSE',
     'FisherMaker',
-    'get_fisher_class',
+    'get_fisher_maker',
 ]
 
 _supported_types = [FISHER_EXACT, FISHER_MC, FISHER_EMP]
@@ -55,6 +42,7 @@ _supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_LAYER_WISE]
 class FisherMakerConfig:
     fisher_type: str
     fisher_shapes: List[Any]
+    loss_type: str
     fisher_attr: str = 'fisher'
     fvp_attr: str = 'fvp'
     fvp: bool = False,
@@ -66,6 +54,9 @@ class FisherMakerConfig:
     scale: float = 1.
     n_mc_samples: int = 1
     var: float = 1.
+    is_distributed: bool = False,
+    all_reduce: bool = False,
+    is_master: bool = True,
 
 
 class FisherMaker(GradientMaker):
@@ -326,114 +317,56 @@ class FisherMCMSE(FisherMaker):
                     retain_graph=i < n_mc_samples - 1)
 
 
-def get_fisher_class(fisher_type, loss_type):
+def get_fisher_maker(model: nn.Module, config: FisherMakerConfig):
+    fisher_type = config.fisher_type
+    loss_type = config.loss_type
     assert fisher_type in _supported_types
     assert loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]
     if fisher_type == FISHER_EMP:
-        return FisherMaker
+        return FisherMaker(model, config)
     elif fisher_type == FISHER_EXACT:
         if loss_type == LOSS_CROSS_ENTROPY:
-            return FisherExactCrossEntropy
+            return FisherExactCrossEntropy(model, config)
         else:
-            return FisherExactMSE
+            return FisherExactMSE(model, config)
     else:
         if loss_type == LOSS_CROSS_ENTROPY:
-            return FisherMCCrossEntropy
+            return FisherMCCrossEntropy(model, config)
         else:
-            return FisherMCMSE
+            return FisherMCMSE(model, config)
 
 
-def calculate_fisher(
-        model: nn.Module,
-        fisher_type: str,
-        fisher_shapes,
-        loss_type: str,
-        inputs: torch.Tensor = None,
-        targets: torch.Tensor = None,
-        data_loader: torch.utils.data.DataLoader = None,
-        fvp=False,
-        vec: ParamVector = None,
-        is_distributed=False,
-        all_reduce=False,
-        is_master=True,
-        accumulate=False,
-        data_average=True,
-        calc_emp_loss_grad=False,
-        return_loss=False,
-        ignore_modules=None,
-        logit_idx=0,
-        seed=None,
-        scale=1.,
-        **kwargs
-):
-    fisher_cls = get_fisher_class(fisher_type, loss_type)
-    f = fisher_cls(model, **kwargs)
-    loss, outputs = f.calculate_fisher(
-        fisher_shapes,
-        inputs=inputs,
-        targets=targets,
-        data_loader=data_loader,
-        fvp=fvp,
-        vec=vec,
-        accumulate=accumulate,
-        data_average=data_average,
-        calc_emp_loss_grad=calc_emp_loss_grad,
-        ignore_modules=ignore_modules,
-        logit_idx=logit_idx,
-        seed=seed,
-        scale=scale)
-    if is_distributed:
-        if fvp:
-            f.reduce_fvp(is_master, all_reduce)
-        else:
-            f.reduce_fisher(is_master, all_reduce)
-    if return_loss:
-        return f, loss, outputs
+def calculate_fisher(model: nn.Module, config: FisherMakerConfig, vec: ParamVector = None, return_rst=False):
+    fisher_maker = get_fisher_maker(model, config)
+    rst = fisher_maker.forward_and_backward(vec)
+    if return_rst:
+        return fisher_maker, rst
     else:
-        return f
+        return fisher_maker
 
 
-fisher_for_cross_entropy = partial(calculate_fisher, loss_type=LOSS_CROSS_ENTROPY, fvp=False)
-fisher_for_mse = partial(calculate_fisher, loss_type=LOSS_MSE, fvp=False)
-fvp_for_cross_entropy = partial(calculate_fisher, loss_type=LOSS_CROSS_ENTROPY, fvp=True)
-fvp_for_mse = partial(calculate_fisher, loss_type=LOSS_MSE, fvp=True)
+def _get_fvp_fn(model: nn.Module, config: FisherMakerConfig):
+
+    def fvp_fn(vec: ParamVector) -> ParamVector:
+        f = calculate_fisher(model, config, vec)
+        return f.load_fvp(config.fisher_shapes[0])
+
+    return fvp_fn
 
 
 def fisher_eig(
-        model,
-        fisher_type: str,
-        fisher_shape,
-        loss_type: str,
-        inputs=None,
-        targets=None,
-        data_loader=None,
+        model: nn.Module,
+        config: FisherMakerConfig,
         top_n=1,
         max_iters=100,
         tol=1e-3,
         is_distributed=False,
         print_progress=False,
-        **kwargs
 ):
-
-    def fvp_fn(vec: ParamVector) -> ParamVector:
-        f = calculate_fisher(model,
-                             fisher_type,
-                             fisher_shape,
-                             loss_type,
-                             inputs=inputs,
-                             targets=targets,
-                             data_loader=data_loader,
-                             fvp=True,
-                             vec=vec,
-                             is_distributed=is_distributed,
-                             all_reduce=True,
-                             **kwargs)
-        return f.load_fvp(fisher_shape)
-
     # for making MC samplings at each iteration deterministic
-    random_seed = torch.rand(1) * 100 if fisher_type == FISHER_MC else None
+    random_seed = torch.rand(1) * 100 if config.fisher_type == FISHER_MC else None
 
-    eigvals, eigvecs = power_method(fvp_fn,
+    eigvals, eigvecs = power_method(_get_fvp_fn(model, config),
                                     model,
                                     top_n=top_n,
                                     max_iters=max_iters,
@@ -446,55 +379,29 @@ def fisher_eig(
     return eigvals, eigvecs
 
 
-fisher_eig_for_cross_entropy = partial(fisher_eig, loss_type=LOSS_CROSS_ENTROPY)
-fisher_eig_for_mse = partial(fisher_eig, loss_type=LOSS_MSE)
-
-
 def fisher_esd(
         model,
-        fisher_type: str,
-        fisher_shape,
-        loss_type: str,
-        inputs=None,
-        targets=None,
-        data_loader=None,
+        config: FisherMakerConfig,
         n_v=1,
         num_iter=100,
         num_bins=10000,
         sigma_squared=1e-5,
         overhead=None,
         is_distributed=False,
-        **kwargs
 ):
-
-    # referenced from https://github.com/amirgholami/PyHessian/blob/master/density_plot.py
-
-    def fvp_fn(vec: ParamVector) -> ParamVector:
-        f = calculate_fisher(model,
-                             fisher_type,
-                             fisher_shape,
-                             loss_type,
-                             inputs=inputs,
-                             targets=targets,
-                             data_loader=data_loader,
-                             fvp=True,
-                             vec=vec,
-                             is_distributed=is_distributed,
-                             all_reduce=True,
-                             **kwargs)
-        return f.load_fvp(fisher_shape)
-    
     # for making MC samplings at each iteration deterministic
-    random_seed = torch.rand(1) * 100 if fisher_type == FISHER_MC else None
+    random_seed = torch.rand(1) * 100 if config.fisher_type == FISHER_MC else None
 
-    eigvals, weights = stochastic_lanczos_quadrature(fvp_fn,
+    eigvals, weights = stochastic_lanczos_quadrature(_get_fvp_fn(model, config),
                                                      model,
                                                      n_v=n_v,
                                                      num_iter=num_iter,
                                                      is_distributed=is_distributed,
                                                      random_seed=random_seed
                                                      )
-    
+
+    # referenced from https://github.com/amirgholami/PyHessian/blob/master/density_plot.py
+
     eigvals = np.array(eigvals)
     weights = np.array(weights)
 
@@ -523,54 +430,27 @@ def fisher_esd(
     return density, grids
 
 
-fisher_esd_for_cross_entropy = partial(fisher_esd, loss_type=LOSS_CROSS_ENTROPY)
-fisher_esd_for_mse = partial(fisher_esd, loss_type=LOSS_MSE)
-
-
 def fisher_free(
-        model,
-        fisher_type: str,
-        fisher_shape,
-        loss_type: str,
+        model: nn.Module,
+        config: FisherMakerConfig,
         b=None,
-        data_loader=None,
-        inputs=None,
-        targets=None,
         init_x=None,
         damping=1e-3,
         max_iters=None,
         tol=1e-8,
         preconditioner=None,
-        is_distributed=False,
         print_progress=False,
         random_seed=None,
-        **kwargs
 ) -> ParamVector:
-
-    def fvp_fn(vec: ParamVector) -> ParamVector:
-        f = calculate_fisher(model,
-                             fisher_type,
-                             fisher_shape,
-                             loss_type,
-                             inputs=inputs,
-                             targets=targets,
-                             data_loader=data_loader,
-                             fvp=True,
-                             vec=vec,
-                             is_distributed=is_distributed,
-                             all_reduce=True,
-                             **kwargs)
-        return f.load_fvp(fisher_shape)
-
     if b is None:
         grads = {p: p.grad for p in model.parameters() if p.requires_grad}
         b = ParamVector(grads.keys(), grads.values())
 
     # for making MC samplings at each iteration deterministic
-    if fisher_type == FISHER_MC and random_seed is None:
+    if config.fisher_type == FISHER_MC and random_seed is None:
         random_seed = int(torch.rand(1) * 100)
 
-    return conjugate_gradient_method(fvp_fn,
+    return conjugate_gradient_method(_get_fvp_fn(model, config),
                                      b,
                                      init_x=init_x,
                                      damping=damping,
@@ -581,43 +461,14 @@ def fisher_free(
                                      random_seed=random_seed)
 
 
-fisher_free_for_cross_entropy = partial(fisher_free, loss_type=LOSS_CROSS_ENTROPY)
-fisher_free_for_mse = partial(fisher_free, loss_type=LOSS_MSE)
-
-
 def fisher_quadratic_form(
-        model,
-        fisher_type: str,
-        fisher_shape,
-        loss_type: str,
+        model: nn.Module,
+        config: FisherMakerConfig,
         v=None,
-        data_loader=None,
-        inputs=None,
-        targets=None,
-        is_distributed=False,
         **kwargs
 ):
-    def fvp_fn(vec: ParamVector) -> ParamVector:
-        f = calculate_fisher(model,
-                             fisher_type,
-                             fisher_shape,
-                             loss_type,
-                             inputs=inputs,
-                             targets=targets,
-                             data_loader=data_loader,
-                             fvp=True,
-                             vec=vec,
-                             is_distributed=is_distributed,
-                             all_reduce=True,
-                             **kwargs)
-        return f.load_fvp(fisher_shape)
-
     if v is None:
         grads = {p: p.grad for p in model.parameters() if p.requires_grad}
         v = ParamVector(grads.keys(), grads.values())
 
-    return quadratic_form(fvp_fn, v, **kwargs)
-
-
-fisher_quadratic_form_for_cross_entropy = partial(fisher_quadratic_form, loss_type=LOSS_CROSS_ENTROPY)
-fisher_quadratic_form_for_mse = partial(fisher_quadratic_form, loss_type=LOSS_MSE)
+    return quadratic_form(_get_fvp_fn(model, config), v, **kwargs)
