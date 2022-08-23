@@ -262,7 +262,7 @@ class NaturalGradientMaker(GradientMaker):
                     if partition_aware and module in self.partitioned_modules:
                         partition_id = self.partitioned_modules.index(module) // self.num_modules_per_partition
                         module_id_in_partition = self.config.module_partitions[partition_id].index(module)
-                        rank_in_group = dist.get_rank(self.sync_group)
+                        rank_in_group = dist.get_rank(self.config.sync_group)
                         modified_partition_id = (partition_id + rank_in_group) % len(self.config.module_partitions)
                         module = self.config.module_partitions[modified_partition_id][module_id_in_partition]
 
@@ -359,7 +359,7 @@ class NaturalGradientMaker(GradientMaker):
         if module not in self.partitioned_modules:
             return True
         else:
-            rank = dist.get_rank(self.sync_group)
+            rank = dist.get_rank(self.config.sync_group)
             return module in module_partitions[rank]
 
     @nvtx_range('sync_curvature')
@@ -404,7 +404,7 @@ class NaturalGradientMaker(GradientMaker):
                 handles += self.fisher_maker.reduce_scatter_fisher(module_partitions,
                                                                    *keys,
                                                                    with_grad=with_grad,
-                                                                   group=self.sync_group,
+                                                                   group=self.config.sync_group,
                                                                    async_op=True)
         return handles
 
