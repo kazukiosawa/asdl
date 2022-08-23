@@ -143,7 +143,7 @@ class NaturalGradientMaker(GradientMaker):
 
     @property
     def _fisher_attr(self):
-        return self.config.fisher_type
+        return self.fisher_maker.config.fisher_attr
 
     def _get_module_fisher(self, module, postfix=None):
         if postfix is None:
