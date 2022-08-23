@@ -41,7 +41,6 @@ class FisherMakerConfig:
     n_mc_samples: int = 1
     var: float = 1.
     seed: int = None
-    data_average: bool = True
     fisher_attr: str = 'fisher'
     fvp_attr: str = 'fvp'
     fvp: bool = False
