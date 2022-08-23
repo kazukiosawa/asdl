@@ -79,10 +79,7 @@ class SmwEmpNaturalGradientMaker(GradientMaker):
             ones /= n
         batch_loss.backward(gradient=(ones - b) / damping)
         loss = batch_loss.mean() if data_average else batch_loss.sum()
-        if self._loss_fn is None:
-            return self._model_output
-        else:
-            return self._model_output, loss
+        return self._model_output, loss
 
     def _call_loss_fn(self) -> Tensor:
         assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
