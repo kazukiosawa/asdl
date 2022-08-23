@@ -59,7 +59,8 @@ class SmwEmpNaturalGradientMaker(GradientMaker):
 
         with extend(model, OP_GRAM_HADAMARD):
             zero_kernel(model, n, n)
-            logits, batch_loss = self._forward()
+            self._forward()
+            batch_loss = self._loss
             params = [p for p in model.parameters() if p.requires_grad]
             torch.autograd.grad(batch_loss.sum(), params, retain_graph=True)
         UtU = model.kernel  # n x n
@@ -72,10 +73,11 @@ class SmwEmpNaturalGradientMaker(GradientMaker):
             b /= n ** 2
             ones /= n
         batch_loss.backward(gradient=(ones - b) / damping)
-        if data_average:
-            return logits, batch_loss.mean()
+        loss = batch_loss.mean() if data_average else batch_loss.sum()
+        if self._loss_fn is None:
+            return self._model_output
         else:
-            return logits, batch_loss.sum()
+            return self._model_output, loss
 
     def _call_loss_fn(self) -> Tensor:
         assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
