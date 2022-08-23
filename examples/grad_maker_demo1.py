@@ -42,7 +42,8 @@ logits1, loss1 = model1(x, targets=t)
 loss1.backward()
 
 # GradientMaker
-grad_maker.setup_model_call(model2, x, targets=t)
+dummy_y = grad_maker.setup_model_call(model2, x, targets=t)
+grad_maker.setup_loss_repr(dummy_y[1])
 logits2, loss2 = grad_maker.forward_and_backward()
 
 g1 = parameters_to_vector([p.grad for p in model1.parameters()])

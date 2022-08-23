@@ -77,7 +77,7 @@ class GradientMaker:
         self._loss_fn_args = ()
         self._loss_fn_kwargs = dict()
         self._loss: Tensor = None
-        self._dummy_loss = DummyObject([GetItem(1)])  # default: logits, loss = model_fn()
+        self._dummy_loss: DummyObject = None
         self._dummy_logits = DummyObject([GetFirstItem()])
 
     def setup_model_call(self, model_fn, *args, **kwargs):
@@ -118,6 +118,9 @@ class GradientMaker:
         self._model_output = self._model_fn(*self._model_args, **self._model_kwargs)
         self._logits = self._dummy_logits.eval(self._model_output)
         if self._loss_fn is None:
+            assert self._dummy_loss is not None, 'Neither loss_fn nor loss_repr is not set. ' \
+                                                 'Call setup_loss_call() or setup_loss_repr() ' \
+                                                 'before calling forward_and_backward().'
             self._loss = self._dummy_loss.eval(self._model_output)
         else:
             self._loss = self._call_loss_fn()
