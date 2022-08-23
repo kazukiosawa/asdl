@@ -91,7 +91,7 @@ class FisherMaker(GradientMaker):
 
             def closure(nll_expr, retain_graph=False):
                 cxt.clear_batch_grads()
-                with skip_param_grad(model, disable=not calc_emp_loss_grad or not self.is_fisher_emp):
+                with skip_param_grad(model, disable=calc_emp_loss_grad and self.is_fisher_emp):
                     nll_expr().backward(retain_graph=retain_graph or calc_emp_loss_grad)
                 if fvp:
                     cxt.calc_full_cvp(model)
