@@ -108,9 +108,9 @@ class NaturalGradientMaker(GradientMaker):
 
         self._step = 0
 
-    def forward_and_backward(self, scale=1., accumulate=False) -> Union[Tuple[Any, Tensor], Any]:
+    def forward_and_backward(self, data_size=1, scale=1., accumulate=False) -> Union[Tuple[Any, Tensor], Any]:
         if self._step % self.config.upd_curvature_interval == 0:
-            self.update_curvature(scale=scale, accumulate=accumulate)
+            self.update_curvature(data_size=data_size, scale=scale, accumulate=accumulate)
         else:
             self._forward()
             self._loss.backward()
@@ -196,6 +196,7 @@ class NaturalGradientMaker(GradientMaker):
 
     @nvtx_range('update_curvature')
     def update_curvature(self,
+                         data_size=1,
                          scale=1.,
                          accumulate=False,
                          cxt: OperationContext = None,
@@ -242,7 +243,7 @@ class NaturalGradientMaker(GradientMaker):
                 fisher_maker.setup_loss_repr(self._dummy_loss)
             else:
                 fisher_maker.setup_loss_call(self._loss_fn, *self._loss_fn_args, **self._loss_fn_kwargs)
-            fisher_maker.forward_and_backward(scale=scale, accumulate=accumulate, calc_emp_loss_grad=True)
+            fisher_maker.forward_and_backward(data_size=data_size, scale=scale, accumulate=accumulate, calc_emp_loss_grad=True)
             self._model_output = fisher_maker.model_output
             self._loss = fisher_maker.loss
 

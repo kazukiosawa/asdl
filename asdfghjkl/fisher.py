@@ -9,7 +9,7 @@ import torch.nn.functional as F
 import torch.distributed as dist
 
 from .core import no_centered_cov
-from .utils import skip_param_grad
+from .utils import skip_param_grad, has_reduction
 from .grad_maker import GradientMaker
 from .matrices import *
 from .vector import ParamVector, reduce_vectors
@@ -66,6 +66,7 @@ class FisherMaker(GradientMaker):
         return False
 
     def forward_and_backward(self,
+                             data_size=1,
                              scale=1.,
                              accumulate=False,
                              calc_emp_loss_grad=True,
@@ -77,6 +78,7 @@ class FisherMaker(GradientMaker):
         ignore_modules = self.config.ignore_modules
         fvp = self.config.fvp
         seed = self.config.seed
+        scale /= data_size
 
         if not accumulate:
             # set Fisher/FVP zero
@@ -107,10 +109,26 @@ class FisherMaker(GradientMaker):
         if calc_emp_loss_grad and not self.is_fisher_emp:
             emp_loss.backward()
 
+        if calc_emp_loss_grad:
+            # divide gradients by data size
+            # (every loss function returns the sum of loss, not the average)
+            for p in model.parameters():
+                if p.grad is not None:
+                    p.grad.div_(data_size)
+
         if self._loss_fn is None:
             return self._model_output
         else:
             return self._model_output, self._loss
+
+    def _call_loss_fn(self) -> Tensor:
+        assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
+        if isinstance(self._loss_fn, nn.Module):
+            self._loss_fn.reduction = 'sum'
+        else:
+            self._loss_fn_kwargs['reduction'] = 'sum'
+        args, kwargs = self._get_mapped_loss_fn_args_kwargs()
+        return self._loss_fn(*args, **kwargs)
 
     def _fisher_loop(self, closure):
         raise NotImplementedError

@@ -4,24 +4,15 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 import torch.nn as nn
-import torch.nn.functional as F
 
+from ..utils import has_reduction
 from ..core import extend
 from ..operations import OP_GRAM_HADAMARD
 from ..grad_maker import GradientMaker
 
-torch_function_class = F.cross_entropy.__class__
 _required = -1
 
 __all__ = ['SmwEmpNaturalGradientMakerConfig', 'SmwEmpNaturalGradientMaker']
-
-
-def has_reduction(func):
-    if isinstance(func, nn.Module):
-        return hasattr(func, 'reduction')
-    elif isinstance(func, torch_function_class):
-        return 'reduction' in func.__code__.co_varnames
-    return False
 
 
 def zero_kernel(model: nn.Module, n_data1: int, n_data2: int):

@@ -6,12 +6,15 @@ from torch.nn import functional as F
 from torch.utils.data import BatchSampler, Subset, DataLoader
 from torch.cuda import nvtx
 
+torch_function_class = F.cross_entropy.__class__
+
 _REQUIRES_GRAD_ATTR = '_original_requires_grad'
 
 __all__ = [
     'original_requires_grad', 'record_original_requires_grad',
     'restore_original_requires_grad', 'skip_param_grad', 'im2col_2d',
-    'im2col_2d_slow', 'cholesky_inv', 'PseudoBatchLoaderGenerator', 'nvtx_range'
+    'im2col_2d_slow', 'cholesky_inv', 'PseudoBatchLoaderGenerator', 'nvtx_range',
+    'has_reduction'
 ]
 
 
@@ -162,3 +165,13 @@ def nvtx_range(msg, *args, **kwargs):
         yield nvtx.range(msg, *args, **kwargs)
     else:
         yield nullcontext()
+
+
+def has_reduction(func):
+    if isinstance(func, nn.Module):
+        return hasattr(func, 'reduction')
+    elif isinstance(func, torch_function_class):
+        return 'reduction' in func.__code__.co_varnames
+    return False
+
+
