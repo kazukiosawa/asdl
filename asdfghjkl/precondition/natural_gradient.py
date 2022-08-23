@@ -273,9 +273,7 @@ class NaturalGradientMaker(GradientMaker):
 
                 if self.is_module_for_inv_and_precondition(module):
                     if shape == SHAPE_KRON:
-                        matrix.update_inv(damping,
-                                          calc_A_inv='A' in kron,
-                                          calc_B_inv='B' in kron)
+                        matrix.update_inv(damping, calc_A_inv='A' in kron, calc_B_inv='B' in kron)
                     else:
                         matrix.update_inv(damping)
 
