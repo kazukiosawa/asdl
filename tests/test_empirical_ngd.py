@@ -33,25 +33,25 @@ config = NaturalGradientMakerConfig(fisher_type=FISHER_EMP,
                                     upd_curvature_interval=1,
                                     upd_inv_interval=1,
                                     damping=damping)
-nat_grad_maker = NaturalGradientMaker(model1, config)
+grad_maker1 = NaturalGradientMaker(model1, config)
 
 model2 = copy.deepcopy(model)
 optim2 = torch.optim.SGD(model2.parameters(), lr=1)
 config = SmwEmpNaturalGradientMakerConfig(damping=damping)
-smw_nat_grad_maker = SmwEmpNaturalGradientMaker(model2, config)
+grad_maker2 = SmwEmpNaturalGradientMaker(model2, config)
 
 for x, t in dataloader:
     x, t = x.to(device), t.to(device)
     optim1.zero_grad(set_to_none=True)
-    dummy_y = nat_grad_maker.setup_model_call(model1, x)
-    nat_grad_maker.setup_loss_call(F.cross_entropy, dummy_y, t)
-    nat_grad_maker.forward_and_backward(scale=1/batchsize)
+    dummy_y = grad_maker1.setup_model_call(model1, x)
+    grad_maker1.setup_loss_call(F.cross_entropy, dummy_y, t)
+    grad_maker1.forward_and_backward(scale=1/batchsize)
     optim1.step()
 
     optim2.zero_grad(set_to_none=True)
-    dummy_y = smw_nat_grad_maker.setup_model_call(model1, x)
-    smw_nat_grad_maker.setup_loss_call(F.cross_entropy, dummy_y, t)
-    smw_nat_grad_maker.forward_and_backward(data_size=batchsize)
+    dummy_y = grad_maker2.setup_model_call(model2, x)
+    grad_maker2.setup_loss_call(F.cross_entropy, dummy_y, t)
+    grad_maker2.forward_and_backward(data_size=batchsize)
     optim2.step()
 
     for p1, p2 in zip(model1.parameters(), model2.parameters()):

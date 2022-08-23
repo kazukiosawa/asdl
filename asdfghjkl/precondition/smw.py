@@ -11,6 +11,7 @@ from ..operations import OP_GRAM_HADAMARD
 from ..grad_maker import GradientMaker
 
 torch_function_class = F.cross_entropy.__class__
+_required = -1
 
 __all__ = ['SmwEmpNaturalGradientMakerConfig', 'SmwEmpNaturalGradientMaker']
 
@@ -40,7 +41,6 @@ def cholesky_solve(A, b, eps=1e-8):
 
 @dataclass
 class SmwEmpNaturalGradientMakerConfig:
-    data_size: int
     damping: float = 1.e-5
 
 
@@ -50,8 +50,10 @@ class SmwEmpNaturalGradientMaker(GradientMaker):
         assert isinstance(config, SmwEmpNaturalGradientMakerConfig)
         self.config = config
 
-    def forward_and_backward(self, data_size, data_average=True) -> Tuple[Tensor, Tensor]:
+    def forward_and_backward(self, data_size=_required, data_average=True) -> Tuple[Tensor, Tensor]:
         model = self.model
+        if data_size == _required:
+            raise ValueError('data_size has to be specified.')
         n = data_size
         damping = self.config.damping
 
