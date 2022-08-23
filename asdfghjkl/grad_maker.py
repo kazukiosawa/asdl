@@ -113,7 +113,7 @@ class GradientMaker:
 
     def _forward(self):
         assert self._model_fn is not None, \
-            'model_fn is not specified. setup_model_call() ' \
+            'model_fn is not set. Call setup_model_call() ' \
             'before calling forward_and_backward().'
         self._model_output = self._model_fn(*self._model_args, **self._model_kwargs)
         self._logits = self._dummy_logits.eval(self._model_output)
