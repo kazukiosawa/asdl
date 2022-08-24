@@ -87,14 +87,17 @@ class FisherMaker(GradientMaker):
         if seed:
             torch.random.manual_seed(seed)
 
+        calc_loss_grad_with_fisher = calc_loss_grad and self.is_fisher_emp
+        calc_loss_grad_after_fisher = calc_loss_grad and not self.is_fisher_emp
+
         with no_centered_cov(model, fisher_shapes, ignore_modules=ignore_modules, cvp=fvp, vectors=vec) as cxt:
             self._forward()
             loss = self._loss
 
             def closure(nll_expr, retain_graph=False):
                 cxt.clear_batch_grads()
-                with skip_param_grad(model, disable=calc_loss_grad and self.is_fisher_emp):
-                    nll_expr().backward(retain_graph=retain_graph or calc_loss_grad)
+                with skip_param_grad(model, disable=calc_loss_grad_with_fisher):
+                    nll_expr().backward(retain_graph=retain_graph or calc_loss_grad_after_fisher)
                 if fvp:
                     cxt.calc_full_cvp(model)
                 else:
@@ -106,7 +109,7 @@ class FisherMaker(GradientMaker):
                 self._fisher_loop(closure)
             self.accumulate(cxt, scale, fvp=fvp)
 
-        if calc_loss_grad and not self.is_fisher_emp:
+        if calc_loss_grad_after_fisher:
             loss.backward()
 
         if calc_loss_grad:
