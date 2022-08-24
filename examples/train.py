@@ -59,6 +59,7 @@ def train(epoch):
         loss = grad_maker.loss
 
         optimizer.step()
+
         if batch_idx % args.log_interval == 0:
             if args.wandb:
                 log = {'epoch': epoch,
