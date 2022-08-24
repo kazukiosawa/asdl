@@ -21,13 +21,13 @@ _invalid_ema_decay = -1
 _module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG]
 
 __all__ = [
-    'NaturalGradientMakerConfig', 'NaturalGradientMaker', 'FullNaturalGradientMaker', 'LayerWiseNaturalGradientMaker',
+    'NaturalGradientConfig', 'NaturalGradientMaker', 'FullNaturalGradientMaker', 'LayerWiseNaturalGradientMaker',
     'KfacGradientMaker', 'UnitWiseNaturalGradientMaker', 'DiagNaturalGradientMaker', 'EmpNaturalGradientMaker'
 ]
 
 
 @dataclass
-class NaturalGradientMakerConfig:
+class NaturalGradientConfig:
     data_size: int
     fisher_type: str = FISHER_EXACT
     fisher_shape: Union[str, List[Any]] = SHAPE_FULL
@@ -558,19 +558,19 @@ class NaturalGradientMaker(GradientMaker):
 
 
 class FullNaturalGradientMaker(NaturalGradientMaker):
-    def __init__(self, model, config: NaturalGradientMakerConfig):
+    def __init__(self, model, config: NaturalGradientConfig):
         config.fisher_shape = SHAPE_FULL
         super().__init__(model, config)
 
 
 class LayerWiseNaturalGradientMaker(NaturalGradientMaker):
-    def __init__(self, model, config: NaturalGradientMakerConfig):
+    def __init__(self, model, config: NaturalGradientConfig):
         config.fisher_shape = SHAPE_LAYER_WISE
         super().__init__(model, config)
 
 
 class KfacGradientMaker(NaturalGradientMaker):
-    def __init__(self, model, config: NaturalGradientMakerConfig):
+    def __init__(self, model, config: NaturalGradientConfig):
         config.fisher_shape = [SHAPE_KRON,
                                (nn.BatchNorm1d, SHAPE_UNIT_WISE),
                                (nn.BatchNorm2d, SHAPE_UNIT_WISE),
@@ -579,19 +579,19 @@ class KfacGradientMaker(NaturalGradientMaker):
 
 
 class UnitWiseNaturalGradientMaker(NaturalGradientMaker):
-    def __init__(self, model, config: NaturalGradientMakerConfig):
+    def __init__(self, model, config: NaturalGradientConfig):
         config.fisher_shape = SHAPE_UNIT_WISE
         super().__init__(model, config)
 
 
 class DiagNaturalGradientMaker(NaturalGradientMaker):
-    def __init__(self, model, config: NaturalGradientMakerConfig):
+    def __init__(self, model, config: NaturalGradientConfig):
         config.fisher_shape = SHAPE_DIAG
         super().__init__(model, config)
 
 
 class EmpNaturalGradientMaker(NaturalGradientMaker):
-    def __init__(self, model, config: NaturalGradientMakerConfig):
+    def __init__(self, model, config: NaturalGradientConfig):
         config.fisher_type = FISHER_EMP
         super().__init__(model, config)
 

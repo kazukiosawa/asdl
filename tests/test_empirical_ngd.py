@@ -5,8 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from asdfghjkl import FISHER_EMP, SHAPE_FULL
-from asdfghjkl import NaturalGradientMaker, NaturalGradientMakerConfig
-from asdfghjkl import SmwEmpNaturalGradientMaker, SmwEmpNaturalGradientMakerConfig
+from asdfghjkl import NaturalGradientMaker, NaturalGradientConfig
+from asdfghjkl import SmwEmpNaturalGradientMaker, SmwEmpNaturalGradientConfig
 
 
 torch.random.manual_seed(0)
@@ -28,16 +28,16 @@ dataloader = torch.utils.data.DataLoader(dataset, batch_size=batchsize, shuffle=
 damping = 1e-2
 model1 = copy.deepcopy(model)
 optim1 = torch.optim.SGD(model1.parameters(), lr=1)
-config = NaturalGradientMakerConfig(fisher_type=FISHER_EMP,
-                                    fisher_shape=SHAPE_FULL,
-                                    upd_curvature_interval=1,
-                                    upd_inv_interval=1,
-                                    damping=damping)
+config = NaturalGradientConfig(fisher_type=FISHER_EMP,
+                               fisher_shape=SHAPE_FULL,
+                               upd_curvature_interval=1,
+                               upd_inv_interval=1,
+                               damping=damping)
 grad_maker1 = NaturalGradientMaker(model1, config)
 
 model2 = copy.deepcopy(model)
 optim2 = torch.optim.SGD(model2.parameters(), lr=1)
-config = SmwEmpNaturalGradientMakerConfig(damping=damping)
+config = SmwEmpNaturalGradientConfig(damping=damping)
 grad_maker2 = SmwEmpNaturalGradientMaker(model2, config)
 
 for i, (x, t) in enumerate(dataloader):

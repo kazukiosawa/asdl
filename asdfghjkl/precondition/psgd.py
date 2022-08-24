@@ -12,7 +12,7 @@ from ..grad_maker import GradientMaker
 
 _supported_modules = (nn.Linear, nn.Conv2d)
 
-__all__ = ['PsgdGradientMakerConfig', 'PsgdGradientMaker', 'KronPsgdGradientMaker']
+__all__ = ['PsgdGradientConfig', 'PsgdGradientMaker', 'KronPsgdGradientMaker']
 
 
 def parameters_to_vector(parameters: Iterable[Tensor]) -> Tensor:
@@ -25,7 +25,7 @@ def parameters_to_vector(parameters: Iterable[Tensor]) -> Tensor:
 
 
 @dataclass
-class PsgdGradientMakerConfig:
+class PsgdGradientConfig:
     precond_lr: float = 0.01
     upd_precond_interval: int = 1
     init_scale: float = 1.
@@ -33,9 +33,9 @@ class PsgdGradientMakerConfig:
 
 
 class PsgdGradientMaker(GradientMaker):
-    def __init__(self, model: nn.Module, config: PsgdGradientMakerConfig = None):
+    def __init__(self, model: nn.Module, config: PsgdGradientConfig = None):
         if config is None:
-            config = PsgdGradientMakerConfig()  # default config
+            config = PsgdGradientConfig()  # default config
         model = nn.ModuleList([m for m in model.modules() if isinstance(m, _supported_modules)])
         super().__init__(model)
         self.config = config

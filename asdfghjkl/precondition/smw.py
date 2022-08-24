@@ -10,7 +10,7 @@ from ..core import extend
 from ..operations import OP_GRAM_HADAMARD
 from ..grad_maker import GradientMaker
 
-__all__ = ['SmwEmpNaturalGradientMakerConfig', 'SmwEmpNaturalGradientMaker']
+__all__ = ['SmwEmpNaturalGradientConfig', 'SmwEmpNaturalGradientMaker']
 
 
 def zero_kernel(model: nn.Module, n_data1: int, n_data2: int):
@@ -29,7 +29,7 @@ def cholesky_solve(A, b, eps=1e-8):
 
 
 @dataclass
-class SmwEmpNaturalGradientMakerConfig:
+class SmwEmpNaturalGradientConfig:
     data_size: int
     damping: float = 1.e-5
 

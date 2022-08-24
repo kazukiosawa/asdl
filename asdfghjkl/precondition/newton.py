@@ -9,11 +9,11 @@ from ..hessian import HessianMaker, HessianMakerConfig
 from ..matrices import SHAPE_FULL
 
 
-__all__ = ['NewtonGradientMakerConfig', 'NewtonGradientMaker']
+__all__ = ['NewtonGradientConfig', 'NewtonGradientMaker']
 
 
 @dataclass
-class NewtonGradientMakerConfig:
+class NewtonGradientConfig:
     damping: float = 1.e-8
     absolute: bool = False
 
