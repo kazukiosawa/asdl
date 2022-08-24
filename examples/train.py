@@ -6,7 +6,6 @@ import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.utils import parameters_to_vector, vector_to_parameters
 import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -14,16 +13,13 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 import asdfghjkl as asdl
 from asdfghjkl import FISHER_EXACT, FISHER_MC, FISHER_EMP
 from asdfghjkl import SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG
-from asdfghjkl import empirical_natural_gradient, empirical_natural_gradient2
-from asdfghjkl.precondition.psgd import FullPreconditioner, KronPreconditoner
 
 import wandb
 
 OPTIM_SGD = 'sgd'
 OPTIM_ADAM = 'adam'
 OPTIM_NGD = 'ngd'
-OPTIM_WOODBURY_NGD = 'woodbury_ngd'
-OPTIM_WOODBURY_NGD2 = 'woodbury_ngd2'
+OPTIM_SMW_NGD = 'smw_ngd'
 OPTIM_FULL_PSGD = 'full_psgd'
 OPTIM_KRON_PSGD = 'kron_psgd'
 OPTIM_NEWTON = 'newton'
@@ -49,42 +45,19 @@ def main():
 
 def train(epoch):
     model.train()
-    for batch_idx, (inputs, targets) in enumerate(train_loader):
-        inputs, targets = inputs.to(device), targets.to(device)
+    for batch_idx, (x, t) in enumerate(train_loader):
+        x, t = x.to(device), t.to(device)
         optimizer.zero_grad(set_to_none=True)
-        if args.optim == OPTIM_NGD:
-            loss, outputs = ngd.update_curvature(inputs, targets, calc_emp_loss_grad=True)
-            ngd.update_inv()
-            ngd.precondition()
-        elif args.optim == OPTIM_WOODBURY_NGD:
-            loss = empirical_natural_gradient(model, inputs, targets, damping=args.damping)
-        elif args.optim == OPTIM_WOODBURY_NGD2:
-            loss = empirical_natural_gradient2(model, inputs, targets, damping=args.damping)
-        elif args.optim in [OPTIM_FULL_PSGD, OPTIM_KRON_PSGD]:
-            outputs = model(inputs)
-            loss = F.cross_entropy(outputs, targets)
-            grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=True)
-            for p, g in zip(model.parameters(), grads):
-                p.grad = g
-            psgd.update_preconditioner()
-            psgd.precondition()
-        elif args.optim in [OPTIM_NEWTON, OPTIM_ABS_NEWTON]:
-            outputs = model(inputs)
-            loss = F.cross_entropy(outputs, targets)
-            loss.backward()
-            grads = [p.grad for p in model.parameters()]
-            if args.optim == OPTIM_NEWTON:
-                hessian = asdl.get_hessian(model, F.cross_entropy, inputs, targets)
-            else:
-                hessian = asdl.get_abs_hessian(model, F.cross_entropy, inputs, targets)
-            diag = torch.diagonal(hessian)
-            diag += args.damping
-            g = parameters_to_vector(grads)
-            vector_to_parameters(torch.linalg.solve(hessian, g), grads)
-        else:
-            outputs = model(inputs)
-            loss = F.cross_entropy(outputs, targets)
-            loss.backward()
+
+        # y = model(x)
+        # loss = F.cross_entropy(y, t)
+        # loss.backward()
+
+        dummy_y = grad_maker.setup_model_call(model, x)
+        grad_maker.setup_loss_call(F.cross_entropy, dummy_y, t)
+        grad_maker.forward_and_backward()
+        loss = grad_maker.loss
+
         optimizer.step()
         if batch_idx % args.log_interval == 0:
             if args.wandb:
@@ -94,7 +67,7 @@ def train(epoch):
                        'learning_rate': optimizer.param_groups[0]['lr']}
                 wandb.log(log)
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                epoch, batch_idx * len(inputs), len(train_loader.dataset),
+                epoch, batch_idx * len(x), len(train_loader.dataset),
                 100. * batch_idx / num_steps_per_epoch, float(loss)))
 
         scheduler.step()
@@ -186,17 +159,28 @@ if __name__ == '__main__':
     else:
         optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
-    ngd = psgd = None
     if args.optim == OPTIM_NGD:
-        fisher_shape = [args.fisher_shape]
-        ngd = asdl.NaturalGradientMaker(model,
-                                        fisher_type=args.fisher_type,
-                                        fisher_shape=fisher_shape,
-                                        damping=args.damping)
+        config = asdl.NaturalGradientConfig(data_size=args.batch_size,
+                                            fisher_type=args.fisher_type,
+                                            fisher_shape=args.fisher_shape,
+                                            damping=args.damping)
+        grad_maker = asdl.NaturalGradientMaker(model, config)
+    elif args.optim == OPTIM_SMW_NGD:
+        config = asdl.SmwEmpNaturalGradientConfig(data_size=args.batch_size,
+                                                  damping=args.damping)
+        grad_maker = asdl.SmwEmpNaturalGradientMaker(model, config)
     elif args.optim == OPTIM_FULL_PSGD:
-        psgd = FullPreconditioner(model)
+        grad_maker = asdl.PsgdGradientMaker(model)
     elif args.optim == OPTIM_KRON_PSGD:
-        psgd = KronPreconditoner(model)
+        grad_maker = asdl.KronPsgdGradientMaker(model)
+    elif args.optim == OPTIM_NEWTON:
+        config = asdl.NewtonGradientConfig(damping=args.damping)
+        grad_maker = asdl.NewtonGradientMaker(model, config)
+    elif args.optim == OPTIM_ABS_NEWTON:
+        config = asdl.NewtonGradientConfig(damping=args.damping, absolute=True)
+        grad_maker = asdl.NewtonGradientMaker(model, config)
+    else:
+        grad_maker = asdl.GradientMaker(model)
 
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs * num_steps_per_epoch)
 
