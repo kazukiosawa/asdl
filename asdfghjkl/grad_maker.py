@@ -119,6 +119,17 @@ class GradientMaker:
         else:
             return self._model_output, self._loss
 
+    def delegate_forward_and_backward(self, other, *args, **kwargs):
+        other.setup_model_call(self._model_fn, *self._model_args, **self._model_kwargs)
+        if self._loss_fn is None:
+            other.setup_loss_repr(self._dummy_loss)
+        else:
+            other.setup_loss_call(self._loss_fn, *self._loss_fn_args, **self._loss_fn_kwargs)
+        other.setup_logits_repr(self._dummy_logits)
+        other.forward_and_backward(*args, **kwargs)
+        self._model_output = other.model_output
+        self._loss = other.loss
+
     def _forward(self):
         assert self._model_fn is not None, \
             'model_fn is not set. Call setup_model_call() ' \

@@ -238,15 +238,11 @@ class NaturalGradientMaker(GradientMaker):
                         if not no_save:
                             self.save_curvature(cxt, scale, module=module)
         else:
-            fisher_maker.setup_model_call(self._model_fn, *self._model_args, **self._model_kwargs)
-            if self._loss_fn is None:
-                fisher_maker.setup_loss_repr(self._dummy_loss)
-            else:
-                fisher_maker.setup_loss_call(self._loss_fn, *self._loss_fn_args, **self._loss_fn_kwargs)
-            fisher_maker.setup_logits_repr(self._dummy_logits)
-            fisher_maker.forward_and_backward(data_size=data_size, scale=scale, accumulate=accumulate, calc_loss_grad=True)
-            self._model_output = fisher_maker.model_output
-            self._loss = fisher_maker.loss
+            self.delegate_forward_and_backward(fisher_maker,
+                                               data_size=data_size,
+                                               scale=scale,
+                                               accumulate=accumulate,
+                                               calc_loss_grad=True)
 
     def save_curvature(self, cxt, scale=1., module=None, module_name=None):
         self.fisher_maker.accumulate(cxt, scale, target_module=module, target_module_name=module_name)
