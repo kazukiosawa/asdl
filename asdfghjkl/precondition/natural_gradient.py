@@ -13,7 +13,7 @@ from ..operations import OperationContext
 from ..matrices import *
 from ..symmatrix import SymMatrix
 from ..vector import ParamVector
-from ..fisher import LOSS_CROSS_ENTROPY, get_fisher_maker, FisherMakerConfig
+from ..fisher import LOSS_CROSS_ENTROPY, get_fisher_maker, FisherConfig
 from ..grad_maker import GradientMaker
 
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
@@ -87,7 +87,7 @@ class NaturalGradientMaker(GradientMaker):
             self.partitioned_modules = []
             self.num_modules_per_partition = None
 
-        fisher_config = FisherMakerConfig(
+        fisher_config = FisherConfig(
             fisher_type=config.fisher_type,
             fisher_shapes=config.fisher_shape,
             loss_type=config.loss_type,

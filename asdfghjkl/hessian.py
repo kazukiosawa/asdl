@@ -11,12 +11,12 @@ from .mvp import power_method, conjugate_gradient_method, quadratic_form
 from .vector import ParamVector
 from .grad_maker import GradientMaker
 
-__all__ = ['HessianMakerConfig', 'HessianMaker']
+__all__ = ['HessianConfig', 'HessianMaker']
 _supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_DIAG]
 
 
 @dataclass
-class HessianMakerConfig:
+class HessianConfig:
     hessian_attr: str = 'hessian'
     tmp_hessian_attr: str = 'tmp_hessian'
     hvp_attr: str = 'hvp'

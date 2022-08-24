@@ -5,7 +5,7 @@ import torch
 from torch import Tensor
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from ..grad_maker import GradientMaker
-from ..hessian import HessianMaker, HessianMakerConfig
+from ..hessian import HessianMaker, HessianConfig
 from ..matrices import SHAPE_FULL
 
 
@@ -22,7 +22,7 @@ class NewtonGradientMaker(GradientMaker):
     def __init__(self, model, config):
         super().__init__(model)
         self.config = config
-        hessian_config = HessianMakerConfig(hessian_shapes=[SHAPE_FULL])
+        hessian_config = HessianConfig(hessian_shapes=[SHAPE_FULL])
         self.hessian_maker = HessianMaker(model, hessian_config)
 
     def forward_and_backward(self,

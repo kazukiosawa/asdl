@@ -24,7 +24,7 @@ LOSS_MSE = 'mse'
 __all__ = [
     'LOSS_CROSS_ENTROPY',
     'LOSS_MSE',
-    'FisherMakerConfig',
+    'FisherConfig',
     'get_fisher_maker',
 ]
 
@@ -34,7 +34,7 @@ _supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_LAYER_WISE]
 
 
 @dataclass
-class FisherMakerConfig:
+class FisherConfig:
     fisher_type: str
     fisher_shapes: List[Any]
     loss_type: str = None
@@ -52,7 +52,7 @@ class FisherMakerConfig:
 class FisherMaker(GradientMaker):
     def __init__(self, model, config):
         super().__init__(model)
-        self.config: FisherMakerConfig = config
+        self.config: FisherConfig = config
 
     def zero_fisher(self, fvp=False):
         attr = self.config.fvp_attr if fvp else self.config.fisher_attr
@@ -451,7 +451,7 @@ class FisherEmp(FisherMaker):
         return True
 
 
-def get_fisher_maker(model: nn.Module, config: FisherMakerConfig):
+def get_fisher_maker(model: nn.Module, config: FisherConfig):
     fisher_type = config.fisher_type
     loss_type = config.loss_type
     assert fisher_type in _supported_types
