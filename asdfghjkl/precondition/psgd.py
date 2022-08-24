@@ -33,8 +33,9 @@ class PsgdGradientMakerConfig:
 
 
 class PsgdGradientMaker(GradientMaker):
-    def __init__(self, model: nn.Module, config: PsgdGradientMakerConfig):
-        assert isinstance(config, PsgdGradientMakerConfig)
+    def __init__(self, model: nn.Module, config: PsgdGradientMakerConfig = None):
+        if config is None:
+            config = PsgdGradientMakerConfig()  # default config
         model = nn.ModuleList([m for m in model.modules() if isinstance(m, _supported_modules)])
         super().__init__(model)
         self.config = config
