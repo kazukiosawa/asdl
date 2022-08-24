@@ -27,12 +27,10 @@ class NewtonGradientMaker(GradientMaker):
         self.hessian_maker = HessianMaker(model, hessian_config)
 
     def forward_and_backward(self,
-                             data_size=1,
                              scale=1.,
                              accumulate=False
                              ) -> Union[Tuple[Any, Tensor], Any]:
         self.delegate_forward_and_backward(self.hessian_maker,
-                                           data_size=data_size,
                                            scale=scale,
                                            accumulate=accumulate,
                                            calc_loss_grad=True)

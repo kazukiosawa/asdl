@@ -37,14 +37,12 @@ class HessianMaker(GradientMaker):
                 delattr(module, attr)
 
     def forward_and_backward(self,
-                             data_size=1,
                              scale=1.,
                              accumulate=False,
                              calc_loss_grad=False,
                              hvp=False,
                              vec: ParamVector = None
                              ) -> Union[Tuple[Any, Tensor], Any]:
-        scale /= data_size
         if not accumulate:
             self.zero_hessian(hvp)
 
