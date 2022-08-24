@@ -34,7 +34,8 @@ class NewtonGradientMaker(GradientMaker):
         self.delegate_forward_and_backward(self.hessian_maker,
                                            data_size=data_size,
                                            scale=scale,
-                                           accumulate=accumulate)
+                                           accumulate=accumulate,
+                                           calc_loss_grad=True)
         self.precondition()
         if self._loss_fn is None:
             return self._model_output

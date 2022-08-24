@@ -40,6 +40,7 @@ class HessianMaker(GradientMaker):
                              data_size=1,
                              scale=1.,
                              accumulate=False,
+                             calc_loss_grad=False,
                              hvp=False,
                              vec: ParamVector = None
                              ) -> Union[Tuple[Any, Tensor], Any]:
@@ -50,17 +51,20 @@ class HessianMaker(GradientMaker):
         self._forward()
         if hvp:
             params = [p for p in self.model.parameters() if p.requires_grad]
-            v = _hvp(self._loss, params, vec)
+            v, g = _hvp(self._loss, params, vec)
             setattr(self.model, self.config.tmp_hvp_attr, v)
+            if calc_loss_grad:
+                for param, grad in zip(params, g.values()):
+                    param.grad = grad
         else:
-            self._hessian()
+            self._hessian(calc_loss_grad)
         self.accumulate(scale)
         if self._loss_fn is None:
             return self._model_output
         else:
             return self._model_output, self._loss
 
-    def _hessian(self):
+    def _hessian(self, calc_loss_grad=False):
         model = self.model
         loss = self._loss
         hessian_shapes = self.config.hessian_shapes
@@ -76,7 +80,7 @@ class HessianMaker(GradientMaker):
 
         # full
         if SHAPE_FULL in hessian_shapes:
-            full_hess = _hessian(loss, params)
+            full_hess = _hessian(loss, params, save_grad=calc_loss_grad)
             setattr(model, save_attr, SymMatrix(data=full_hess))
         else:
             full_hess = None
@@ -95,7 +99,7 @@ class HessianMaker(GradientMaker):
 
             # module hessian
             if full_hess is None:
-                m_hess = _hessian(loss, params)
+                m_hess = _hessian(loss, params, save_grad=calc_loss_grad)
             else:
                 m_numel = sum([p.numel() for p in params])
                 m_hess = full_hess[idx:idx + m_numel, idx:idx + m_numel]
@@ -211,11 +215,11 @@ class HessianMaker(GradientMaker):
 def _hvp(output, inputs, vec: ParamVector):
     grads = torch.autograd.grad(output, inputs=inputs, create_graph=True)
     v = torch.autograd.grad(grads, inputs=inputs, grad_outputs=tuple(vec.values()))
-    return ParamVector(inputs, v)
+    return ParamVector(inputs, v), ParamVector(inputs, grads)
 
 
 # adopted from https://github.com/mariogeiger/hessian/blob/master/hessian/hessian.py
-def _hessian(output, inputs, out=None, allow_unused=False, create_graph=False):
+def _hessian(output, inputs, out=None, allow_unused=False, create_graph=False, save_grad=False):
     '''
     Compute the Hessian of `output` with respect to `inputs`
     hessian((x * y).sum(), [x, y])
@@ -236,6 +240,8 @@ def _hessian(output, inputs, out=None, allow_unused=False, create_graph=False):
         [grad] = torch.autograd.grad(
             output, inp, create_graph=True, allow_unused=allow_unused
         )
+        if save_grad and inp.requires_grad:
+            inp.grad = grad
         grad = torch.zeros_like(inp) if grad is None else grad
         grad = grad.contiguous().view(-1)
 
