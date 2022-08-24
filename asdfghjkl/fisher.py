@@ -43,7 +43,6 @@ class FisherMakerConfig:
     seed: int = None
     fisher_attr: str = 'fisher'
     fvp_attr: str = 'fvp'
-    fvp: bool = False
     ignore_modules: List[Any] = None
     is_distributed: bool = False
     all_reduce: bool = False
@@ -70,13 +69,13 @@ class FisherMaker(GradientMaker):
                              scale=1.,
                              accumulate=False,
                              calc_loss_grad=True,
+                             fvp=False,
                              vec: ParamVector = None) -> Union[Tuple[Any, Tensor], Any]:
         model = self.model
         fisher_shapes = self.config.fisher_shapes
         if isinstance(fisher_shapes, str):
             fisher_shapes = [fisher_shapes]
         ignore_modules = self.config.ignore_modules
-        fvp = self.config.fvp
         seed = self.config.seed
         scale /= data_size
 
@@ -283,7 +282,7 @@ class FisherMaker(GradientMaker):
 
     def _get_fvp_fn(self):
         def fvp_fn(vec: ParamVector) -> ParamVector:
-            self.forward_and_backward(vec=vec)
+            self.forward_and_backward(fvp=True, vec=vec)
             return self.load_fvp(self.config.fisher_shapes[0])
         return fvp_fn
 
