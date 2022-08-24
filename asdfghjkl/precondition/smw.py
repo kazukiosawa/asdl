@@ -46,7 +46,7 @@ class SmwEmpNaturalGradientMaker(GradientMaker):
         if isinstance(self._loss_fn, nn.Module):
             data_average = self._loss_fn.reduction == 'mean'
         else:
-            data_average = self._loss_fn_kwargs.get('reduction', None) == 'mean'
+            data_average = self._loss_fn_kwargs.get('reduction', 'mean') == 'mean'
         model = self.model
         if data_size == _required:
             raise ValueError('data_size has to be specified.')

@@ -118,11 +118,12 @@ class FisherMaker(GradientMaker):
             for p in model.parameters():
                 if p.grad is not None:
                     p.grad.div_(data_size)
+            loss.div_(data_size)
 
         if self._loss_fn is None:
             return self._model_output
         else:
-            return self._model_output, self._loss
+            return self._model_output, loss
 
     def _call_loss_fn(self) -> Tensor:
         assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
