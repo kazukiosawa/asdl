@@ -39,11 +39,13 @@ class HessianMaker(GradientMaker):
     def forward_and_backward(self,
                              data_size=1,
                              scale=1.,
+                             accumulate=False,
                              hvp=False,
                              vec: ParamVector = None
                              ) -> Union[Tuple[Any, Tensor], Any]:
         scale /= data_size
-        self.zero_hessian(hvp)
+        if not accumulate:
+            self.zero_hessian(hvp)
 
         self._forward()
         if hvp:
