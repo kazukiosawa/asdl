@@ -20,7 +20,6 @@ class NewtonGradientMakerConfig:
 
 class NewtonGradientMaker(GradientMaker):
     def __init__(self, model, config):
-        assert isinstance(config, NewtonGradientMakerConfig)
         super().__init__(model)
         self.config = config
         hessian_config = HessianMakerConfig(hessian_shapes=[SHAPE_FULL])

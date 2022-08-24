@@ -53,7 +53,6 @@ class NaturalGradientMaker(GradientMaker):
         assert not isinstance(model, DDP), f'{DDP} is not supported.'
         del DDP
         super().__init__(model)
-        assert isinstance(config, NaturalGradientMakerConfig)
         if isinstance(config.fisher_shape, str):
             config.fisher_shape = [config.fisher_shape]
         self.config = config

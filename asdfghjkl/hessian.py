@@ -26,7 +26,6 @@ class HessianMakerConfig:
 
 class HessianMaker(GradientMaker):
     def __init__(self, model: nn.Module, config):
-        assert isinstance(config, HessianMakerConfig)
         super().__init__(model)
         self.config = config
 

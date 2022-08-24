@@ -38,7 +38,6 @@ class SmwEmpNaturalGradientMakerConfig:
 class SmwEmpNaturalGradientMaker(GradientMaker):
     def __init__(self, model, config):
         super().__init__(model)
-        assert isinstance(config, SmwEmpNaturalGradientMakerConfig)
         self.config = config
 
     def forward_and_backward(self, data_size=_required) -> Tuple[Tensor, Tensor]:
