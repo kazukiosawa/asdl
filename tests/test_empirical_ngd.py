@@ -40,20 +40,24 @@ optim2 = torch.optim.SGD(model2.parameters(), lr=1)
 config = SmwEmpNaturalGradientMakerConfig(damping=damping)
 grad_maker2 = SmwEmpNaturalGradientMaker(model2, config)
 
-for x, t in dataloader:
+for i, (x, t) in enumerate(dataloader):
+    print('*******************')
+    print('batch', i)
     x, t = x.to(device), t.to(device)
     optim1.zero_grad(set_to_none=True)
     dummy_y = grad_maker1.setup_model_call(model1, x)
     grad_maker1.setup_loss_call(F.cross_entropy, dummy_y, t)
-    grad_maker1.forward_and_backward(scale=1/batchsize)
+    y1, loss1 = grad_maker1.forward_and_backward(data_size=batchsize)
     optim1.step()
 
     optim2.zero_grad(set_to_none=True)
     dummy_y = grad_maker2.setup_model_call(model2, x)
     grad_maker2.setup_loss_call(F.cross_entropy, dummy_y, t)
-    grad_maker2.forward_and_backward(data_size=batchsize)
+    y2, loss2 = grad_maker2.forward_and_backward(data_size=batchsize)
     optim2.step()
 
+    print('logits', float(y1.norm()), float(y2.norm()))
+    print('loss', float(loss1), float(loss2))
     for p1, p2 in zip(model1.parameters(), model2.parameters()):
         if p1.requires_grad:
-            torch.testing.assert_allclose(p1.grad, p2.grad, rtol=1e-4, atol=1e-3)
+            print('grad', float(p1.grad.norm()), float(p2.grad.norm()))
