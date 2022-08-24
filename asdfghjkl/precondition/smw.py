@@ -10,8 +10,6 @@ from ..core import extend
 from ..operations import OP_GRAM_HADAMARD
 from ..grad_maker import GradientMaker
 
-_required = -1
-
 __all__ = ['SmwEmpNaturalGradientMakerConfig', 'SmwEmpNaturalGradientMaker']
 
 
@@ -32,6 +30,7 @@ def cholesky_solve(A, b, eps=1e-8):
 
 @dataclass
 class SmwEmpNaturalGradientMakerConfig:
+    data_size: int
     damping: float = 1.e-5
 
 
@@ -40,16 +39,14 @@ class SmwEmpNaturalGradientMaker(GradientMaker):
         super().__init__(model)
         self.config = config
 
-    def forward_and_backward(self, data_size=_required) -> Tuple[Tensor, Tensor]:
+    def forward_and_backward(self) -> Tuple[Tensor, Tensor]:
         assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
         if isinstance(self._loss_fn, nn.Module):
             data_average = self._loss_fn.reduction == 'mean'
         else:
             data_average = self._loss_fn_kwargs.get('reduction', 'mean') == 'mean'
         model = self.model
-        if data_size == _required:
-            raise ValueError('data_size has to be specified.')
-        n = data_size
+        n = self.config.data_size
         damping = self.config.damping
 
         with extend(model, OP_GRAM_HADAMARD):
