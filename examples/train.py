@@ -55,8 +55,7 @@ def train(epoch):
 
         dummy_y = grad_maker.setup_model_call(model, x)
         grad_maker.setup_loss_call(F.cross_entropy, dummy_y, t)
-        grad_maker.forward_and_backward()
-        loss = grad_maker.loss
+        y, loss = grad_maker.forward_and_backward()
 
         optimizer.step()
 
