@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Any
 from dataclasses import dataclass
 
 import torch
@@ -39,7 +39,7 @@ class SmwEmpNaturalGradientMaker(GradientMaker):
         super().__init__(model)
         self.config = config
 
-    def forward_and_backward(self) -> Tuple[Tensor, Tensor]:
+    def forward_and_backward(self) -> Tuple[Any, Tensor]:
         assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
         if isinstance(self._loss_fn, nn.Module):
             data_average = self._loss_fn.reduction == 'mean'
