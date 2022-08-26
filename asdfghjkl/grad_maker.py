@@ -109,15 +109,43 @@ class GradientMaker:
     def loss(self):
         return self._loss
 
-    def forward_and_backward(self) -> Union[Tuple[Any, Tensor], Any]:
-        # Performs a simple gradient calculation.
+    def call_model(self) -> Any:
+        assert self._model_fn is not None, \
+            'model_fn is not set. Call setup_model_call() ' \
+            'before calling forward_and_backward().'
+        self._model_output = self._model_fn(*self._model_args, **self._model_kwargs)
+        self._logits = self._dummy_logits.eval(self._model_output)
+        return self._model_output
+
+    def call_loss(self) -> Tensor:
+        if self._loss_fn is None:
+            assert self._dummy_loss is not None, 'Neither loss_fn nor loss_repr is not set. ' \
+                                                 'Call setup_loss_call() or setup_loss_repr() ' \
+                                                 'before calling forward_and_backward().'
+            self._loss = self._dummy_loss.eval(self._model_output)
+        else:
+            self._loss = self._call_loss_fn()
+        return self._loss
+
+    def forward(self) -> Union[Tuple[Any, Tensor], Any]:
+        # Performs simple model and loss evaluations.
         # A child class should override this function.
-        self._forward()
-        self._loss.backward()
+        self.call_model()
+        self.call_loss()
         if self._loss_fn is None:
             return self._model_output
         else:
             return self._model_output, self._loss
+
+    def backward(self):
+        # Performs a simple gradient calculation.
+        # A child class should override this function.
+        self._loss.backward()
+
+    def forward_and_backward(self) -> Union[Tuple[Any, Tensor], Any]:
+        rst = self.forward()
+        self.backward()
+        return rst
 
     def delegate_forward_and_backward(self, other, *args, **kwargs):
         other.setup_model_call(self._model_fn, *self._model_args, **self._model_kwargs)
@@ -130,20 +158,6 @@ class GradientMaker:
         self._model_output = other.model_output
         self._loss = other.loss
         return rst
-
-    def _forward(self):
-        assert self._model_fn is not None, \
-            'model_fn is not set. Call setup_model_call() ' \
-            'before calling forward_and_backward().'
-        self._model_output = self._model_fn(*self._model_args, **self._model_kwargs)
-        self._logits = self._dummy_logits.eval(self._model_output)
-        if self._loss_fn is None:
-            assert self._dummy_loss is not None, 'Neither loss_fn nor loss_repr is not set. ' \
-                                                 'Call setup_loss_call() or setup_loss_repr() ' \
-                                                 'before calling forward_and_backward().'
-            self._loss = self._dummy_loss.eval(self._model_output)
-        else:
-            self._loss = self._call_loss_fn()
 
     def _get_mapped_loss_fn_args_kwargs(self):
         def mapping(value):

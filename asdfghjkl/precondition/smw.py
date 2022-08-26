@@ -51,7 +51,7 @@ class SmwEmpNaturalGradientMaker(GradientMaker):
 
         with extend(model, OP_GRAM_HADAMARD):
             zero_kernel(model, n, n)
-            self._forward()
+            self.forward()
             batch_loss = self._loss
             params = [p for p in model.parameters() if p.requires_grad]
             torch.autograd.grad(batch_loss.sum(), params, retain_graph=True)

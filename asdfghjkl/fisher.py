@@ -90,7 +90,7 @@ class FisherMaker(GradientMaker):
         calc_loss_grad_after_fisher = calc_loss_grad and not self.is_fisher_emp
 
         with no_centered_cov(model, fisher_shapes, ignore_modules=ignore_modules, cvp=fvp, vectors=vec) as cxt:
-            self._forward()
+            self.forward()
             loss = self._loss
 
             def closure(nll_expr, retain_graph=False):

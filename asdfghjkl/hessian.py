@@ -45,7 +45,7 @@ class HessianMaker(GradientMaker):
         if not accumulate:
             self.zero_hessian(hvp)
 
-        self._forward()
+        self.forward()
         if hvp:
             params = [p for p in self.model.parameters() if p.requires_grad]
             v, g = _hvp(self._loss, params, vec)

@@ -112,7 +112,7 @@ class NaturalGradientMaker(GradientMaker):
         if self._step % self.config.upd_curvature_interval == 0:
             self.update_curvature(scale=scale, accumulate=accumulate)
         else:
-            self._forward()
+            self.forward()
             self._loss.backward()
         if self._step % self.config.upd_inv_interval == 0:
             self.update_inv()
