@@ -17,7 +17,7 @@ OP_COV_KRON = 'cov_kron'  # Kronecker-factored
 OP_COV_DIAG = 'cov_diag'  # diagonal
 OP_COV_UNIT_WISE = 'cov_unit_wise'  # unit-wise
 OP_RFIM_RELU = 'rfim_relu'  # relative FIM for ReLU
-OP_RFIM_SOFTMAX = 'rfim_softmax'  # relative FIM for sotmax
+OP_RFIM_SOFTMAX = 'rfim_softmax'  # relative FIM for softmax
 
 # compute Gram matrix
 OP_GRAM_DIRECT = 'gram_direct'  # direct
