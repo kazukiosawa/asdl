@@ -57,11 +57,6 @@ def train(epoch):
         grad_maker.setup_loss_call(F.cross_entropy, dummy_y, t)
         y, loss = grad_maker.forward_and_backward()
 
-        # separate call for forward, loss, and backward
-        # profiling
-        # parallel
-        # pipelining
-
         optimizer.step()
 
         if batch_idx % args.log_interval == 0:
