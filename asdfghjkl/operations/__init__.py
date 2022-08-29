@@ -25,6 +25,7 @@ __all__ = [
     'OP_COV',
     'OP_CVP',
     'OP_COV_KRON',
+    'OP_COV_SWIFT_KRON',
     'OP_COV_DIAG',
     'OP_COV_UNIT_WISE',
     'OP_RFIM_RELU',

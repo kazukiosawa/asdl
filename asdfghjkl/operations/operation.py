@@ -14,6 +14,7 @@ OP_FULL_CVP = 'full_cvp'  # full covariance-vector product
 OP_COV = 'cov'  # layer-wise covariance
 OP_CVP = 'cvp'  # layer-wise covariance-vector product
 OP_COV_KRON = 'cov_kron'  # Kronecker-factored
+OP_COV_SWIFT_KRON = 'cov_swift_kron'  # swift Kronecker-factored
 OP_COV_DIAG = 'cov_diag'  # diagonal
 OP_COV_UNIT_WISE = 'cov_unit_wise'  # unit-wise
 OP_RFIM_RELU = 'rfim_relu'  # relative FIM for ReLU
@@ -33,17 +34,17 @@ OP_MEAN_OUTGRADS = 'mean_outgrads'  # compute the mean outgrads
 OP_BFGS_KRON_S_AS = 'bfgs_kron_s_As'  # compute s ans As for K-BFGS
 
 ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
-           OP_COV_KRON, OP_COV_DIAG, OP_COV_UNIT_WISE,
+           OP_COV_KRON, OP_COV_SWIFT_KRON, OP_COV_DIAG, OP_COV_UNIT_WISE,
            OP_RFIM_RELU, OP_RFIM_SOFTMAX,
            OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS,
            OP_SAVE_INPUTS, OP_SAVE_OUTGRADS,
            OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_MEAN_OUTGRADS,
            OP_OUT_SPATIAL_SIZE, OP_BFGS_KRON_S_AS]
 
-FWD_OPS = [OP_SAVE_INPUTS, OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX,
+FWD_OPS = [OP_SAVE_INPUTS, OP_COV_KRON, OP_COV_SWIFT_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX,
            OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE]
 BWD_OPS_WITH_INPUTS = [OP_COV, OP_CVP, OP_COV_DIAG, OP_COV_UNIT_WISE, OP_BATCH_GRADS, OP_GRAM_DIRECT]
-BWD_OPS = [OP_SAVE_OUTGRADS, OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX, OP_MEAN_OUTGRADS] \
+BWD_OPS = [OP_SAVE_OUTGRADS, OP_COV_KRON, OP_COV_SWIFT_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX, OP_MEAN_OUTGRADS] \
           + BWD_OPS_WITH_INPUTS
 
 
@@ -134,6 +135,9 @@ class Operation:
             if op_name == OP_COV_KRON:
                 A = self.cov_kron_A(module, in_data)
                 self.accumulate_result(A, OP_COV_KRON, 'A')
+            elif op_name == OP_COV_SWIFT_KRON:
+                A = self.cov_swift_kron_A(module, in_data)
+                self.accumulate_result(A, OP_COV_KRON, 'A')  # not OP_COV_SWIFT_KRON
             elif op_name == OP_GRAM_HADAMARD:
                 assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
                 n_data = in_data.shape[0]
@@ -193,6 +197,9 @@ class Operation:
             elif op_name == OP_COV_KRON:
                 B = self.cov_kron_B(module, out_grads)
                 self.accumulate_result(B, OP_COV_KRON, 'B')
+            elif op_name == OP_COV_SWIFT_KRON:
+                B = self.cov_swift_kron_B(module, out_grads)
+                self.accumulate_result(B, OP_COV_KRON, 'B')  # not OP_COV_SWIFT_KRON
             elif op_name == OP_COV_UNIT_WISE:
                 if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm)):
                     assert original_requires_grad(module, 'weight') and original_requires_grad(module, 'bias'), \
@@ -301,7 +308,15 @@ class Operation:
         raise NotImplementedError
 
     @staticmethod
+    def cov_swift_kron_A(module, in_data):
+        raise NotImplementedError
+
+    @staticmethod
     def cov_kron_B(module, out_grads):
+        raise NotImplementedError
+
+    @staticmethod
+    def cov_swift_kron_B(module, out_grads):
         raise NotImplementedError
 
     @staticmethod
@@ -531,7 +546,7 @@ class OperationContext:
     def cov_diag(self, module):
         return self.get_result(module, OP_COV_DIAG)
 
-    def calc_cov(self, module, shape=SHAPE_LAYER_WISE, kron=None, clear_in_out=False, num_batches=None, tag=''):
+    def calc_cov(self, module, shape=SHAPE_LAYER_WISE, kron=None, clear_in_out=False, num_batches=None, swift=False, tag=''):
         operation, in_data, out_grads = self.load_op_in_out(module)
         if shape == SHAPE_KRON:
             if kron is None:
@@ -546,7 +561,10 @@ class OperationContext:
                             tensor = in_data[i]
                         if self._input_scale != 1:
                             tensor = tensor * self._input_scale
-                        A = operation.cov_kron_A(module, tensor)
+                        if swift:
+                            A = operation.cov_swift_kron_A(module, tensor)
+                        else:
+                            A = operation.cov_kron_A(module, tensor)
                         self.accumulate_result(module, A, OP_COV_KRON, 'A')
             if 'B' in kron and out_grads is not None:
                 max_len = len(out_grads) if num_batches is None else min(len(out_grads), num_batches)
@@ -558,7 +576,10 @@ class OperationContext:
                             tensor = out_grads[i]
                         if self._output_scale != 1:
                             tensor = tensor * self._output_scale
-                        B = operation.cov_kron_B(module, tensor)
+                        if swift:
+                            B = operation.cov_swift_kron_B(module, tensor)
+                        else:
+                            B = operation.cov_kron_B(module, tensor)
                         self.accumulate_result(module, B, OP_COV_KRON, 'B')
         else:
             if in_data is None or out_grads is None:

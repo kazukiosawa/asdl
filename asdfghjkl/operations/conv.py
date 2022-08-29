@@ -83,11 +83,27 @@ class Conv2d(Operation):
             m, m.T
         ).div(out_size)  # (c_in)(kernel_size) x (c_in)(kernel_size)
 
+    @classmethod
+    def cov_swift_kron_A(cls, module, in_data):
+        n, cin_ks, _ = in_data.shape
+        if n < cin_ks:
+            return in_data.sum(dim=-1)  # n x (c_in)(kernel_size)
+        else:
+            return cls.cov_kron_A(module, in_data)  # (c_in)(kernel_size) x (c_in)(kernel_size)
+
     @staticmethod
     def cov_kron_B(module, out_grads):
         m = out_grads.transpose(0,
                                 1).flatten(start_dim=1)  # c_out x n(out_size)
         return torch.matmul(m, m.T)  # c_out x c_out
+
+    @classmethod
+    def cov_swift_kron_B(cls, module, out_grads):
+        n, c_out, _ = out_grads.shape
+        if n < c_out:
+            return out_grads.sum(dim=-1)  # n x c_out
+        else:
+            return cls.cov_kron_B(module, out_grads)  # c_out x c_out
 
     @staticmethod
     def gram_A(module, in_data1, in_data2):

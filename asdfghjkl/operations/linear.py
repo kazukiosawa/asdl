@@ -73,9 +73,25 @@ class Linear(Operation):
     def cov_kron_A(module, in_data):
         return torch.matmul(in_data.T, in_data)  # f_in x f_in
 
+    @classmethod
+    def cov_swift_kron_A(cls, module, in_data):
+        n, f_in = in_data.shape
+        if n < f_in:
+            return in_data  # n x f_in
+        else:
+            return cls.cov_kron_A(module, in_data)  # f_in x f_in
+
     @staticmethod
     def cov_kron_B(module, out_grads):
         return torch.matmul(out_grads.T, out_grads)  # f_out x f_out
+
+    @classmethod
+    def cov_swift_kron_B(cls, module, out_grads):
+        n, f_out = out_grads.shape
+        if n < f_out:
+            return out_grads  # n x f_out
+        else:
+            return cls.cov_kron_B(module, out_grads)  # f_out x f_out
 
     @staticmethod
     def cov_unit_wise(module, in_data, out_grads):

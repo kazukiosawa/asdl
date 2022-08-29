@@ -13,8 +13,8 @@ _REQUIRES_GRAD_ATTR = '_original_requires_grad'
 __all__ = [
     'original_requires_grad', 'record_original_requires_grad',
     'restore_original_requires_grad', 'skip_param_grad', 'im2col_2d',
-    'im2col_2d_slow', 'cholesky_inv', 'PseudoBatchLoaderGenerator', 'nvtx_range',
-    'has_reduction'
+    'im2col_2d_slow', 'cholesky_inv', 'smw_inv', 'PseudoBatchLoaderGenerator',
+    'nvtx_range', 'has_reduction'
 ]
 
 
@@ -87,6 +87,18 @@ def cholesky_inv(X, damping=1e-7):
     u = torch.linalg.cholesky(X)
     diag -= damping
     return torch.cholesky_inverse(u)
+
+
+def smw_inv(X, damping=1e-7):
+    n, d = X.shape  # n x d
+    I = torch.eye(d, device=X.device)
+    K = X @ X.T  # n x n
+    diag = torch.diagonal(K)
+    diag += damping * n
+    u = torch.linalg.cholesky(K)
+    Kinv_X = torch.cholesky_solve(X, u)  # n x d
+    X_Kinv_X = X.T @ Kinv_X  # d x d
+    return 1/damping * (I - X_Kinv_X)  # d x d
 
 
 class PseudoBatchLoaderGenerator:

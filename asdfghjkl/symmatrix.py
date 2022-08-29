@@ -2,7 +2,7 @@ import os
 from operator import iadd
 import numpy as np
 import torch
-from .utils import cholesky_inv
+from .utils import cholesky_inv, smw_inv
 from .vector import ParamVector
 
 __all__ = [
@@ -450,11 +450,17 @@ class Kron:
         if calc_A_inv:
             assert self.has_A
             if not torch.all(self.A == 0):
-                self.A_inv = cholesky_inv(self.A, damping_A)
+                if self.A.shape[0] != self.A.shape[1]:
+                    self.A_inv = smw_inv(self.A, damping_A)
+                else:
+                    self.A_inv = cholesky_inv(self.A, damping_A)
         if calc_B_inv:
             assert self.has_B
             if not torch.all(self.B == 0):
-                self.B_inv = cholesky_inv(self.B, damping_B)
+                if self.B.shape[0] != self.B.shape[1]:
+                    self.B_inv = smw_inv(self.B, damping_B)
+                else:
+                    self.B_inv = cholesky_inv(self.B, damping_B)
 
     def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
         mat_A = self.A_inv if use_inv else self.A

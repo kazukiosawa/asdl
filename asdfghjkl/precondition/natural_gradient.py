@@ -570,8 +570,8 @@ class LayerWiseNaturalGradientMaker(NaturalGradientMaker):
 
 
 class KfacGradientMaker(NaturalGradientMaker):
-    def __init__(self, model, config: NaturalGradientConfig):
-        config.fisher_shape = [SHAPE_KRON,
+    def __init__(self, model, config: NaturalGradientConfig, swift=False):
+        config.fisher_shape = [SHAPE_SWIFT_KRON if swift else SHAPE_KRON,
                                (nn.BatchNorm1d, SHAPE_UNIT_WISE),
                                (nn.BatchNorm2d, SHAPE_UNIT_WISE),
                                (nn.LayerNorm, SHAPE_UNIT_WISE)]
