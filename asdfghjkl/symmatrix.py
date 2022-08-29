@@ -384,6 +384,14 @@ class Kron:
             self._B_dim = self.B.shape[-1]
         return self._B_dim
 
+    @property
+    def A_is_square(self):
+        return self.A.shape[0] == self.A.shape[1]
+
+    @property
+    def B_is_square(self):
+        return self.B.shape[0] == self.B.shape[1]
+
     def mul_(self, value):
         if self.has_A:
             self.A.mul_(value)
@@ -438,8 +446,8 @@ class Kron:
     def update_inv(self, damping=_default_damping, calc_A_inv=True, calc_B_inv=True, eps=1e-7):
         assert self.has_data
         if self.has_A and self.has_B:
-            A_eig_mean = self.A.trace() / self.A_dim
-            B_eig_mean = self.B.trace() / self.B_dim
+            A_eig_mean = (self.A.trace() if self.A_is_square else torch.sum(self.A ** 2)) / self.A_dim
+            B_eig_mean = (self.B.trace() if self.B_is_square else torch.sum(self.B ** 2)) / self.B_dim
             pi = torch.sqrt(A_eig_mean / B_eig_mean)
             r = damping**0.5
             damping_A = max(r * pi, eps)
@@ -450,17 +458,17 @@ class Kron:
         if calc_A_inv:
             assert self.has_A
             if not torch.all(self.A == 0):
-                if self.A.shape[0] != self.A.shape[1]:
-                    self.A_inv = smw_inv(self.A, damping_A)
-                else:
+                if self.A_is_square:
                     self.A_inv = cholesky_inv(self.A, damping_A)
+                else:
+                    self.A_inv = smw_inv(self.A, damping_A)
         if calc_B_inv:
             assert self.has_B
             if not torch.all(self.B == 0):
-                if self.B.shape[0] != self.B.shape[1]:
-                    self.B_inv = smw_inv(self.B, damping_B)
-                else:
+                if self.B_is_square:
                     self.B_inv = cholesky_inv(self.B, damping_B)
+                else:
+                    self.B_inv = smw_inv(self.B, damping_B)
 
     def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
         mat_A = self.A_inv if use_inv else self.A
