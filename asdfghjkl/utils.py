@@ -95,10 +95,9 @@ def smw_inv(X, damping=1e-7):
     K = X @ X.T  # n x n
     diag = torch.diagonal(K)
     diag += damping * n
-    u = torch.linalg.cholesky(K)
-    Kinv_X = torch.cholesky_solve(X, u)  # n x d
+    Kinv_X = torch.linalg.solve(K, X)  # n x d
     X_Kinv_X = X.T @ Kinv_X  # d x d
-    return 1/damping * (I - X_Kinv_X)  # d x d
+    return (I - X_Kinv_X) / damping  # d x d
 
 
 class PseudoBatchLoaderGenerator:
