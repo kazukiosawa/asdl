@@ -18,7 +18,7 @@ from ..grad_maker import GradientMaker
 
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 _invalid_ema_decay = -1
-_module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG]
+_module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_SWIFT_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG]
 
 __all__ = [
     'NaturalGradientConfig', 'NaturalGradientMaker', 'FullNaturalGradientMaker', 'LayerWiseNaturalGradientMaker',
@@ -169,7 +169,7 @@ class NaturalGradientMaker(GradientMaker):
             return None
         if shape in [SHAPE_FULL, SHAPE_LAYER_WISE]:
             return fisher
-        elif shape == SHAPE_KRON:
+        elif shape in [SHAPE_KRON, SHAPE_SWIFT_KRON]:
             return fisher.kron
         elif shape == SHAPE_UNIT_WISE:
             return fisher.unit
@@ -270,20 +270,20 @@ class NaturalGradientMaker(GradientMaker):
                     continue
 
                 event = f'inv_{shape}'
-                if shape == SHAPE_KRON:
+                if shape in [SHAPE_KRON, SHAPE_SWIFT_KRON]:
                     for A_or_B in kron:
                         event += f'_{A_or_B}'
 
                 with nvtx_range(event + self.nvtx_tag(name)):
                     if self.is_module_for_inv_and_precondition(module):
-                        if shape == SHAPE_KRON:
+                        if shape in [SHAPE_KRON, SHAPE_SWIFT_KRON]:
                             matrix.update_inv(damping, calc_A_inv='A' in kron, calc_B_inv='B' in kron)
                         else:
                             matrix.update_inv(damping)
 
                     if zero_curvature:
                         with torch.no_grad():
-                            if shape == SHAPE_KRON:
+                            if shape in [SHAPE_KRON, SHAPE_SWIFT_KRON]:
                                 if 'A' in kron:
                                     matrix.A.mul_(0)
                                 if 'B' in kron:
@@ -459,7 +459,7 @@ class NaturalGradientMaker(GradientMaker):
             return [['data']]
         elif shape == SHAPE_LAYER_WISE:
             return [['data']]
-        elif shape == SHAPE_KRON:
+        elif shape in [SHAPE_KRON, SHAPE_SWIFT_KRON]:
             if kron is None:
                 kron = ['A', 'B']
             assert all(A_or_B in ['A', 'B'] for A_or_B in kron)
