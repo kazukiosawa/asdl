@@ -34,6 +34,7 @@ class NaturalGradientConfig:
     loss_type: str = LOSS_CROSS_ENTROPY
     damping: float = 1e-5
     ema_decay: float = _invalid_ema_decay
+    scale: float = 1.
     grad_scale: float = 1.
     upd_curvature_interval: int = 1
     upd_inv_interval: int = 1
@@ -108,9 +109,9 @@ class NaturalGradientMaker(GradientMaker):
 
         self._step = 0
 
-    def forward_and_backward(self, scale=1., accumulate=False) -> Union[Tuple[Any, Tensor], Any]:
+    def forward_and_backward(self, accumulate=False) -> Union[Tuple[Any, Tensor], Any]:
         if self._step % self.config.upd_curvature_interval == 0:
-            self.update_curvature(scale=scale, accumulate=accumulate)
+            self.update_curvature(accumulate=accumulate)
         else:
             self.forward()
             self._loss.backward()
@@ -196,7 +197,6 @@ class NaturalGradientMaker(GradientMaker):
 
     @nvtx_range('update_curvature')
     def update_curvature(self,
-                         scale=1.,
                          accumulate=False,
                          cxt: OperationContext = None,
                          closure: Callable = None,
@@ -206,6 +206,7 @@ class NaturalGradientMaker(GradientMaker):
                          no_save=False):
         config = self.config
         fisher_maker = self.fisher_maker
+        scale = config.scale
 
         ema_decay = config.ema_decay
         if ema_decay != _invalid_ema_decay:
@@ -575,6 +576,8 @@ class KfacGradientMaker(NaturalGradientMaker):
                                (nn.BatchNorm1d, SHAPE_UNIT_WISE),
                                (nn.BatchNorm2d, SHAPE_UNIT_WISE),
                                (nn.LayerNorm, SHAPE_UNIT_WISE)]
+        if swift:
+            config.scale = config.data_size
         super().__init__(model, config)
 
 
