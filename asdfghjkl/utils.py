@@ -89,15 +89,15 @@ def cholesky_inv(X, damping=1e-7):
     return torch.cholesky_inverse(u)
 
 
-def smw_inv(X, damping=1e-7):
-    n, d = X.shape  # n x d
-    I = torch.eye(d, device=X.device)
-    K = X @ X.T  # n x n
+def smw_inv(x, damping=1e-7):
+    n, d = x.shape  # n x d
+    I = torch.eye(d, device=x.device)
+    K = x @ x.T  # n x n
     diag = torch.diagonal(K)
     diag += damping * n
-    Kinv_X = torch.linalg.solve(K, X)  # n x d
-    X_Kinv_X = X.T @ Kinv_X  # d x d
-    return (I - X_Kinv_X) / damping  # d x d
+    Kinv_x = torch.linalg.solve(K, x)  # n x d
+    xt_Kinv_x = x.T @ Kinv_x  # d x d
+    return (I - xt_Kinv_x) / damping  # d x d
 
 
 class PseudoBatchLoaderGenerator:
