@@ -24,6 +24,7 @@ OPTIM_FULL_PSGD = 'full_psgd'
 OPTIM_KRON_PSGD = 'kron_psgd'
 OPTIM_NEWTON = 'newton'
 OPTIM_ABS_NEWTON = 'abs_newton'
+OPTiM_KBFGS = 'kbfgs'
 
 
 def main():
@@ -179,6 +180,10 @@ if __name__ == '__main__':
     elif args.optim == OPTIM_ABS_NEWTON:
         config = asdl.NewtonGradientConfig(damping=args.damping, absolute=True)
         grad_maker = asdl.NewtonGradientMaker(model, config)
+    elif args.optim == OPTiM_KBFGS:
+        config = asdl.KronBfgsGradientConfig(data_size=args.batch_size,
+                                             damping=args.damping)
+        grad_maker = asdl.KronBfgsGradientMaker(model, config)
     else:
         grad_maker = asdl.GradientMaker(model)
 

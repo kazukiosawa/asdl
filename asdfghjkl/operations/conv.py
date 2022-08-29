@@ -12,13 +12,14 @@ class Conv2d(Operation):
 
     Argument shapes
     in_data: n x (c_in)(kernel_size) x out_size
-    out_grads: n x c_out x out_size
+    out_data: n x c_out x out_size
+    out_grads: n x c_out x h_out x w_out
 
     kernel_size = (k_h)(k_w)
     out_size = output feature map size
     """
     @staticmethod
-    def preprocess_in_data(module, in_data, out_data):
+    def preprocess_in_data(module, in_data, ouT_data):
         # n x c x h_in x w_in -> n x c(kh)(kw) x (h_out)(w_out)
         return im2col_2d(in_data, module)
 
@@ -121,3 +122,31 @@ class Conv2d(Operation):
         m = torch.bmm(m, m.transpose(1, 2)).view(n, c_out, f_in, f_in)
         # c_out x f_in x f_in
         return m.sum(dim=0)
+
+    @staticmethod
+    def in_data_mean(module, in_data):
+        in_data = in_data.mean(dim=2)  # n x (c_in)(kernel_size)
+        return in_data.mean(dim=0)  # (c_in)(kernel_size)
+
+    @staticmethod
+    def out_data_mean(module, out_data):
+        # n x c_out x h_out x w_out -> n x c_out x (h_out)(w_out)
+        out_data = out_data.flatten(start_dim=2)
+        return out_data.mean(dim=2)  # n x c_out
+
+    @staticmethod
+    def out_spatial_size(module, out_data):
+        return out_data.shape[-2] * out_data.shape[-1]
+
+    @staticmethod
+    def out_grads_mean(module, out_grads):
+        return out_grads.mean(dim=2)  # n x c_out
+
+    @staticmethod
+    def bfgs_kron_s_As(module, in_data):
+        H = module.bfgs.kron.A_inv  # (c_in)(ks) x (c_in)(ks)
+        in_data = in_data.mean(dim=2)  # n x (c_in)(ks)
+        s = torch.mv(H, in_data.mean(dim=0))  # (c_in)(ks)
+        indata_s = torch.mv(in_data, s)  # n
+        As = torch.mv(in_data.T, indata_s)  # (c_in)(ks)
+        return s, As

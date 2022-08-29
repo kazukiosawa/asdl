@@ -107,3 +107,28 @@ class Linear(Operation):
         f = diag_p - ppt  # n x f_out x f_out
         xxt = torch.einsum('bi,bj->bij', in_data, in_data)  # n x f_in x f_in
         return torch.einsum('bij,bkl->ikjl', f, xxt)  # (f_out)(f_in)(f_out)(f_in)
+
+    @staticmethod
+    def in_data_mean(module, in_data):
+        return in_data.mean(dim=0)  # f_in
+
+    @staticmethod
+    def out_data_mean(module, out_data):
+        return out_data.mean(dim=0)  # f_out
+
+    @staticmethod
+    def out_spatial_size(module, out_data):
+        return 1
+
+    @staticmethod
+    def out_grads_mean(module, out_grads):
+        return out_grads.mean(dim=0)  # f_out
+
+    @staticmethod
+    def bfgs_kron_s_As(module, in_data):
+        H = module.bfgs.kron.A_inv  # f_in x f_in
+        s = torch.mv(H, in_data.mean(dim=0))  # fin
+        indata_s = torch.mv(in_data, s)  # n
+        As = torch.mv(in_data.T, indata_s)  # f_in
+        return s, As
+

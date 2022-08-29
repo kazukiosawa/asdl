@@ -26,16 +26,25 @@ OP_GRAM_HADAMARD = 'gram_hada'  # Hadamard-factored
 OP_BATCH_GRADS = 'batch_grads'  # compute batched gradients (per-example gradients)
 OP_SAVE_INPUTS = 'save_inputs'  # save inputs during a forward-pass
 OP_SAVE_OUTGRADS = 'save_outgrads'  # save outgrads during a backward-pass
+OP_MEAN_INPUTS = 'mean_inputs'  # compute the mean of inputs
+OP_MEAN_OUTPUTS = 'mean_outputs'  # compute the mean of outputs
+OP_OUT_SPATIAL_SIZE = 'out_spatial_size'  # get the spatial size of outputs
+OP_MEAN_OUTGRADS = 'mean_outgrads'  # compute the mean outgrads
+OP_BFGS_KRON_S_AS = 'bfgs_kron_s_As'  # compute s ans As for K-BFGS
 
 ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
            OP_COV_KRON, OP_COV_DIAG, OP_COV_UNIT_WISE,
            OP_RFIM_RELU, OP_RFIM_SOFTMAX,
            OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS,
-           OP_SAVE_INPUTS, OP_SAVE_OUTGRADS]
+           OP_SAVE_INPUTS, OP_SAVE_OUTGRADS,
+           OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_MEAN_OUTGRADS,
+           OP_OUT_SPATIAL_SIZE, OP_BFGS_KRON_S_AS]
 
-FWD_OPS = [OP_SAVE_INPUTS, OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX]
+FWD_OPS = [OP_SAVE_INPUTS, OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX,
+           OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE]
 BWD_OPS_WITH_INPUTS = [OP_COV, OP_CVP, OP_COV_DIAG, OP_COV_UNIT_WISE, OP_BATCH_GRADS, OP_GRAM_DIRECT]
-BWD_OPS = [OP_SAVE_OUTGRADS, OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX] + BWD_OPS_WITH_INPUTS
+BWD_OPS = [OP_SAVE_OUTGRADS, OP_COV_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX, OP_MEAN_OUTGRADS] \
+          + BWD_OPS_WITH_INPUTS
 
 
 class Operation:
@@ -140,6 +149,14 @@ class Operation:
                 self.accumulate_result(self.rfim_relu(module, in_data, out_data), OP_RFIM_RELU)
             elif op_name == OP_RFIM_SOFTMAX:
                 self.accumulate_result(self.rfim_softmax(module, in_data, out_data), OP_RFIM_SOFTMAX)
+            elif op_name == OP_MEAN_INPUTS:
+                self.accumulate_result(self.in_data_mean(module, in_data), OP_MEAN_INPUTS)
+            elif op_name == OP_MEAN_OUTPUTS:
+                self.accumulate_result(self.out_data_mean(module, out_data), OP_MEAN_OUTPUTS)
+            elif op_name == OP_OUT_SPATIAL_SIZE:
+                self.accumulate_result(self.out_spatial_size(module, out_data), OP_OUT_SPATIAL_SIZE)
+            elif op_name == OP_BFGS_KRON_S_AS:
+                self.accumulate_result(self.bfgs_kron_s_As(module, in_data), OP_BFGS_KRON_S_AS)
 
     def backward_pre_process(self, in_data, out_data, out_grads, vector: torch.Tensor = None):
         module = self._module
@@ -221,6 +238,8 @@ class Operation:
                 if original_requires_grad(module, 'bias'):
                     rst = getattr(self, f'{op_name}_bias')(module, out_grads)
                     self.accumulate_result(rst, op_name, 'bias')
+            elif op_name == OP_MEAN_OUTGRADS:
+                self.accumulate_result(self.out_grads_mean(module, out_grads), OP_MEAN_OUTGRADS)
 
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):
@@ -303,6 +322,26 @@ class Operation:
 
     @staticmethod
     def rfim_softmax(module, in_data, out_data):
+        raise NotImplementedError
+
+    @staticmethod
+    def in_data_mean(module, in_data):
+        raise NotImplementedError
+
+    @staticmethod
+    def out_data_mean(module, out_data):
+        raise NotImplementedError
+
+    @staticmethod
+    def out_spatial_size(module, out_data):
+        raise NotImplementedError
+
+    @staticmethod
+    def out_grads_mean(module, out_grads):
+        raise NotImplementedError
+
+    @staticmethod
+    def bfgs_kron_s_As(module, in_data):
         raise NotImplementedError
 
 
@@ -619,3 +658,18 @@ class OperationContext:
 
     def out_grads(self, module):
         return self.get_result(module, OP_SAVE_OUTGRADS)
+
+    def mean_in_data(self, module):
+        return self.get_result(module, OP_MEAN_INPUTS)
+
+    def mean_out_data(self, module):
+        return self.get_result(module, OP_MEAN_OUTPUTS)
+
+    def out_spatial_size(self, module):
+        return self.get_result(module, OP_OUT_SPATIAL_SIZE)
+
+    def mean_out_grads(self, module):
+        return self.get_result(module, OP_MEAN_OUTGRADS)
+
+    def bfgs_kron_s_As(self, module):
+        return self.get_result(module, OP_BFGS_KRON_S_AS)
