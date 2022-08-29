@@ -375,13 +375,13 @@ class Kron:
     @property
     def A_dim(self):
         if self._A_dim is None and self.A is not None:
-            self._A_dim = self.A.shape[0]
+            self._A_dim = self.A.shape[-1]
         return self._A_dim
 
     @property
     def B_dim(self):
         if self._B_dim is None and self.B is not None:
-            self._B_dim = self.B.shape[0]
+            self._B_dim = self.B.shape[-1]
         return self._B_dim
 
     def mul_(self, value):
