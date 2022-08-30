@@ -29,7 +29,7 @@ __all__ = [
 @dataclass
 class NaturalGradientConfig:
     data_size: int
-    fisher_type: str = FISHER_EXACT
+    fisher_type: str = FISHER_MC
     fisher_shape: Union[str, List[Any]] = SHAPE_FULL
     loss_type: str = LOSS_CROSS_ENTROPY
     damping: float = 1e-5
