@@ -15,6 +15,7 @@ OP_COV = 'cov'  # layer-wise covariance
 OP_CVP = 'cvp'  # layer-wise covariance-vector product
 OP_COV_KRON = 'cov_kron'  # Kronecker-factored
 OP_COV_SWIFT_KRON = 'cov_swift_kron'  # swift Kronecker-factored
+OP_COV_KFE = 'cov_kfe'  # Kronecker-factored eigenbasis
 OP_COV_DIAG = 'cov_diag'  # diagonal
 OP_COV_UNIT_WISE = 'cov_unit_wise'  # unit-wise
 OP_RFIM_RELU = 'rfim_relu'  # relative FIM for ReLU
@@ -23,6 +24,7 @@ OP_RFIM_SOFTMAX = 'rfim_softmax'  # relative FIM for softmax
 # compute Gram matrix
 OP_GRAM_DIRECT = 'gram_direct'  # direct
 OP_GRAM_HADAMARD = 'gram_hada'  # Hadamard-factored
+
 
 OP_BATCH_GRADS = 'batch_grads'  # compute batched gradients (per-example gradients)
 OP_SAVE_INPUTS = 'save_inputs'  # save inputs during a forward-pass
@@ -39,12 +41,14 @@ ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
            OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS,
            OP_SAVE_INPUTS, OP_SAVE_OUTGRADS,
            OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_MEAN_OUTGRADS,
-           OP_OUT_SPATIAL_SIZE, OP_BFGS_KRON_S_AS]
+           OP_OUT_SPATIAL_SIZE, OP_BFGS_KRON_S_AS,
+           OP_COV_KFE]
 
 FWD_OPS = [OP_SAVE_INPUTS, OP_COV_KRON, OP_COV_SWIFT_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX,
-           OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE]
+           OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE, OP_COV_KFE]
 BWD_OPS_WITH_INPUTS = [OP_COV, OP_CVP, OP_COV_DIAG, OP_COV_UNIT_WISE, OP_BATCH_GRADS, OP_GRAM_DIRECT]
-BWD_OPS = [OP_SAVE_OUTGRADS, OP_COV_KRON, OP_COV_SWIFT_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX, OP_MEAN_OUTGRADS] \
+BWD_OPS = [OP_SAVE_OUTGRADS, OP_COV_KRON, OP_COV_SWIFT_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX,
+           OP_MEAN_OUTGRADS, OP_COV_KFE] \
           + BWD_OPS_WITH_INPUTS
 
 
@@ -64,6 +68,8 @@ class Operation:
         op_names = set(op_names)
         for name in op_names:
             assert name in ALL_OPS, f'Invalid operation name: {name}.'
+        if OP_COV_KFE in op_names and OP_SAVE_INPUTS not in op_names:
+            op_names.add(OP_SAVE_INPUTS)
         self._op_names = op_names
         self._op_results = {}
 
@@ -161,6 +167,8 @@ class Operation:
                 self.accumulate_result(self.out_spatial_size(module, out_data), OP_OUT_SPATIAL_SIZE)
             elif op_name == OP_BFGS_KRON_S_AS:
                 self.accumulate_result(self.bfgs_kron_s_As(module, in_data), OP_BFGS_KRON_S_AS)
+            elif op_name == OP_COV_KFE:
+                self.accumulate_result(self.cov_kfe_A(module, in_data), OP_COV_KFE, 'A')
 
     def backward_pre_process(self, in_data, out_data, out_grads, vector: torch.Tensor = None):
         module = self._module
@@ -247,6 +255,10 @@ class Operation:
                     self.accumulate_result(rst, op_name, 'bias')
             elif op_name == OP_MEAN_OUTGRADS:
                 self.accumulate_result(self.out_grads_mean(module, out_grads), OP_MEAN_OUTGRADS)
+            elif op_name == OP_COV_KFE:
+                self.accumulate_result(self.cov_kfe_B(module, out_grads), OP_COV_KFE, 'B')
+                Ua, Ub = self.get_result(OP_COV_KFE, 'A'), self.get_result(OP_COV_KFE, 'B')
+                self.accumulate_result(self.cov_kfe_scale(module, in_data, out_grads, Ua, Ub), OP_COV_KFE, 'scale')
 
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):
@@ -317,6 +329,18 @@ class Operation:
 
     @staticmethod
     def cov_swift_kron_B(module, out_grads):
+        raise NotImplementedError
+
+    @staticmethod
+    def cov_kfe_A(module, in_data):
+        raise NotImplementedError
+
+    @staticmethod
+    def cov_kfe_B(module, out_grads):
+        raise NotImplementedError
+
+    @staticmethod
+    def cov_kfe_scale(module, in_data, out_grads, Ua, Ub):
         raise NotImplementedError
 
     @staticmethod
@@ -404,6 +428,8 @@ class OperationContext:
         self.get_operation(module).forward_post_process(in_data, out_data)
 
     def call_operations_in_backward(self, module, in_data, out_data, out_grads):
+        if in_data is None:
+            in_data = self.in_data(module)[-1]  # use last saved in_data if exists
         vector = self.get_vectors_by_module(module, flatten=True)
         self.get_operation(module).backward_pre_process(in_data, out_data, out_grads, vector)
 
@@ -625,6 +651,11 @@ class OperationContext:
         if cov_kron is not None:
             kwargs['kron_A'] = cov_kron.pop('A', None)
             kwargs['kron_B'] = cov_kron.pop('B', None)
+        cov_kfe = self.get_result(module, OP_COV_KFE, pop=pop)
+        if cov_kfe is not None:
+            kwargs['kfe_A'] = cov_kfe.pop('A', None)
+            kwargs['kfe_B'] = cov_kfe.pop('B', None)
+            kwargs['kfe_scale'] = cov_kfe.pop('scale', None)
         cov_diag = self.get_result(module, OP_COV_DIAG, pop=pop)
         if cov_diag is not None:
             if original_requires_grad(module, 'weight'):
@@ -674,11 +705,11 @@ class OperationContext:
     def set_output_scale(self, scale):
         self._output_scale = scale
 
-    def in_data(self, module):
-        return self.get_result(module, OP_SAVE_INPUTS)
+    def in_data(self, module, pop=False):
+        return self.get_result(module, OP_SAVE_INPUTS, pop=pop)
 
-    def out_grads(self, module):
-        return self.get_result(module, OP_SAVE_OUTGRADS)
+    def out_grads(self, module, pop=False):
+        return self.get_result(module, OP_SAVE_OUTGRADS, pop=pop)
 
     def mean_in_data(self, module):
         return self.get_result(module, OP_MEAN_INPUTS)

@@ -1,5 +1,6 @@
 from typing import Callable, List, Tuple, Union, Any
 from dataclasses import dataclass
+import warnings
 
 import torch
 from torch import Tensor
@@ -18,11 +19,11 @@ from ..grad_maker import GradientMaker
 
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 _invalid_ema_decay = -1
-_module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_SWIFT_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG]
+_module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_SWIFT_KRON, SHAPE_KFE, SHAPE_UNIT_WISE, SHAPE_DIAG]
 
 __all__ = [
     'NaturalGradientConfig', 'NaturalGradientMaker', 'FullNaturalGradientMaker', 'LayerWiseNaturalGradientMaker',
-    'KfacGradientMaker', 'UnitWiseNaturalGradientMaker', 'DiagNaturalGradientMaker', 'EmpNaturalGradientMaker'
+    'KfacGradientMaker', 'EkfacGradientMaker', 'UnitWiseNaturalGradientMaker', 'DiagNaturalGradientMaker', 'EmpNaturalGradientMaker'
 ]
 
 
@@ -172,6 +173,8 @@ class NaturalGradientMaker(GradientMaker):
             return fisher
         elif shape in [SHAPE_KRON, SHAPE_SWIFT_KRON]:
             return fisher.kron
+        elif shape == SHAPE_KFE:
+            return fisher.kfe
         elif shape == SHAPE_UNIT_WISE:
             return fisher.unit
         elif shape == SHAPE_DIAG:
@@ -303,14 +306,14 @@ class NaturalGradientMaker(GradientMaker):
                     fisher.mul_(0)
 
     @nvtx_range('precondition')
-    def precondition(self, vectors: ParamVector = None, grad_scale=None):
+    def precondition(self, vectors: ParamVector = None, grad_scale=None, use_inv=True):
         if grad_scale is None:
             grad_scale = self.config.grad_scale
         for shape in _module_level_shapes:
             for module in self.modules_for(shape):
                 if not self.is_module_for_inv_and_precondition(module):
                     continue
-                self.precondition_module(module, shape, vectors, grad_scale=grad_scale)
+                self.precondition_module(module, shape, vectors, grad_scale=grad_scale, use_inv=use_inv)
         params = [p for p in self.parameters_for(SHAPE_FULL)]
         if len(params) > 0:
             fisher = self._get_full_fisher()
@@ -320,10 +323,11 @@ class NaturalGradientMaker(GradientMaker):
             assert vectors is not None, 'gradient has not been calculated.'
             if grad_scale != 1:
                 vectors.mul_(grad_scale)
-            fisher.mvp(vectors=vectors, use_inv=True, inplace=True)
+            fisher.mvp(vectors=vectors, use_inv=use_inv, inplace=True)
 
     def precondition_module(self, module, shape=None, vectors: ParamVector = None,
-                            vec_weight: torch.Tensor = None, vec_bias: torch.Tensor = None, grad_scale=None):
+                            vec_weight: torch.Tensor = None, vec_bias: torch.Tensor = None,
+                            grad_scale=None, use_inv=True):
         if grad_scale is None:
             grad_scale = self.config.grad_scale
         if shape is None:
@@ -348,7 +352,10 @@ class NaturalGradientMaker(GradientMaker):
             vec_weight.data.mul_(grad_scale)
             if vec_bias is not None:
                 vec_bias.data.mul_(grad_scale)
-        matrix.mvp(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=True, inplace=True)
+        kwargs = dict(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=use_inv, inplace=True)
+        if shape == SHAPE_KFE:
+            kwargs['eps'] = self.config.damping
+        matrix.mvp(**kwargs)
 
     def is_module_for_inv_and_precondition(self, module: nn.Module):
         if module not in self.modules_for_curvature:
@@ -579,6 +586,22 @@ class KfacGradientMaker(NaturalGradientMaker):
         if swift:
             config.scale = config.data_size
         super().__init__(model, config)
+
+
+class EkfacGradientMaker(NaturalGradientMaker):
+    def __init__(self, model, config: NaturalGradientConfig):
+        assert config.fisher_type == FISHER_EMP, f'{EkfacGradientMaker} supports only {FISHER_EMP}.'
+        if config.upd_inv_interval > 1:
+            warnings.warn(f'{EkfacGradientMaker} ignores upd_inv_interval ({config.upd_inv_interval} is specified.)')
+        config.fisher_shape = [SHAPE_KFE]
+        super().__init__(model, config)
+
+    def update_inv(self, *args, **kwargs):
+        pass
+
+    def precondition(self, vectors: ParamVector = None, grad_scale=None, use_inv=False):
+        assert not use_inv, 'EKFAC does not calculate the inverse matrix.'
+        super().precondition(vectors=vectors, grad_scale=grad_scale, use_inv=False)
 
 
 class UnitWiseNaturalGradientMaker(NaturalGradientMaker):

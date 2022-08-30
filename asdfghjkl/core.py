@@ -86,6 +86,7 @@ def no_centered_cov(model: nn.Module, shapes, ignore_modules=None, cvp=False, ve
         SHAPE_LAYER_WISE: OP_CVP if cvp else OP_COV,  # layer-wise block-diagonal
         SHAPE_KRON: OP_COV_KRON,  # Kronecker-factored
         SHAPE_SWIFT_KRON: OP_COV_SWIFT_KRON,  # swift Kronecker-factored
+        SHAPE_KFE: OP_COV_KFE,  # Kronecker-factored eigenbasis
         SHAPE_UNIT_WISE: OP_COV_UNIT_WISE,  # unit-wise block-diagonal
         SHAPE_DIAG: OP_COV_DIAG,  # diagonal
     }

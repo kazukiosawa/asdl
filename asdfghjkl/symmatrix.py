@@ -2,6 +2,7 @@ import os
 from operator import iadd
 import numpy as np
 import torch
+from torch import Tensor
 from .utils import cholesky_inv, smw_inv
 from .vector import ParamVector
 
@@ -81,22 +82,27 @@ def _load_from_numpy(path, device='cpu'):
 
 
 class SymMatrix:
-    def __init__(self, data=None, kron=None, diag=None, unit=None,
-                 kron_A=None, kron_B=None, diag_weight=None, diag_bias=None, unit_data=None):
-        self.data = data
+    def __init__(self, data=None, kron=None, kfe=None, diag=None, unit=None,
+                 kron_A=None, kron_B=None, kfe_A=None, kfe_B=None, kfe_scale=None,
+                 diag_weight=None, diag_bias=None, unit_data=None):
+        self.data: Tensor = data
         if kron_A is not None or kron_B is not None:
             self.kron = Kron(kron_A, kron_B)
         else:
-            self.kron = kron
+            self.kron: Kron = kron
+        if kfe_A is not None or kfe_B is not None or kfe_scale is not None:
+            self.kfe = KFE(kfe_A, kfe_B, kfe_scale)
+        else:
+            self.kfe: KFE = kfe
         if diag_weight is not None or diag_bias is not None:
             self.diag = Diag(diag_weight, diag_bias)
         else:
-            self.diag = diag
+            self.diag: Diag = diag
         if unit_data is not None:
             self.unit = UnitWise(unit_data)
         else:
-            self.unit = unit
-        self.inv = None
+            self.unit: UnitWise = unit
+        self.inv: Tensor = None
 
     def __repr__(self):
         text = ''
@@ -107,6 +113,13 @@ class SymMatrix:
                 text += f'kron.A {tuple(self.kron.A.shape)}, '
             if self.kron.has_B:
                 text += f'kron.B {tuple(self.kron.B.shape)}, '
+        if self.has_kfe:
+            if self.kfe.has_Ua:
+                text += f'kfe.Ua {tuple(self.kfe.Ua.shape)}'
+            if self.kfe.has_Ub:
+                text += f'kfe.Ub {tuple(self.kfe.Ub.shape)}'
+            if self.kfe.has_scale:
+                text += f'kfe.scale {tuple(self.kfe.scale.shape)}'
         if self.has_unit and self.unit.has_data:
             text += f'unit {tuple(self.unit.data.shape)}'
         if self.has_diag:
@@ -128,6 +141,10 @@ class SymMatrix:
         return self.kron is not None
 
     @property
+    def has_kfe(self):
+        return self.kfe is not None
+
+    @property
     def has_diag(self):
         return self.diag is not None
 
@@ -138,7 +155,7 @@ class SymMatrix:
     def __add__(self, other):
         # NOTE: inv will not be preserved
         values = {}
-        for attr in ['data', 'kron', 'diag', 'unit']:
+        for attr in ['data', 'kron', 'kfe', 'diag', 'unit']:
             self_value = getattr(self, attr)
             other_value = getattr(other, attr)
             if other_value is not None:
@@ -153,7 +170,7 @@ class SymMatrix:
         return SymMatrix(**values)
 
     def __iadd__(self, other):
-        for attr in ['data', 'kron', 'diag', 'unit']:
+        for attr in ['data', 'kron', 'kfe', 'diag', 'unit']:
             self_value = getattr(self, attr)
             other_value = getattr(other, attr)
             if other_value is not None:
@@ -168,6 +185,8 @@ class SymMatrix:
             self.data.mul_(value)
         if self.has_kron:
             self.kron.mul_(value)
+        if self.has_kfe:
+            self.kfe.mul_(value)
         if self.has_diag:
             self.diag.mul_(value)
         if self.has_unit:
@@ -482,6 +501,62 @@ class Kron:
             if inplace:
                 vec_bias.copy_(mvp_b)
             return mvp_w, mvp_b
+        return mvp_w
+
+
+class KFE:
+    def __init__(self, Ua: Tensor, Ub: Tensor, scale: Tensor):
+        self.Ua: Tensor = Ua
+        self.Ub: Tensor = Ub
+        self.scale: Tensor = scale
+
+    @property
+    def has_Ua(self):
+        return self.Ua is not None
+
+    @property
+    def has_Ub(self):
+        return self.Ub is not None
+
+    @property
+    def has_scale(self):
+        return self.scale is not None
+
+    def update_inv(self, *args, **kwargs):
+        pass
+
+    def __add__(self, other):
+        raise NotImplementedError
+
+    def __iadd__(self, other):
+        # NOTE: iadd only scale
+        if not other.has_scale:
+            return self
+        if self.has_scale:
+            self.scale.add_(other.scale)
+        else:
+            self.scale = other.scale
+        return self
+
+    def mul_(self, value):
+        if self.has_scale:
+            self.scale.mul_(value)
+        return self
+
+    def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False, eps=1.e-7):
+        assert not use_inv, 'KFE does not calculate the inverse matrix.'
+        Ua, Ub = self.Ua, self.Ub
+        vec_weight_2d = vec_weight.view(Ub.shape[0], -1)
+        vec_weight_2d_kfe = Ub.mm(vec_weight_2d).mm(Ua)
+        vec_weight_2d_kfe /= (self.scale + eps)
+        mvp_w = Ub.mm(vec_weight_2d_kfe).mm(Ua).view_as(vec_weight)
+        if inplace:
+            vec_weight.copy_(mvp_w)
+#        if vec_bias is not None:
+#            mvp_b = mat_B.mv(vec_bias)
+#            if inplace:
+#                vec_bias.copy_(mvp_b)
+#            return mvp_w, mvp_b
         return mvp_w
 
 

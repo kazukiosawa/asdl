@@ -93,6 +93,36 @@ class Linear(Operation):
         else:
             return cls.cov_kron_B(module, out_grads)  # f_out x f_out
 
+    @classmethod
+    def cov_kfe_A(cls, module, in_data):
+        n, f_in = in_data.shape
+        if n < f_in:
+            _, _, Vt = torch.linalg.svd(in_data, full_matrices=True)
+            return Vt.T  # f_in x f_in
+        else:
+            A = cls.cov_kron_A(module, in_data)
+            _, U = torch.linalg.eigh(A)
+            return U  # f_in x f_in
+
+    @classmethod
+    def cov_kfe_B(cls, module, out_grads):
+        n, f_out = out_grads.shape
+        if n < f_out:
+            _, _, Vt = torch.linalg.svd(out_grads, full_matrices=True)
+            return Vt.T  # f_out x f_out
+        else:
+            B = cls.cov_kron_B(module, out_grads)
+            _, U = torch.linalg.eigh(B)
+            return U  # f_out x f_out
+
+    @classmethod
+    def cov_kfe_scale(cls, module, in_data, out_grads, Ua, Ub):
+        n, f_in = in_data.shape
+        _, f_out = out_grads.shape
+        in_data_kfe = in_data.mm(Ua)
+        out_grads_kfe = out_grads.mm(Ub)
+        return torch.mm(out_grads_kfe.T ** 2, in_data_kfe ** 2) / n
+
     @staticmethod
     def cov_unit_wise(module, in_data, out_grads):
         n, f_in = in_data.shape[0], in_data.shape[1]

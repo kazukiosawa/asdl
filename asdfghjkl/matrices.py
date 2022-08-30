@@ -16,6 +16,7 @@ SHAPE_FULL = 'full'  # full
 SHAPE_LAYER_WISE = 'layer_wise'  # layer-wise block-diagonal
 SHAPE_KRON = 'kron'  # Kronecker-factored
 SHAPE_SWIFT_KRON = 'swift_kron'  # swift Kronecker-factored
+SHAPE_KFE = 'kfe'  # Kronecker-factored eigenbasis
 SHAPE_UNIT_WISE = 'unit_wise'  # unit-wise block-diagonal
 SHAPE_DIAG = 'diag'  # diagonal
 
@@ -29,6 +30,7 @@ __all__ = [
     'SHAPE_LAYER_WISE',
     'SHAPE_KRON',
     'SHAPE_SWIFT_KRON',
+    'SHAPE_KFE',
     'SHAPE_UNIT_WISE',
     'SHAPE_DIAG',
 ]
