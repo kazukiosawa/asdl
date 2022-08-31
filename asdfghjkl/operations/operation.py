@@ -258,7 +258,9 @@ class Operation:
             elif op_name == OP_COV_KFE:
                 self.accumulate_result(self.cov_kfe_B(module, out_grads), OP_COV_KFE, 'B')
                 Ua, Ub = self.get_result(OP_COV_KFE, 'A'), self.get_result(OP_COV_KFE, 'B')
-                self.accumulate_result(self.cov_kfe_scale(module, in_data, out_grads, Ua, Ub), OP_COV_KFE, 'scale')
+                bias = original_requires_grad(module, 'bias')
+                self.accumulate_result(self.cov_kfe_scale(module, in_data, out_grads, Ua, Ub, bias=bias),
+                                       OP_COV_KFE, 'scale')
 
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):
@@ -340,7 +342,7 @@ class Operation:
         raise NotImplementedError
 
     @staticmethod
-    def cov_kfe_scale(module, in_data, out_grads, Ua, Ub):
+    def cov_kfe_scale(module, in_data, out_grads, Ua, Ub, bias=True):
         raise NotImplementedError
 
     @staticmethod

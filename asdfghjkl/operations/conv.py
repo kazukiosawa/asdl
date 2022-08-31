@@ -105,6 +105,44 @@ class Conv2d(Operation):
         else:
             return cls.cov_kron_B(module, out_grads)  # c_out x c_out
 
+    @classmethod
+    def cov_kfe_A(cls, module, in_data):
+        n, cin_ks, out_size = in_data.shape
+        if n * out_size < cin_ks:
+            m = in_data.permute(0, 2, 1).view(n * out_size, -1)
+            _, _, Vt = torch.linalg.svd(m, full_matrices=True)
+            return Vt.T  # (c_in)(kernel_size) x (c_in)(kernel_size)
+        else:
+            A = cls.cov_kron_A(module, in_data)
+            _, U = torch.linalg.eigh(A)
+            return U  # (c_in)(kernel_size) x (c_in)(kernel_size)
+
+    @classmethod
+    def cov_kfe_B(cls, module, out_grads):
+        n, c_out, out_size = out_grads.shape  # n x c_out x out_size
+        if n * out_size < c_out:
+            m = out_grads.permute(0, 2, 1).view(n * out_size, -1)
+            _, _, Vt = torch.linalg.svd(m, full_matrices=True)
+            return Vt.T  # c_out x c_out
+        else:
+            B = cls.cov_kron_B(module, out_grads)
+            _, U = torch.linalg.eigh(B)
+            return U  # c_out x c_out
+
+    @classmethod
+    def cov_kfe_scale(cls, module, in_data, out_grads, Ua, Ub, bias=True):
+        n, cin_ks, out_size = in_data.shape
+        in_data = in_data.permute(0, 2, 1).contiguous().view(n * out_size, -1)  # n(out_size) x (c_in)(kernel_size)
+        _, c_out, _ = out_grads.shape
+        out_grads = out_grads.permute(0, 2, 1).contiguous().view(n * out_size, -1)  # n(out_size) x c_out
+        in_data_kfe = in_data.mm(Ua)
+        out_grads_kfe = out_grads.mm(Ub)
+        scale_w = torch.mm(out_grads_kfe.T ** 2, in_data_kfe ** 2) / n
+        if bias:
+            scale_b = (out_grads_kfe ** 2).mean(dim=0)
+            return scale_w, scale_b
+        return scale_w,
+
     @staticmethod
     def gram_A(module, in_data1, in_data2):
         # n x (c_in)(kernel_size)(out_size)

@@ -1,5 +1,7 @@
 import os
+from typing import Tuple
 from operator import iadd
+
 import numpy as np
 import torch
 from torch import Tensor
@@ -119,7 +121,8 @@ class SymMatrix:
             if self.kfe.has_Ub:
                 text += f'kfe.Ub {tuple(self.kfe.Ub.shape)}'
             if self.kfe.has_scale:
-                text += f'kfe.scale {tuple(self.kfe.scale.shape)}'
+                for i in range(len(self.kfe.scale)):
+                    text += f'kfe.scale{i} {tuple(self.kfe.scale[i].shape)}'
         if self.has_unit and self.unit.has_data:
             text += f'unit {tuple(self.unit.data.shape)}'
         if self.has_diag:
@@ -505,10 +508,10 @@ class Kron:
 
 
 class KFE:
-    def __init__(self, Ua: Tensor, Ub: Tensor, scale: Tensor):
+    def __init__(self, Ua: Tensor, Ub: Tensor, scale: Tuple[Tensor]):
         self.Ua: Tensor = Ua
         self.Ub: Tensor = Ub
-        self.scale: Tensor = scale
+        self.scale: Tuple[Tensor] = scale
 
     @property
     def has_Ua(self):
@@ -533,14 +536,16 @@ class KFE:
         if not other.has_scale:
             return self
         if self.has_scale:
-            self.scale.add_(other.scale)
+            for i in range(len(self.scale)):
+                self.scale[i].add_(other.scale[i])
         else:
             self.scale = other.scale
         return self
 
     def mul_(self, value):
         if self.has_scale:
-            self.scale.mul_(value)
+            for i in range(len(self.scale)):
+                self.scale[i].mul_(value)
         return self
 
     def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False, eps=1.e-7):
@@ -548,15 +553,17 @@ class KFE:
         Ua, Ub = self.Ua, self.Ub
         vec_weight_2d = vec_weight.view(Ub.shape[0], -1)
         vec_weight_2d_kfe = Ub.mm(vec_weight_2d).mm(Ua)
-        vec_weight_2d_kfe /= (self.scale + eps)
+        vec_weight_2d_kfe /= (self.scale[0] + eps)
         mvp_w = Ub.mm(vec_weight_2d_kfe).mm(Ua).view_as(vec_weight)
         if inplace:
             vec_weight.copy_(mvp_w)
-#        if vec_bias is not None:
-#            mvp_b = mat_B.mv(vec_bias)
-#            if inplace:
-#                vec_bias.copy_(mvp_b)
-#            return mvp_w, mvp_b
+        if vec_bias is not None:
+            vec_bias_kfe = Ub.mv(vec_bias)
+            vec_bias_kfe /= (self.scale[1] + eps)
+            mvp_b = Ub.mv(vec_bias_kfe)
+            if inplace:
+                vec_bias.copy_(mvp_b)
+            return mvp_w, mvp_b
         return mvp_w
 
 

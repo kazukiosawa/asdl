@@ -116,12 +116,16 @@ class Linear(Operation):
             return U  # f_out x f_out
 
     @classmethod
-    def cov_kfe_scale(cls, module, in_data, out_grads, Ua, Ub):
+    def cov_kfe_scale(cls, module, in_data, out_grads, Ua, Ub, bias=True):
         n, f_in = in_data.shape
         _, f_out = out_grads.shape
         in_data_kfe = in_data.mm(Ua)
         out_grads_kfe = out_grads.mm(Ub)
-        return torch.mm(out_grads_kfe.T ** 2, in_data_kfe ** 2) / n
+        scale_w = torch.mm(out_grads_kfe.T ** 2, in_data_kfe ** 2) / n
+        if bias:
+            scale_b = (out_grads_kfe ** 2).mean(dim=0)
+            return scale_w, scale_b
+        return scale_w,
 
     @staticmethod
     def cov_unit_wise(module, in_data, out_grads):
