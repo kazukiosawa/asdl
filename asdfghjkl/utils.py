@@ -92,12 +92,12 @@ def cholesky_inv(X, damping=1e-7):
 def smw_inv(x, damping=1e-7):
     n, d = x.shape  # n x d
     I = torch.eye(d, device=x.device)
-    K = x @ x.T  # n x n
-    diag = torch.diagonal(K)
+    G = x @ x.T  # n x n (Gram matrix)
+    diag = torch.diagonal(G)
     diag += damping * n
-    Kinv_x = torch.linalg.solve(K, x)  # n x d
-    xt_Kinv_x = x.T @ Kinv_x  # d x d
-    return (I - xt_Kinv_x) / damping  # d x d
+    Ginv_x = torch.linalg.solve(G, x)  # n x d
+    xt_Ginv_x = x.T @ Ginv_x  # d x d
+    return (I - xt_Ginv_x) / damping  # d x d
 
 
 class PseudoBatchLoaderGenerator:
