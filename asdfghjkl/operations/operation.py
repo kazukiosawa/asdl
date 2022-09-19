@@ -431,7 +431,9 @@ class OperationContext:
 
     def call_operations_in_backward(self, module, in_data, out_data, out_grads):
         if in_data is None:
-            in_data = self.in_data(module)[-1]  # use last saved in_data if exists
+            in_data = self.in_data(module)
+            if in_data is not None:
+                in_data = in_data[-1]  # use last saved in_data if exists
         vector = self.get_vectors_by_module(module, flatten=True)
         self.get_operation(module).backward_pre_process(in_data, out_data, out_grads, vector)
 
