@@ -13,8 +13,8 @@ _REQUIRES_GRAD_ATTR = '_original_requires_grad'
 __all__ = [
     'original_requires_grad', 'record_original_requires_grad',
     'restore_original_requires_grad', 'skip_param_grad', 'im2col_2d',
-    'im2col_2d_slow', 'cholesky_inv', 'smw_inv', 'PseudoBatchLoaderGenerator',
-    'nvtx_range', 'has_reduction'
+    'im2col_2d_slow', 'cholesky_inv', 'cholesky_solve', 'smw_inv',
+    'PseudoBatchLoaderGenerator', 'nvtx_range', 'has_reduction'
 ]
 
 
@@ -87,6 +87,14 @@ def cholesky_inv(X, damping=1e-7):
     u = torch.linalg.cholesky(X)
     diag -= damping
     return torch.cholesky_inverse(u)
+
+
+def cholesky_solve(X, b, damping=1e-7):
+    diag = torch.diagonal(X)
+    diag += damping
+    u = torch.linalg.cholesky(X)
+    diag -= damping
+    return torch.cholesky_solve(b, u)
 
 
 def smw_inv(x, damping=1e-7):
