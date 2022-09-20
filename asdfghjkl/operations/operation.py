@@ -68,7 +68,7 @@ class Operation:
         op_names = set(op_names)
         for name in op_names:
             assert name in ALL_OPS, f'Invalid operation name: {name}.'
-        if OP_COV_KFE in op_names and OP_SAVE_INPUTS not in op_names:
+        if OP_COV_KFE in op_names:
             op_names.add(OP_SAVE_INPUTS)
         self._op_names = op_names
         self._op_results = {}
