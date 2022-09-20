@@ -113,7 +113,8 @@ class NaturalGradientMaker(GradientMaker):
     def forward_and_backward(self, accumulate=False) -> Union[Tuple[Any, Tensor], Any]:
         config = self.config
         if not accumulate:
-            assert config.upd_curvature_interval == config.upd_inv_interval
+            assert config.upd_curvature_interval == config.upd_inv_interval, \
+                'upd_curvature_interval and upd_inv_interval needs to be the same when no curvature accumulation is performed.'
         if self._step % self.config.upd_curvature_interval == 0:
             self.update_curvature(accumulate=accumulate,
                                   calc_inv=not accumulate)
