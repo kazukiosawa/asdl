@@ -81,6 +81,8 @@ class Operation:
             assert name in ALL_OPS, f'Invalid operation name: {name}.'
         if OP_COV_KFE in op_names:
             op_names.add(OP_SAVE_INPUTS)
+        if OP_COV_KRON_INV in op_names or OP_COV_SWIFT_KRON_INV in op_names:
+            op_names.add(OP_SAVE_INPUTS)
         if OP_COV_KRON_PRECOND in op_names:
             op_names.add(OP_SAVE_INPUTS)
             op_names.add(OP_SAVE_OUTGRADS)
@@ -159,15 +161,9 @@ class Operation:
             if op_name == OP_COV_KRON:
                 A = self.cov_kron_A(module, in_data)
                 self.accumulate_result(A, OP_COV_KRON, 'A')
-            elif op_name == OP_COV_KRON_INV:
-                A_inv = self.cov_kron_A_inv(module, in_data)
-                self.accumulate_result(A_inv, OP_COV_KRON_INV, 'A')
             elif op_name == OP_COV_SWIFT_KRON:
                 A = self.cov_swift_kron_A(module, in_data)
                 self.accumulate_result(A, OP_COV_KRON, 'A')  # not OP_COV_SWIFT_KRON
-            elif op_name == OP_COV_SWIFT_KRON_INV:
-                A_inv = self.cov_swift_kron_A_inv(module, in_data)
-                self.accumulate_result(A_inv, OP_COV_KRON_INV, 'A')  # not OP_COV_SWIFT_KRON_INV
             elif op_name == OP_GRAM_HADAMARD:
                 assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
                 n_data = in_data.shape[0]
@@ -230,7 +226,8 @@ class Operation:
                 B = self.cov_kron_B(module, out_grads)
                 self.accumulate_result(B, OP_COV_KRON, 'B')
             elif op_name == OP_COV_KRON_INV:
-                B_inv = self.cov_kron_B(module, out_grads)
+                A_inv, B_inv = self.cov_kron_inv(module, in_data, out_grads)
+                self.accumulate_result(A_inv, OP_COV_KRON_INV, 'A')
                 self.accumulate_result(B_inv, OP_COV_KRON_INV, 'B')
             elif op_name == OP_COV_KRON_PRECOND:
                 self.cov_kron_precondition(module, in_data, out_grads)
@@ -238,7 +235,8 @@ class Operation:
                 B = self.cov_swift_kron_B(module, out_grads)
                 self.accumulate_result(B, OP_COV_KRON, 'B')  # not OP_COV_SWIFT_KRON
             elif op_name == OP_COV_SWIFT_KRON_INV:
-                B_inv = self.cov_swift_kron_B_inv(module, out_grads)
+                A_inv, B_inv = self.cov_swift_kron_inv(module, in_data, out_grads)
+                self.accumulate_result(A_inv, OP_COV_KRON_INV, 'A')  # not OP_COV_SWIFT_KRON_INV
                 self.accumulate_result(B_inv, OP_COV_KRON_INV, 'B')  # not OP_COV_SWIFT_KRON_INV
             elif op_name == OP_COV_UNIT_WISE:
                 if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm)):
@@ -353,41 +351,19 @@ class Operation:
     def cov_kron_A(module, in_data):
         raise NotImplementedError
 
-    def cov_kron_A_inv(self, module, in_data):
-        damping = self._damping
-        return cholesky_inv(self.cov_kron_A(module, in_data), damping)
-
     @staticmethod
     def cov_swift_kron_A(module, in_data):
         raise NotImplementedError
-
-    def cov_swift_kron_A_inv(self, module, in_data):
-        damping = self._damping
-        A = self.cov_swift_kron_A(module, in_data)
-        if A.shape[0] == A.shape[1]:
-            return cholesky_inv(A, damping)
-        return smw_inv(A, damping)
 
     @staticmethod
     def cov_kron_B(module, out_grads):
         raise NotImplementedError
 
-    def cov_kron_B_inv(self, module, out_grads):
-        damping = self._damping
-        return cholesky_inv(self.cov_kron_B(module, out_grads), damping)
-
     @staticmethod
     def cov_swift_kron_B(module, out_grads):
         raise NotImplementedError
 
-    def cov_swift_kron_B_inv(self, module, out_grads):
-        damping = self._damping
-        B = self.cov_swift_kron_A(module, out_grads)
-        if B.shape[0] == B.shape[1]:
-            return cholesky_inv(B, damping)
-        return smw_inv(B, damping)
-
-    def cov_kron_precondition(self, module, in_data, out_grads, eps=1.e-7):
+    def cov_kron_damping(self, in_data, out_grads, eps=1.e-7):
         damping = self._damping
         A_eig_mean = (in_data ** 2).sum() / in_data.shape[-1]
         B_eig_mean = (out_grads ** 2).sum() / out_grads.shape[-1]
@@ -395,13 +371,38 @@ class Operation:
         r = damping**0.5
         damping_A = max(r * pi, eps)
         damping_B = max(r / pi, eps)
+        return damping_A, damping_B
+
+    def cov_kron_inv(self, module, in_data, out_grads):
+        damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
+        A_inv = cholesky_inv(self.cov_kron_A(module, in_data), damping_A)
+        B_inv = cholesky_inv(self.cov_kron_B(module, out_grads), damping_B)
+        return A_inv, B_inv
+
+    def cov_swift_kron_inv(self, module, in_data, out_grads):
+        damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
+        A = self.cov_swift_kron_A(module, in_data)
+        if A.shape[0] == A.shape[1]:
+            A_inv = cholesky_inv(A, damping_A)
+        else:
+            A_inv = smw_inv(A, damping_A)
+        del A
         B = self.cov_swift_kron_B(module, out_grads)
-        print(module)
+        if B.shape[0] == B.shape[1]:
+            B_inv = cholesky_inv(B, damping_B)
+        else:
+            B_inv = smw_inv(B, damping_B)
+        del B
+        return A_inv, B_inv
+
+    def cov_kron_precondition(self, module, in_data, out_grads):
+        damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
+        B = self.cov_swift_kron_B(module, out_grads)
         grad_weight_2d = module.weight.grad.view(B.shape[0], -1)
         grad_weight_2d.copy_(cholesky_solve(B, grad_weight_2d, damping_B))
         if original_requires_grad(module, 'bias'):
             grad_bias = module.bias.grad
-            grad_bias.copy_(cholesky_solve(B, grad_bias.unsqueeze(-1), damping).squeeze())
+            grad_bias.copy_(cholesky_solve(B, grad_bias.unsqueeze(-1), self._damping).squeeze())
         del B
         A = self.cov_swift_kron_A(module, in_data)
         grad_weight_2d.copy_(cholesky_solve(A, grad_weight_2d.T, damping_A).T)
