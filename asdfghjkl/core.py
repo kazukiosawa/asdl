@@ -79,12 +79,12 @@ def extend(model,
         del cxt
 
 
-def no_centered_cov(model: nn.Module, shapes, ignore_modules=None, cvp=False, vectors: ParamVector = None, stream: Stream = None) -> OperationContext:
+def no_centered_cov(model: nn.Module, shapes, ignore_modules=None, cvp=False, vectors: ParamVector = None, stream: Stream = None, calc_inv=False) -> OperationContext:
     shape_to_op = {
         SHAPE_FULL: OP_BATCH_GRADS,  # full
         SHAPE_LAYER_WISE: OP_CVP if cvp else OP_COV,  # layer-wise block-diagonal
-        SHAPE_KRON: OP_COV_KRON,  # Kronecker-factored
-        SHAPE_SWIFT_KRON: OP_COV_SWIFT_KRON,  # swift Kronecker-factored
+        SHAPE_KRON: OP_COV_KRON_INV if calc_inv else OP_COV_KRON,  # Kronecker-factored
+        SHAPE_SWIFT_KRON: OP_COV_SWIFT_KRON_INV if calc_inv else OP_COV_SWIFT_KRON,  # swift Kronecker-factored
         SHAPE_KFE: OP_COV_KFE,  # Kronecker-factored eigenbasis
         SHAPE_UNIT_WISE: OP_COV_UNIT_WISE,  # unit-wise block-diagonal
         SHAPE_DIAG: OP_COV_DIAG,  # diagonal
