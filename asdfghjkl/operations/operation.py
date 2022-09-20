@@ -91,6 +91,7 @@ class Operation:
         self._op_names = op_names
         self._op_results = {}
         self._damping = 1.e-7
+        self._scale = 1.
 
     def accumulate_result(self, value, *keys, extend=False):
         """
@@ -147,6 +148,9 @@ class Operation:
 
     def set_damping(self, value):
         self._damping = value
+
+    def set_scale(self, value):
+        self._scale = value
 
     def forward_post_process(self, in_data: torch.Tensor, out_data: torch.Tensor):
         module = self._module
@@ -371,22 +375,24 @@ class Operation:
         return damping_A, damping_B
 
     def cov_kron_inv(self, module, in_data, out_grads):
+        scale = self._scale
         damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
-        A_inv = cholesky_inv(self.cov_kron_A(module, in_data), damping_A)
-        B_inv = cholesky_inv(self.cov_kron_B(module, out_grads), damping_B)
+        A_inv = cholesky_inv(self.cov_kron_A(module, in_data).mul_(scale), damping_A)
+        B_inv = cholesky_inv(self.cov_kron_B(module, out_grads).mul_(scale), damping_B)
         return A_inv, B_inv
 
     def cov_swift_kron_inv(self, module, in_data, out_grads):
+        scale = self._scale
         damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
         A = self.cov_swift_kron_A(module, in_data)
         if A.shape[0] == A.shape[1]:
-            A_inv = cholesky_inv(A, damping_A)
+            A_inv = cholesky_inv(A.mul_(scale), damping_A)
         else:
             A_inv = smw_inv(A, damping_A)
         del A
         B = self.cov_swift_kron_B(module, out_grads)
         if B.shape[0] == B.shape[1]:
-            B_inv = cholesky_inv(B, damping_B)
+            B_inv = cholesky_inv(B.mul_(scale), damping_B)
         else:
             B_inv = smw_inv(B, damping_B)
         del B
@@ -838,3 +844,10 @@ class OperationContext:
     def set_damping_all(self, value):
         for operation in self._operations.values():
             operation.set_damping(value)
+
+    def set_scale(self, module, value):
+        self.get_operation(module).set_scale(value)
+
+    def set_scale_all(self, value):
+        for operation in self._operations.values():
+            operation.set_scale(value)

@@ -96,9 +96,9 @@ class FisherMaker(GradientMaker):
         with no_centered_cov(model, fisher_shapes, **kwargs) as cxt:
             # TODO: register fisher via cxt (only when accumulating)
             #self.register_fisher(cxt)
-            # TODO: apply scale during operations
             if damping is not None:
                 cxt.set_damping_all(damping)
+            cxt.set_scale_all(scale)
 
             self.forward()
             loss = self._loss
