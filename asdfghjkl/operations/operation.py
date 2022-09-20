@@ -3,7 +3,7 @@ from typing import Dict, List
 import torch
 import torch.nn as nn
 from torch.cuda import nvtx
-from ..utils import original_requires_grad
+from ..utils import original_requires_grad, cholesky_solve
 from ..matrices import *
 from ..symmatrix import *
 from ..vector import ParamVector
@@ -14,7 +14,10 @@ OP_FULL_CVP = 'full_cvp'  # full covariance-vector product
 OP_COV = 'cov'  # layer-wise covariance
 OP_CVP = 'cvp'  # layer-wise covariance-vector product
 OP_COV_KRON = 'cov_kron'  # Kronecker-factored
+OP_COV_KRON_INV = 'cov_kron_inv'  # Kronecker-factored inverse
 OP_COV_SWIFT_KRON = 'cov_swift_kron'  # swift Kronecker-factored
+OP_COV_SWIFT_KRON_INV = 'cov_swift_kron_inv'  # swift Kronecker-factored inverse
+OP_COV_KRON_PRECOND = 'cov_kron_precondition'  # precondition grad with KF inverse
 OP_COV_KFE = 'cov_kfe'  # Kronecker-factored eigenbasis
 OP_COV_DIAG = 'cov_diag'  # diagonal
 OP_COV_UNIT_WISE = 'cov_unit_wise'  # unit-wise
@@ -36,7 +39,9 @@ OP_MEAN_OUTGRADS = 'mean_outgrads'  # compute the mean outgrads
 OP_BFGS_KRON_S_AS = 'bfgs_kron_s_As'  # compute s ans As for K-BFGS
 
 ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
-           OP_COV_KRON, OP_COV_SWIFT_KRON, OP_COV_DIAG, OP_COV_UNIT_WISE,
+           OP_COV_KRON, OP_COV_KRON_INV, OP_COV_KRON_PRECOND,
+           OP_COV_SWIFT_KRON, OP_COV_SWIFT_KRON_INV,
+           OP_COV_DIAG, OP_COV_UNIT_WISE,
            OP_RFIM_RELU, OP_RFIM_SOFTMAX,
            OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS,
            OP_SAVE_INPUTS, OP_SAVE_OUTGRADS,
@@ -44,10 +49,16 @@ ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
            OP_OUT_SPATIAL_SIZE, OP_BFGS_KRON_S_AS,
            OP_COV_KFE]
 
-FWD_OPS = [OP_SAVE_INPUTS, OP_COV_KRON, OP_COV_SWIFT_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX,
+FWD_OPS = [OP_SAVE_INPUTS,
+           OP_COV_KRON, OP_COV_KRON_INV,
+           OP_COV_SWIFT_KRON, OP_COV_SWIFT_KRON_INV,
+           OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX,
            OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE, OP_COV_KFE]
 BWD_OPS_WITH_INPUTS = [OP_COV, OP_CVP, OP_COV_DIAG, OP_COV_UNIT_WISE, OP_BATCH_GRADS, OP_GRAM_DIRECT]
-BWD_OPS = [OP_SAVE_OUTGRADS, OP_COV_KRON, OP_COV_SWIFT_KRON, OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX,
+BWD_OPS = [OP_SAVE_OUTGRADS,
+           OP_COV_KRON, OP_COV_KRON_INV,
+           OP_COV_SWIFT_KRON, OP_COV_SWIFT_KRON_INV,
+           OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX,
            OP_MEAN_OUTGRADS, OP_COV_KFE] \
           + BWD_OPS_WITH_INPUTS
 
@@ -70,8 +81,12 @@ class Operation:
             assert name in ALL_OPS, f'Invalid operation name: {name}.'
         if OP_COV_KFE in op_names:
             op_names.add(OP_SAVE_INPUTS)
+        if OP_COV_KRON_PRECOND in op_names:
+            op_names.add(OP_SAVE_INPUTS)
+            op_names.add(OP_SAVE_OUTGRADS)
         self._op_names = op_names
         self._op_results = {}
+        self._damping = 1.e-7
 
     def accumulate_result(self, value, *keys, extend=False):
         """
@@ -126,6 +141,9 @@ class Operation:
         while op_name in self._op_names:
             self._op_names.remove(op_name)
 
+    def set_damping(self, value):
+        self._damping = value
+
     def forward_post_process(self, in_data: torch.Tensor, out_data: torch.Tensor):
         module = self._module
         op_names = self._op_names
@@ -141,9 +159,15 @@ class Operation:
             if op_name == OP_COV_KRON:
                 A = self.cov_kron_A(module, in_data)
                 self.accumulate_result(A, OP_COV_KRON, 'A')
+            elif op_name == OP_COV_KRON_INV:
+                A_inv = self.cov_kron_A_inv(module, in_data)
+                self.accumulate_result(A_inv, OP_COV_KRON_INV, 'A')
             elif op_name == OP_COV_SWIFT_KRON:
                 A = self.cov_swift_kron_A(module, in_data)
                 self.accumulate_result(A, OP_COV_KRON, 'A')  # not OP_COV_SWIFT_KRON
+            elif op_name == OP_COV_SWIFT_KRON_INV:
+                A_inv = self.cov_swift_kron_A_inv(module, in_data)
+                self.accumulate_result(A_inv, OP_COV_KRON_INV, 'A')  # not OP_COV_SWIFT_KRON_INV
             elif op_name == OP_GRAM_HADAMARD:
                 assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
                 n_data = in_data.shape[0]
@@ -205,9 +229,17 @@ class Operation:
             elif op_name == OP_COV_KRON:
                 B = self.cov_kron_B(module, out_grads)
                 self.accumulate_result(B, OP_COV_KRON, 'B')
+            elif op_name == OP_COV_KRON_INV:
+                B_inv = self.cov_kron_B(module, out_grads)
+                self.accumulate_result(B_inv, OP_COV_KRON_INV, 'B')
+            elif op_name == OP_COV_KRON_PRECOND:
+                self.cov_kron_precondition(module, in_data, out_grads)
             elif op_name == OP_COV_SWIFT_KRON:
                 B = self.cov_swift_kron_B(module, out_grads)
                 self.accumulate_result(B, OP_COV_KRON, 'B')  # not OP_COV_SWIFT_KRON
+            elif op_name == OP_COV_SWIFT_KRON_INV:
+                B_inv = self.cov_swift_kron_B_inv(module, out_grads)
+                self.accumulate_result(B_inv, OP_COV_KRON_INV, 'B')  # not OP_COV_SWIFT_KRON_INV
             elif op_name == OP_COV_UNIT_WISE:
                 if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm)):
                     assert original_requires_grad(module, 'weight') and original_requires_grad(module, 'bias'), \
@@ -321,17 +353,49 @@ class Operation:
     def cov_kron_A(module, in_data):
         raise NotImplementedError
 
+    def cov_kron_A_inv(self, module, out_grads):
+        raise NotImplementedError
+
     @staticmethod
     def cov_swift_kron_A(module, in_data):
+        raise NotImplementedError
+
+    def cov_swift_kron_A_inv(self, module, in_data):
         raise NotImplementedError
 
     @staticmethod
     def cov_kron_B(module, out_grads):
         raise NotImplementedError
 
+    def cov_kron_B_inv(self, module, out_grads):
+        raise NotImplementedError
+
     @staticmethod
     def cov_swift_kron_B(module, out_grads):
         raise NotImplementedError
+
+    def cov_swift_kron_B_inv(self, module, out_grads):
+        raise NotImplementedError
+
+    def cov_kron_precondition(self, module, in_data, out_grads, eps=1.e-7):
+        damping = self._damping
+        A_eig_mean = (in_data ** 2).sum() / in_data.shape[-1]
+        B_eig_mean = (out_grads ** 2).sum() / out_grads.shape[-1]
+        pi = torch.sqrt(A_eig_mean / B_eig_mean)
+        r = damping**0.5
+        damping_A = max(r * pi, eps)
+        damping_B = max(r / pi, eps)
+        B = self.cov_swift_kron_B(module, out_grads)
+        print(module)
+        grad_weight_2d = module.weight.grad.view(B.shape[0], -1)
+        grad_weight_2d.copy_(cholesky_solve(B, grad_weight_2d, damping_B))
+        if original_requires_grad(module, 'bias'):
+            grad_bias = module.bias.grad
+            grad_bias.copy_(cholesky_solve(B, grad_bias.unsqueeze(-1), damping).squeeze())
+        del B
+        A = self.cov_swift_kron_A(module, in_data)
+        grad_weight_2d.copy_(cholesky_solve(A, grad_weight_2d.T, damping_A).T)
+        del A
 
     @staticmethod
     def cov_kfe_A(module, in_data):
@@ -434,6 +498,10 @@ class OperationContext:
             in_data = self.in_data(module)
             if in_data is not None:
                 in_data = in_data[-1]  # use last saved in_data if exists
+        if out_grads is None:
+            out_grads = self.out_grads(module)
+            if out_grads is not None:
+                out_grads = out_grads[-1]  # use last saved out_grads if exits
         vector = self.get_vectors_by_module(module, flatten=True)
         self.get_operation(module).backward_pre_process(in_data, out_data, out_grads, vector)
 
@@ -655,6 +723,10 @@ class OperationContext:
         if cov_kron is not None:
             kwargs['kron_A'] = cov_kron.pop('A', None)
             kwargs['kron_B'] = cov_kron.pop('B', None)
+        cov_kron_inv = self.get_result(module, OP_COV_KRON_INV, pop=pop)
+        if cov_kron_inv is not None:
+            kwargs['kron_A_inv'] = cov_kron_inv.pop('A', None)
+            kwargs['kron_B_inv'] = cov_kron_inv.pop('B', None)
         cov_kfe = self.get_result(module, OP_COV_KFE, pop=pop)
         if cov_kfe is not None:
             kwargs['kfe_A'] = cov_kfe.pop('A', None)
@@ -729,3 +801,10 @@ class OperationContext:
 
     def bfgs_kron_s_As(self, module):
         return self.get_result(module, OP_BFGS_KRON_S_AS)
+
+    def set_damping(self, module, value):
+        self.get_operation(module).set_damping(value)
+
+    def set_damping_all(self, value):
+        for operation in self._operations.values():
+            operation.set_damping(value)
