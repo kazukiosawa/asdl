@@ -85,11 +85,12 @@ def _load_from_numpy(path, device='cpu'):
 
 class SymMatrix:
     def __init__(self, data=None, kron=None, kfe=None, diag=None, unit=None,
-                 kron_A=None, kron_B=None, kfe_A=None, kfe_B=None, kfe_scale=None,
+                 kron_A=None, kron_B=None, kron_A_inv=None, kron_B_inv=None,
+                 kfe_A=None, kfe_B=None, kfe_scale=None,
                  diag_weight=None, diag_bias=None, unit_data=None):
         self.data: Tensor = data
-        if kron_A is not None or kron_B is not None:
-            self.kron = Kron(kron_A, kron_B)
+        if not (kron_A is None and kron_B is None and kron_A_inv is None and kron_B_inv is None):
+            self.kron = Kron(kron_A, kron_B, kron_A_inv, kron_B_inv)
         else:
             self.kron: Kron = kron
         if kfe_A is not None or kfe_B is not None or kfe_scale is not None:
@@ -342,11 +343,11 @@ class SymMatrix:
 
 
 class Kron:
-    def __init__(self, A, B):
+    def __init__(self, A, B, A_inv=None, B_inv=None):
         self.A = A
         self.B = B
-        self.A_inv = None
-        self.B_inv = None
+        self.A_inv = A_inv
+        self.B_inv = B_inv
         self._A_dim = self._B_dim = None
 
     def __add__(self, other):
@@ -396,14 +397,20 @@ class Kron:
 
     @property
     def A_dim(self):
-        if self._A_dim is None and self.A is not None:
-            self._A_dim = self.A.shape[-1]
+        if self._A_dim is None:
+            if self.A is not None:
+                self._A_dim = self.A.shape[-1]
+            elif self.A_inv is not None:
+                self._A_dim = self.A_inv.shape[-1]
         return self._A_dim
 
     @property
     def B_dim(self):
-        if self._B_dim is None and self.B is not None:
-            self._B_dim = self.B.shape[-1]
+        if self._B_dim is None:
+            if self.B is not None:
+                self._B_dim = self.B.shape[-1]
+            elif self.B_inv is not None:
+                self._B_dim = self.B_inv.shape[-1]
         return self._B_dim
 
     @property
