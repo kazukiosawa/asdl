@@ -111,12 +111,17 @@ class NaturalGradientMaker(GradientMaker):
         self._step = 0
 
     def forward_and_backward(self, accumulate=False) -> Union[Tuple[Any, Tensor], Any]:
+        config = self.config
+        if not accumulate:
+            assert config.upd_curvature_interval == config.upd_inv_interval
         if self._step % self.config.upd_curvature_interval == 0:
-            self.update_curvature(accumulate=accumulate)
+            self.update_curvature(accumulate=accumulate,
+                                  calc_inv=not accumulate)
         else:
             self.forward()
             self._loss.backward()
-        if self._step % self.config.upd_inv_interval == 0:
+
+        if accumulate and self._step % self.config.upd_inv_interval == 0:
             self.update_inv()
         self.precondition()
         self._step += 1
@@ -203,6 +208,7 @@ class NaturalGradientMaker(GradientMaker):
                          accumulate=False,
                          cxt: OperationContext = None,
                          closure: Callable = None,
+                         calc_inv=False,
                          module_name=None,
                          num_batches=None,
                          kron=None,
@@ -245,7 +251,10 @@ class NaturalGradientMaker(GradientMaker):
                                                data_size=self.config.data_size,
                                                scale=scale,
                                                accumulate=accumulate,
-                                               calc_loss_grad=True)
+                                               calc_loss_grad=True,
+                                               calc_inv=calc_inv,
+                                               damping=self.config.damping
+                                               )
 
     def save_curvature(self, cxt, scale=1., module=None, module_name=None):
         self.fisher_maker.accumulate(cxt, scale, target_module=module, target_module_name=module_name)

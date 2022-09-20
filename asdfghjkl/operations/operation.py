@@ -742,6 +742,28 @@ class OperationContext:
             return None
         return SymMatrix(**kwargs)
 
+    def register_symmatrix(self, module, matrix: SymMatrix):
+        operation = self.get_operation(module)
+        if matrix.has_kron:
+            if matrix.kron.has_A:
+                operation.accumulate_result(matrix.kron.A, OP_COV_KRON, 'A')
+            if matrix.kron.has_B:
+                operation.accumulate_result(matrix.kron.B, OP_COV_KRON, 'B')
+        if matrix.has_kfe:
+            if matrix.kfe.has_Ua:
+                operation.accumulate_result(matrix.kfe.Ua, OP_COV_KFE, 'A')
+            if matrix.kfe.has_Ub:
+                operation.accumulate_result(matrix.kfe.Ub, OP_COV_KFE, 'B')
+            if matrix.kfe.has_scale:
+                operation.accumulate_result(matrix.kfe.scale, OP_COV_KFE, 'scale')
+        if matrix.has_unit and matrix.unit.has_data:
+            operation.accumulate_result(matrix.unit, OP_COV_UNIT_WISE)
+        if matrix.has_diag:
+            if matrix.diag.has_weight:
+                operation.accumulate_result(matrix.diag.weight, OP_COV_DIAG)
+            if matrix.diag.has_bias:
+                operation.accumulate_result(matrix.diag.bias, OP_COV_DIAG)
+
     def full_cov_symmatrix(self, module, pop=False):
         cov = self.get_result(module, OP_FULL_COV, pop=pop)
         if cov is None:

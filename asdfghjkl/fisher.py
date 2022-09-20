@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import torch.distributed as dist
 
 from .core import no_centered_cov
+from .operations import OperationContext
 from .utils import skip_param_grad, has_reduction
 from .grad_maker import GradientMaker
 from .matrices import *
@@ -69,7 +70,9 @@ class FisherMaker(GradientMaker):
                              scale=1.,
                              accumulate=False,
                              calc_loss_grad=True,
+                             calc_inv=False,
                              fvp=False,
+                             damping=None,
                              vec: ParamVector = None) -> Union[Tuple[Any, Tensor], Any]:
         model = self.model
         fisher_shapes = self.config.fisher_shapes
@@ -89,7 +92,14 @@ class FisherMaker(GradientMaker):
         calc_loss_grad_with_fisher = calc_loss_grad and self.is_fisher_emp
         calc_loss_grad_after_fisher = calc_loss_grad and not self.is_fisher_emp
 
-        with no_centered_cov(model, fisher_shapes, ignore_modules=ignore_modules, cvp=fvp, vectors=vec) as cxt:
+        kwargs = dict(ignore_modules=ignore_modules, cvp=fvp, vectors=vec, calc_inv=calc_inv)
+        with no_centered_cov(model, fisher_shapes, **kwargs) as cxt:
+            # TODO: register fisher via cxt (only when accumulating)
+            #self.register_fisher(cxt)
+            # TODO: apply scale during operations
+            if damping is not None:
+                cxt.set_damping_all(damping)
+
             self.forward()
             loss = self._loss
 
@@ -106,7 +116,11 @@ class FisherMaker(GradientMaker):
                 closure(lambda: loss)
             else:
                 self._fisher_loop(closure)
-            self.accumulate(cxt, scale, fvp=fvp)
+
+            if calc_inv:
+                self.extract_fisher(cxt)
+            else:
+                self.accumulate(cxt, scale, fvp=fvp)
 
         if calc_loss_grad_after_fisher:
             loss.backward()
@@ -123,6 +137,18 @@ class FisherMaker(GradientMaker):
             return self._model_output
         else:
             return self._model_output, loss
+
+    def register_fisher(self, cxt: OperationContext):
+        for module in self.model.modules():
+            fisher = getattr(module, self.config.fisher_attr, None)
+            if fisher is not None:
+                cxt.register_symmatrix(module, fisher)
+
+    def extract_fisher(self, cxt: OperationContext):
+        for module in self.model.modules():
+            fisher = cxt.cov_symmatrix(module, pop=True)
+            if fisher is not None:
+                setattr(module, self.config.fisher_attr, fisher)
 
     def _call_loss_fn(self) -> Tensor:
         assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
