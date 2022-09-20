@@ -3,7 +3,6 @@ from torch import nn
 import torch.nn.functional as F
 
 from .operation import Operation
-from ..utils import cholesky_inv, smw_inv
 
 
 class Linear(Operation):
@@ -74,10 +73,6 @@ class Linear(Operation):
     def cov_kron_A(module, in_data):
         return torch.matmul(in_data.T, in_data)  # f_in x f_in
 
-    def cov_kron_A_inv(self, module, in_data):
-        damping = self._damping
-        return cholesky_inv(self.cov_kron_A(module, in_data), damping)  # f_in x f_in
-
     @classmethod
     def cov_swift_kron_A(cls, module, in_data):
         n, f_in = in_data.shape
@@ -86,20 +81,9 @@ class Linear(Operation):
         else:
             return cls.cov_kron_A(module, in_data)  # f_in x f_in
 
-    def cov_swift_kron_A_inv(self, module, in_data):
-        n, f_in = in_data.shape
-        damping = self._damping
-        if n < f_in:
-            return smw_inv(in_data, damping)  # f_in x f_in
-        return cholesky_inv(self.cov_kron_A(module, in_data), damping)  # f_in x f_in
-
     @staticmethod
     def cov_kron_B(module, out_grads):
         return torch.matmul(out_grads.T, out_grads)  # f_out x f_out
-
-    def cov_kron_B_inv(self, module, out_grads):
-        damping = self._damping
-        return cholesky_inv(self.cov_kron_B(module, out_grads), damping)  # f_out x f_out
 
     @classmethod
     def cov_swift_kron_B(cls, module, out_grads):
@@ -108,13 +92,6 @@ class Linear(Operation):
             return out_grads  # n x f_out
         else:
             return cls.cov_kron_B(module, out_grads)  # f_out x f_out
-
-    def cov_swift_kron_B_inv(self, module, out_grads):
-        n, f_out = out_grads.shape
-        damping = self._damping
-        if n < f_out:
-            return smw_inv(out_grads, damping)  # f_out x f_out
-        return cholesky_inv(self.cov_kron_B(module, out_grads), damping)  # f_out x f_out
 
     @classmethod
     def cov_kfe_A(cls, module, in_data):

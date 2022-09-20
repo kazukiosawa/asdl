@@ -3,7 +3,7 @@ from typing import Dict, List
 import torch
 import torch.nn as nn
 from torch.cuda import nvtx
-from ..utils import original_requires_grad, cholesky_solve
+from ..utils import original_requires_grad, cholesky_solve, cholesky_inv, smw_inv
 from ..matrices import *
 from ..symmatrix import *
 from ..vector import ParamVector
@@ -353,29 +353,39 @@ class Operation:
     def cov_kron_A(module, in_data):
         raise NotImplementedError
 
-    def cov_kron_A_inv(self, module, out_grads):
-        raise NotImplementedError
+    def cov_kron_A_inv(self, module, in_data):
+        damping = self._damping
+        return cholesky_inv(self.cov_kron_A(module, in_data), damping)
 
     @staticmethod
     def cov_swift_kron_A(module, in_data):
         raise NotImplementedError
 
     def cov_swift_kron_A_inv(self, module, in_data):
-        raise NotImplementedError
+        damping = self._damping
+        A = self.cov_swift_kron_A(module, in_data)
+        if A.shape[0] == A.shape[1]:
+            return cholesky_inv(A, damping)
+        return smw_inv(A, damping)
 
     @staticmethod
     def cov_kron_B(module, out_grads):
         raise NotImplementedError
 
     def cov_kron_B_inv(self, module, out_grads):
-        raise NotImplementedError
+        damping = self._damping
+        return cholesky_inv(self.cov_kron_B(module, out_grads), damping)
 
     @staticmethod
     def cov_swift_kron_B(module, out_grads):
         raise NotImplementedError
 
     def cov_swift_kron_B_inv(self, module, out_grads):
-        raise NotImplementedError
+        damping = self._damping
+        B = self.cov_swift_kron_A(module, out_grads)
+        if B.shape[0] == B.shape[1]:
+            return cholesky_inv(B, damping)
+        return smw_inv(B, damping)
 
     def cov_kron_precondition(self, module, in_data, out_grads, eps=1.e-7):
         damping = self._damping
