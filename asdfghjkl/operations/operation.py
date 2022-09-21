@@ -83,6 +83,7 @@ class Operation:
             assert name in ALL_OPS, f'Invalid operation name: {name}.'
         if any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names):
             op_names.add(OP_SAVE_INPUTS)
+            op_names.add(OP_SAVE_OUTPUTS)
         self._op_names = op_names
         self._op_results = {}
         self._damping = 1.e-7
