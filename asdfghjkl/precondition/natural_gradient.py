@@ -593,8 +593,6 @@ class KfacGradientMaker(NaturalGradientMaker):
                                (nn.BatchNorm1d, SHAPE_UNIT_WISE),
                                (nn.BatchNorm2d, SHAPE_UNIT_WISE),
                                (nn.LayerNorm, SHAPE_UNIT_WISE)]
-        if swift:
-            config.scale = config.data_size
         super().__init__(model, config)
 
 
