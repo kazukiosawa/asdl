@@ -50,16 +50,17 @@ ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
            OP_COV_KFE]
 
 FWD_OPS = [OP_SAVE_INPUTS,
-           OP_COV_KRON, OP_COV_KRON_INV,
-           OP_COV_SWIFT_KRON, OP_COV_SWIFT_KRON_INV,
-           OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX,
-           OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE, OP_COV_KFE]
-BWD_OPS_WITH_INPUTS = [OP_COV, OP_CVP, OP_COV_DIAG, OP_COV_UNIT_WISE, OP_BATCH_GRADS, OP_GRAM_DIRECT]
+           OP_COV_KRON, OP_COV_SWIFT_KRON,
+           OP_RFIM_RELU, OP_RFIM_SOFTMAX,
+           OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE]
+BWD_OPS_WITH_INPUTS = [OP_COV, OP_CVP, OP_COV_DIAG, OP_COV_UNIT_WISE,
+                       OP_COV_KRON_INV, OP_COV_SWIFT_KRON_INV,
+                       OP_GRAM_HADAMARD, OP_GRAM_DIRECT,
+                       OP_BATCH_GRADS, OP_COV_KFE]
 BWD_OPS = [OP_SAVE_OUTGRADS,
-           OP_COV_KRON, OP_COV_KRON_INV,
-           OP_COV_SWIFT_KRON, OP_COV_SWIFT_KRON_INV,
-           OP_GRAM_HADAMARD, OP_RFIM_RELU, OP_RFIM_SOFTMAX,
-           OP_MEAN_OUTGRADS, OP_COV_KFE] \
+           OP_COV_KRON, OP_COV_SWIFT_KRON,
+           OP_RFIM_RELU, OP_RFIM_SOFTMAX,
+           OP_MEAN_OUTGRADS] \
           + BWD_OPS_WITH_INPUTS
 
 
@@ -79,14 +80,7 @@ class Operation:
         op_names = set(op_names)
         for name in op_names:
             assert name in ALL_OPS, f'Invalid operation name: {name}.'
-        if OP_COV_KFE in op_names:
-            op_names.add(OP_SAVE_INPUTS)
-        if OP_COV_KRON_INV in op_names or OP_COV_SWIFT_KRON_INV in op_names:
-            op_names.add(OP_SAVE_INPUTS)
-        if OP_COV_KRON_PRECOND in op_names:
-            op_names.add(OP_SAVE_INPUTS)
-            op_names.add(OP_SAVE_OUTGRADS)
-        if OP_GRAM_HADAMARD in op_names:
+        if any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names):
             op_names.add(OP_SAVE_INPUTS)
         self._op_names = op_names
         self._op_results = {}
@@ -156,10 +150,11 @@ class Operation:
         module = self._module
         op_names = self._op_names
 
+        if OP_SAVE_INPUTS in op_names:
+            self.accumulate_result([in_data], OP_SAVE_INPUTS, extend=True)
+
         if any(op_name in FWD_OPS for op_name in op_names):
             in_data = self.preprocess_in_data(module, in_data, out_data)
-            if OP_SAVE_INPUTS in op_names:
-                self.accumulate_result([in_data], OP_SAVE_INPUTS, extend=True)
 
         for op_name in op_names:
             if op_name not in FWD_OPS:
@@ -182,8 +177,6 @@ class Operation:
                 self.accumulate_result(self.out_spatial_size(module, out_data), OP_OUT_SPATIAL_SIZE)
             elif op_name == OP_BFGS_KRON_S_AS:
                 self.accumulate_result(self.bfgs_kron_s_As(module, in_data), OP_BFGS_KRON_S_AS)
-            elif op_name == OP_COV_KFE:
-                self.accumulate_result(self.cov_kfe_A(module, in_data), OP_COV_KFE, 'A')
 
     def backward_pre_process(self, in_data, out_data, out_grads, vector: torch.Tensor = None):
         module = self._module
@@ -287,9 +280,11 @@ class Operation:
             elif op_name == OP_MEAN_OUTGRADS:
                 self.accumulate_result(self.out_grads_mean(module, out_grads), OP_MEAN_OUTGRADS)
             elif op_name == OP_COV_KFE:
-                self.accumulate_result(self.cov_kfe_B(module, out_grads), OP_COV_KFE, 'B')
-                Ua, Ub = self.get_result(OP_COV_KFE, 'A'), self.get_result(OP_COV_KFE, 'B')
+                Ua = self.cov_kfe_A(module, in_data)
+                Ub = self.cov_kfe_B(module, out_grads)
                 bias = original_requires_grad(module, 'bias')
+                self.accumulate_result(Ua, OP_COV_KFE, 'A')
+                self.accumulate_result(Ub, OP_COV_KFE, 'B')
                 self.accumulate_result(self.cov_kfe_scale(module, in_data, out_grads, Ua, Ub, bias=bias),
                                        OP_COV_KFE, 'scale')
 
@@ -509,11 +504,11 @@ class OperationContext:
 
     def call_operations_in_backward(self, module, in_data, out_data, out_grads):
         if in_data is None:
-            in_data = self.in_data(module)
+            in_data = self.in_data(module, pop=True)
             if in_data is not None:
                 in_data = in_data[-1]  # use last saved in_data if exists
         if out_grads is None:
-            out_grads = self.out_grads(module)
+            out_grads = self.out_grads(module, pop=True)
             if out_grads is not None:
                 out_grads = out_grads[-1]  # use last saved out_grads if exits
         vector = self.get_vectors_by_module(module, flatten=True)

@@ -42,21 +42,11 @@ def extend(model,
 
             # register hooks and operations for child modules
             if has_fwd_op or has_bwd_op_with_inputs:
-                if has_bwd_op_with_inputs:
-                    def forward_hook(_module, in_data, out_data):
-                        with stream_cxt:
-                            cxt.call_operations_in_forward(_module, in_data[0].detach(), out_data.detach())
-                        if out_data.requires_grad:
-                            def _backward_hook(out_grads):
-                                with stream_cxt:
-                                    cxt.call_operations_in_backward(_module, in_data[0].detach(), out_data.detach(), out_grads.detach())
-                            handles.append(out_data.register_hook(_backward_hook))
-                else:
-                    def forward_hook(_module, in_data, out_data):
-                        with stream_cxt:
-                            cxt.call_operations_in_forward(_module, in_data[0].detach(), out_data.detach())
+                def forward_hook(_module, in_data, out_data):
+                    with stream_cxt:
+                        cxt.call_operations_in_forward(_module, in_data[0].detach(), out_data.detach())
                 handles.append(module.register_forward_hook(forward_hook))
-            if (not has_bwd_op_with_inputs) and has_bwd_op:
+            if has_bwd_op or has_bwd_op_with_inputs:
                 def backward_hook(_module, unused, out_grads):
                     with stream_cxt:
                         try:
