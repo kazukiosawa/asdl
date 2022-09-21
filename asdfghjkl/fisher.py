@@ -94,8 +94,8 @@ class FisherMaker(GradientMaker):
 
         kwargs = dict(ignore_modules=ignore_modules, cvp=fvp, vectors=vec, calc_inv=calc_inv)
         with no_centered_cov(model, fisher_shapes, **kwargs) as cxt:
-            # TODO: register fisher via cxt (only when accumulating)
-            #self.register_fisher(cxt)
+            if accumulate:
+                self.register_fisher(cxt)
             if damping is not None:
                 cxt.set_damping_all(damping)
             cxt.set_scale_all(scale)
@@ -120,7 +120,7 @@ class FisherMaker(GradientMaker):
             if calc_inv:
                 self.extract_fisher(cxt)
             else:
-                self.accumulate(cxt, scale, fvp=fvp)
+                self.accumulate_fisher(cxt, scale, fvp=fvp)
 
         if calc_loss_grad_after_fisher:
             loss.backward()
@@ -162,7 +162,7 @@ class FisherMaker(GradientMaker):
     def _fisher_loop(self, closure):
         raise NotImplementedError
 
-    def accumulate(self, cxt, scale=1., target_module=None, target_module_name=None, fvp=False):
+    def accumulate_fisher(self, cxt, scale=1., target_module=None, target_module_name=None, fvp=False):
         model = self.model
         for name, module in model.named_modules():
             if target_module is not None and module != target_module:

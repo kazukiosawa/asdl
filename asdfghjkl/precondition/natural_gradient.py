@@ -258,7 +258,7 @@ class NaturalGradientMaker(GradientMaker):
                                                )
 
     def save_curvature(self, cxt, scale=1., module=None, module_name=None):
-        self.fisher_maker.accumulate(cxt, scale, target_module=module, target_module_name=module_name)
+        self.fisher_maker.accumulate_fisher(cxt, scale, target_module=module, target_module_name=module_name)
 
     @nvtx_range('update_inv')
     def update_inv(self, damping=None, module_name=None, kron=None, zero_curvature=False, partition_aware=False):
