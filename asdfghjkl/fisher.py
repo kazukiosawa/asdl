@@ -94,8 +94,8 @@ class FisherMaker(GradientMaker):
 
         kwargs = dict(ignore_modules=ignore_modules, cvp=fvp, vectors=vec, calc_inv=calc_inv)
         with no_centered_cov(model, fisher_shapes, **kwargs) as cxt:
-            if accumulate:
-                self.register_fisher(cxt)
+#            if accumulate:
+#                self.register_fisher(cxt)
             if damping is not None:
                 cxt.set_damping_all(damping)
             cxt.set_scale_all(scale)
