@@ -50,7 +50,7 @@ def extend(model,
                 def backward_hook(_module, unused, out_grads):
                     with stream_cxt:
                         try:
-                            cxt.call_operations_in_backward(_module, None, None, out_grads[0].detach())
+                            cxt.call_operations_in_backward(_module, out_grads[0].detach())
                         except NameError:
                             # context resource is already released.
                             pass

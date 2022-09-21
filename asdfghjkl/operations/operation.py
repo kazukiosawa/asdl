@@ -31,6 +31,7 @@ OP_GRAM_HADAMARD = 'gram_hada'  # Hadamard-factored
 
 OP_BATCH_GRADS = 'batch_grads'  # compute batched gradients (per-example gradients)
 OP_SAVE_INPUTS = 'save_inputs'  # save inputs during a forward-pass
+OP_SAVE_OUTPUTS = 'save_outputs'  # save outputs during a forward-pass
 OP_SAVE_OUTGRADS = 'save_outgrads'  # save outgrads during a backward-pass
 OP_MEAN_INPUTS = 'mean_inputs'  # compute the mean of inputs
 OP_MEAN_OUTPUTS = 'mean_outputs'  # compute the mean of outputs
@@ -44,12 +45,12 @@ ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
            OP_COV_DIAG, OP_COV_UNIT_WISE,
            OP_RFIM_RELU, OP_RFIM_SOFTMAX,
            OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS,
-           OP_SAVE_INPUTS, OP_SAVE_OUTGRADS,
+           OP_SAVE_INPUTS, OP_SAVE_OUTPUTS, OP_SAVE_OUTGRADS,
            OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_MEAN_OUTGRADS,
            OP_OUT_SPATIAL_SIZE, OP_BFGS_KRON_S_AS,
            OP_COV_KFE]
 
-FWD_OPS = [OP_SAVE_INPUTS,
+FWD_OPS = [OP_SAVE_INPUTS, OP_SAVE_OUTPUTS,
            OP_COV_KRON, OP_COV_SWIFT_KRON,
            OP_RFIM_RELU, OP_RFIM_SOFTMAX,
            OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE]
@@ -152,6 +153,8 @@ class Operation:
 
         if OP_SAVE_INPUTS in op_names:
             self.accumulate_result([in_data], OP_SAVE_INPUTS, extend=True)
+        if OP_SAVE_OUTPUTS in op_names:
+            self.accumulate_result([out_data], OP_SAVE_OUTPUTS, extend=True)
 
         if any(op_name in FWD_OPS for op_name in op_names):
             in_data = self.preprocess_in_data(module, in_data, out_data)
@@ -502,17 +505,20 @@ class OperationContext:
     def call_operations_in_forward(self, module, in_data, out_data):
         self.get_operation(module).forward_post_process(in_data, out_data)
 
-    def call_operations_in_backward(self, module, in_data, out_data, out_grads):
-        if in_data is None:
-            in_data = self.in_data(module, pop=True)
-            if in_data is not None:
-                in_data = in_data[-1]  # use last saved in_data if exists
+    def call_operations_in_backward(self, module, out_grads):
+        in_data = self.in_data(module, pop=True)
+        if in_data is not None:
+            in_data = in_data[-1]  # use last saved in_data if exists
+        out_data = self.out_data(module, pop=True)
+        if out_data is not None:
+            out_data = out_data[-1]  # use last saved out_data if exists
         if out_grads is None:
             out_grads = self.out_grads(module, pop=True)
             if out_grads is not None:
                 out_grads = out_grads[-1]  # use last saved out_grads if exits
         vector = self.get_vectors_by_module(module, flatten=True)
         self.get_operation(module).backward_pre_process(in_data, out_data, out_grads, vector)
+        del in_data, out_data
 
     def get_result(self, module, *keys, pop=False, default=None):
         try:
@@ -814,6 +820,9 @@ class OperationContext:
 
     def in_data(self, module, pop=False):
         return self.get_result(module, OP_SAVE_INPUTS, pop=pop)
+
+    def out_data(self, module, pop=False):
+        return self.get_result(module, OP_SAVE_OUTPUTS, pop=pop)
 
     def out_grads(self, module, pop=False):
         return self.get_result(module, OP_SAVE_OUTGRADS, pop=pop)
