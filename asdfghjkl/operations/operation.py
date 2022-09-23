@@ -222,7 +222,13 @@ class Operation:
                 B = self.cov_kron_B(module, out_grads)
                 self.accumulate_result(B, OP_COV_KRON, 'B')
             elif op_name == OP_COV_KRON_INV:
-                A_inv, B_inv = self.cov_kron_inv(module, in_data, out_grads)
+                scale = self._scale
+                damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
+                A = self.cov_kron_A(module, in_data).mul_(scale)
+                del in_data
+                A_inv = cholesky_inv(A, damping_A)
+                del A
+                B_inv = cholesky_inv(self.cov_kron_B(module, out_grads).mul_(scale), damping_B)
                 self.accumulate_result(A_inv, OP_COV_KRON_INV, 'A')
                 self.accumulate_result(B_inv, OP_COV_KRON_INV, 'B')
             elif op_name == OP_COV_KRON_PRECOND:
@@ -231,7 +237,21 @@ class Operation:
                 B = self.cov_swift_kron_B(module, out_grads)
                 self.accumulate_result(B, OP_COV_KRON, 'B')  # not OP_COV_SWIFT_KRON
             elif op_name == OP_COV_SWIFT_KRON_INV:
-                A_inv, B_inv = self.cov_swift_kron_inv(module, in_data, out_grads)
+                scale = self._scale
+                damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
+                A = self.cov_swift_kron_A(module, in_data)
+                del in_data
+                if A.shape[0] == A.shape[1]:
+                    A_inv = cholesky_inv(A.mul_(scale), damping_A)
+                else:
+                    A_inv = smw_inv(A, damping_A)
+                del A
+                B = self.cov_swift_kron_B(module, out_grads)
+                if B.shape[0] == B.shape[1]:
+                    B_inv = cholesky_inv(B.mul_(scale), damping_B)
+                else:
+                    B_inv = smw_inv(B, damping_B)
+                del B
                 self.accumulate_result(A_inv, OP_COV_KRON_INV, 'A')  # not OP_COV_SWIFT_KRON_INV
                 self.accumulate_result(B_inv, OP_COV_KRON_INV, 'B')  # not OP_COV_SWIFT_KRON_INV
             elif op_name == OP_COV_UNIT_WISE:
@@ -250,6 +270,7 @@ class Operation:
                     A = self.gram_A(module, in_data)
                 else:
                     A = self.gram_A(module, in_data[:n1], in_data[n1:])
+                del in_data
                 if original_requires_grad(module, 'bias'):
                     A += 1.
                 if n_data == n1:
@@ -375,30 +396,6 @@ class Operation:
         damping_A = max(r * pi, eps)
         damping_B = max(r / pi, eps)
         return damping_A, damping_B
-
-    def cov_kron_inv(self, module, in_data, out_grads):
-        scale = self._scale
-        damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
-        A_inv = cholesky_inv(self.cov_kron_A(module, in_data).mul_(scale), damping_A)
-        B_inv = cholesky_inv(self.cov_kron_B(module, out_grads).mul_(scale), damping_B)
-        return A_inv, B_inv
-
-    def cov_swift_kron_inv(self, module, in_data, out_grads):
-        scale = self._scale
-        damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
-        A = self.cov_swift_kron_A(module, in_data)
-        if A.shape[0] == A.shape[1]:
-            A_inv = cholesky_inv(A.mul_(scale), damping_A)
-        else:
-            A_inv = smw_inv(A, damping_A)
-        del A
-        B = self.cov_swift_kron_B(module, out_grads)
-        if B.shape[0] == B.shape[1]:
-            B_inv = cholesky_inv(B.mul_(scale), damping_B)
-        else:
-            B_inv = smw_inv(B, damping_B)
-        del B
-        return A_inv, B_inv
 
     def cov_kron_precondition(self, module, in_data, out_grads):
         damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
