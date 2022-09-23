@@ -19,7 +19,7 @@ class Conv2d(Operation):
     out_size = output feature map size
     """
     @staticmethod
-    def preprocess_in_data(module, in_data, ouT_data):
+    def preprocess_in_data(module, in_data, out_data):
         # n x c x h_in x w_in -> n x c(kh)(kw) x (h_out)(w_out)
         return im2col_2d(in_data, module)
 
