@@ -368,8 +368,8 @@ class Operation:
 
     def cov_kron_damping(self, in_data, out_grads, eps=1.e-7):
         damping = self._damping
-        A_eig_mean = (in_data ** 2).sum() / in_data.shape[-1]
-        B_eig_mean = (out_grads ** 2).sum() / out_grads.shape[-1]
+        A_eig_mean = in_data.norm() ** 2 / in_data.shape[-1]
+        B_eig_mean = out_grads.norm() ** 2 / out_grads.shape[-1]
         pi = torch.sqrt(A_eig_mean / B_eig_mean)
         r = damping**0.5
         damping_A = max(r * pi, eps)
