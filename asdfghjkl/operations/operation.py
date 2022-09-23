@@ -182,7 +182,7 @@ class Operation:
             elif op_name == OP_BFGS_KRON_S_AS:
                 self.accumulate_result(self.bfgs_kron_s_As(module, in_data), OP_BFGS_KRON_S_AS)
 
-    def backward_pre_process(self, in_data, out_data, out_grads, vector: torch.Tensor = None):
+    def backward_pre_process(self, out_grads, vector: torch.Tensor = None):
         module = self._module
         op_names = self._op_names
 
@@ -190,8 +190,12 @@ class Operation:
             out_grads = self.preprocess_out_grads(module, out_grads)
             if OP_SAVE_OUTGRADS in op_names:
                 self.accumulate_result([out_grads], OP_SAVE_OUTGRADS, extend=True)
+        in_data = None
         if any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names):
+            in_data = self.get_result(OP_SAVE_INPUTS, pop=True)[-1]
+            out_data = self.get_result(OP_SAVE_OUTPUTS, pop=True)[-1]
             in_data = self.preprocess_in_data(module, in_data, out_data)
+            del out_data
 
         for op_name in op_names:
             if op_name not in BWD_OPS:
@@ -506,19 +510,8 @@ class OperationContext:
         self.get_operation(module).forward_post_process(in_data, out_data)
 
     def call_operations_in_backward(self, module, out_grads):
-        in_data = self.in_data(module, pop=True)
-        if in_data is not None:
-            in_data = in_data[-1]  # use last saved in_data if exists
-        out_data = self.out_data(module, pop=True)
-        if out_data is not None:
-            out_data = out_data[-1]  # use last saved out_data if exists
-        if out_grads is None:
-            out_grads = self.out_grads(module, pop=True)
-            if out_grads is not None:
-                out_grads = out_grads[-1]  # use last saved out_grads if exits
         vector = self.get_vectors_by_module(module, flatten=True)
-        self.get_operation(module).backward_pre_process(in_data, out_data, out_grads, vector)
-        del in_data, out_data
+        self.get_operation(module).backward_pre_process(out_grads, vector)
 
     def get_result(self, module, *keys, pop=False, default=None):
         try:
