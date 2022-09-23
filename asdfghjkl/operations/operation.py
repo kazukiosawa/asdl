@@ -240,17 +240,16 @@ class Operation:
                 self.accumulate_result(rst, OP_COV_UNIT_WISE)
             elif op_name == OP_GRAM_HADAMARD:
                 assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
-                n_data = in_data.shape[0]
-                assert n_data == out_grads.shape[0]
+                n_data = out_grads.shape[0]
                 n1 = self._model_for_kernel.kernel.shape[0]
                 if n_data == n1:
-                    A = self.gram_A(module, in_data, in_data)
+                    A = self.gram_A(module, in_data)
                 else:
                     A = self.gram_A(module, in_data[:n1], in_data[n1:])
                 if original_requires_grad(module, 'bias'):
                     A += 1.
                 if n_data == n1:
-                    B = self.gram_B(module, out_grads, out_grads)
+                    B = self.gram_B(module, out_grads)
                 else:
                     B = self.gram_B(module, out_grads[:n1], out_grads[n1:])
                 self._model_for_kernel.kernel += B.mul(A)
@@ -427,11 +426,11 @@ class Operation:
         raise NotImplementedError
 
     @staticmethod
-    def gram_A(module, in_data1, in_data2):
+    def gram_A(module, in_data1, in_data2=None):
         raise NotImplementedError
 
     @staticmethod
-    def gram_B(module, out_grads1, out_grads2):
+    def gram_B(module, out_grads1, out_grads2=None):
         raise NotImplementedError
 
     @staticmethod

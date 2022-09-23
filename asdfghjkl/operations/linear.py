@@ -135,11 +135,15 @@ class Linear(Operation):
         return torch.matmul(grad_grad.T, in_in).view(-1, f_in, f_in)  # f_out x f_in x_fin
 
     @staticmethod
-    def gram_A(module, in_data1, in_data2):
+    def gram_A(module, in_data1, in_data2=None):
+        if in_data2 is None:
+            return torch.matmul(in_data1, in_data1.T)  # n x n
         return torch.matmul(in_data1, in_data2.T)  # n x n
 
     @staticmethod
-    def gram_B(module, out_grads1, out_grads2):
+    def gram_B(module, out_grads1, out_grads2=None):
+        if out_grads2 is None:
+            return torch.matmul(out_grads1, out_grads1.T)  # n x n
         return torch.matmul(out_grads1, out_grads2.T)  # n x n
 
     @staticmethod

@@ -144,17 +144,21 @@ class Conv2d(Operation):
         return scale_w,
 
     @staticmethod
-    def gram_A(module, in_data1, in_data2):
+    def gram_A(module, in_data1, in_data2=None):
         # n x (c_in)(kernel_size)(out_size)
         m1 = in_data1.flatten(start_dim=1)
+        if in_data2 is None:
+            return torch.matmul(m1, m1.T)  # n x n
         m2 = in_data2.flatten(start_dim=1)
         return torch.matmul(m1, m2.T)  # n x n
 
     @staticmethod
-    def gram_B(module, out_grads1, out_grads2):
+    def gram_B(module, out_grads1, out_grads2=None):
         out_size = out_grads1.shape[-1]
         # n x (c_out)(out_size)
         m1 = out_grads1.flatten(start_dim=1)
+        if out_grads2 is None:
+            return torch.matmul(m1, m1.T).div(out_size)  # n x n
         m2 = out_grads2.flatten(start_dim=1)
         return torch.matmul(m1, m2.T).div(out_size)  # n x n
 
