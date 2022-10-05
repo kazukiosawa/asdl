@@ -123,8 +123,8 @@ class Operation:
             if op_name not in FWD_OPS:
                 continue
             if op_name == OP_COV_KRON:
-                if original_requires_grad(module, 'bias'):
-                    in_data = self.extend_in_data(in_data)
+                # if original_requires_grad(module, 'bias'):
+                #     in_data = self.extend_in_data(in_data)
                 A = self.cov_kron_A(module, in_data)
                 self.accumulate_result(A, OP_COV_KRON, 'A')
             elif op_name == OP_GRAM_HADAMARD:
@@ -245,16 +245,16 @@ class Operation:
         assert batch_grads_w is not None or batch_grads_b is not None, \
             f'At least one of weight or bias has to require grad (module: {module}).'
 
-        if batch_grads_w is not None and batch_grads_b is not None and batch_grads_w.ndim > batch_grads_b.ndim:
-            if isinstance(module, nn.Conv2d):
-                batch_grads_w = batch_grads_w.flatten(start_dim=2)
-            size = (1,)
-            for i in range(batch_grads_w.ndim-batch_grads_b.ndim-1):
-                size += (1,)
-            batch_grads_b = batch_grads_b.view(batch_grads_b.shape+size)
+        # if batch_grads_w is not None and batch_grads_b is not None and batch_grads_w.ndim > batch_grads_b.ndim:
+        #     if isinstance(module, nn.Conv2d):
+        #         batch_grads_w = batch_grads_w.flatten(start_dim=2)
+        #     size = (1,)
+        #     for i in range(batch_grads_w.ndim-batch_grads_b.ndim-1):
+        #         size += (1,)
+        #     batch_grads_b = batch_grads_b.view(batch_grads_b.shape+size)
         grads = [batch_grads_w, batch_grads_b]
-        batch_g = torch.cat([g for g in grads if g is not None], dim=2).flatten(start_dim=1)
-        # batch_g = torch.cat([g.flatten(start_dim=1) for g in grads if g is not None], dim=1)
+        # batch_g = torch.cat([g for g in grads if g is not None], dim=2).flatten(start_dim=1)
+        batch_g = torch.cat([g.flatten(start_dim=1) for g in grads if g is not None], dim=1)
         return batch_grads_w, batch_grads_b, batch_g
 
     @staticmethod

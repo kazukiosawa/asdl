@@ -73,7 +73,8 @@ def test_lw_hess_linear(loss_type, cuda):
             for k in range(out_grads.shape[-1]):
                 targets = torch.tensor([0], requires_grad=False)
                 if isinstance(module, nn.Conv2d):
-                    inputs = torch.randn(1, module.in_channels, module.kernel_size[0]+1, module.kernel_size[1]+1, requires_grad=False).to(device)
+                    inputs = torch.randn(1, module.in_channels, module.kernel_size[0]+1, module.kernel_size[1]+1,
+                                         requires_grad=False).to(device)
                 else:
                     inputs = torch.randn(1, module.in_features, requires_grad=False).to(device)
                 asdl.hessian(module, lambda outputs, targets: z[0, k], asdl.SHAPE_FULL, inputs=inputs, targets=targets)
@@ -107,7 +108,8 @@ def test_lw_hess(loss_type, data_size, padding, cuda):
             for k in range(out_grads.shape[-1]):
                 targets = torch.tensor([0], requires_grad=False)
                 if isinstance(module, nn.Conv2d):
-                    inputs = torch.randn(1, module.in_channels, module.kernel_size[0]+1, module.kernel_size[1]+1, requires_grad=False).to(device)
+                    inputs = torch.randn(1, module.in_channels, module.kernel_size[0]+1, module.kernel_size[1]+1,
+                                         requires_grad=False).to(device)
                 else:
                     inputs = torch.randn(1, module.in_features, requires_grad=False).to(device)
                 asdl.hessian(module, lambda outputs, targets: z[0, k], asdl.SHAPE_FULL, inputs=inputs, targets=targets)
@@ -115,19 +117,20 @@ def test_lw_hess(loss_type, data_size, padding, cuda):
                 lw += hess_out * out_grads[0, k]
             torch.testing.assert_close(lw, hess)
 
-def test_kron_lw(fisher_type, loss_type, data_size, padding, cuda):
+def test_kron_lw(model, data, fisher_type, loss_type, data_size, padding, bias, cuda):
     device = torch.device('cuda' if cuda else 'cpu')
-    model = Net(padding=padding, bias=True, data_size=data_size).to(device)
+    model = Net(padding=padding, bias=bias, data_size=data_size).to(device)
     kron_modules = (nn.Linear, nn.Conv2d, nn.Embedding, Bias, Scale)
     x = torch.randn(1, 3, data_size, data_size)
     if loss_type == LOSS_CROSS_ENTROPY:
         y = torch.tensor([0])
     else:
         y = torch.randn(1, 10)
+    # x, y = data
     with save_inputs_outgrads(model) as cxt:
         f = calculate_fisher(model, fisher_type, [SHAPE_LAYER_WISE, SHAPE_KRON], loss_type, inputs=x, targets=y)
         for name, module in model.named_modules():
-            if isinstance(module, (nn.Conv2d, nn.Linear)):
+            if isinstance(module, kron_modules):
                 print(name)
                 kron_A = f.get_fisher_tensor(module, 'kron', 'A')
                 kron_B = f.get_fisher_tensor(module, 'kron', 'B')
@@ -153,9 +156,9 @@ def test_kron_lw(fisher_type, loss_type, data_size, padding, cuda):
                                 kron += gakron - gakron2
                 torch.testing.assert_close(kron, lw)
 
-def test_kron_linear(fisher_type, loss_type, cuda):
+def test_kron_linear(fisher_type, loss_type, bias, cuda):
     device = torch.device('cuda' if cuda else 'cpu')
-    model = nn.Linear(20, 10).to(device)
+    model = nn.Linear(20, 10, bias=bias).to(device)
     kron_modules = (nn.Linear, nn.Conv2d, nn.Embedding, Bias, Scale)
     x = torch.randn(1, 20)
     if loss_type == LOSS_CROSS_ENTROPY:
@@ -163,17 +166,24 @@ def test_kron_linear(fisher_type, loss_type, cuda):
     else:
         y = torch.randn(1, 10)
     f = calculate_fisher(model, fisher_type, [SHAPE_LAYER_WISE, SHAPE_KRON], loss_type, inputs=x, targets=y, seed=1)
-    for module in model.modules():
-        if isinstance(module, kron_modules):
-            kron_A = f.get_fisher_tensor(module, 'kron', 'A')
-            kron_B = f.get_fisher_tensor(module, 'kron', 'B')
-            kron = torch.kron(kron_B, kron_A)
-            lw = f.get_fisher_tensor(module, 'data')
-            torch.testing.assert_close(lw, kron)
+    kron_A = f.get_fisher_tensor(model, 'kron', 'A')
+    kron_B = f.get_fisher_tensor(model, 'kron', 'B')
+    if asdl.original_requires_grad(model, 'bias'):
+        kron_A_weight = kron_A[:-1, :-1]
+        kron_A_bias = kron_A[-1, :-1]
+        kron_weight = torch.kron(kron_B, kron_A_weight)
+        kron_bias = torch.kron(kron_B, kron_A_bias)
+        kron = torch.cat([kron_weight, kron_bias], dim=0)
+        right = torch.cat([torch.kron(kron_B, kron_A_bias.view(-1, 1)), kron_B], dim=0)
+        kron = torch.cat([kron, right], dim=1)
+    else:
+        kron = torch.kron(kron_B, kron_A)
+    lw = f.get_fisher_tensor(model, 'data')
+    torch.testing.assert_close(lw, kron)
 
-def test_kron_conv(fisher_type, loss_type, data_size, padding, cuda):
+def test_kron_conv(fisher_type, loss_type, data_size, padding, bias, cuda):
     device = torch.device('cuda' if cuda else 'cpu')
-    model = nn.Sequential(nn.Conv2d(3, 2, 3, padding=padding),nn.Flatten()).to(device)
+    model = nn.Sequential(nn.Conv2d(3, 2, 3, padding=padding, bias=bias),nn.Flatten()).to(device)
     x = torch.randn(1, 3, data_size, data_size)
     if loss_type == LOSS_CROSS_ENTROPY:
         y = torch.tensor([0], dtype=torch.long)
@@ -204,6 +214,50 @@ def test_kron_conv(fisher_type, loss_type, data_size, padding, cuda):
                             kron += gakron - gakron2
                 lw = f.get_fisher_tensor(module, 'data')
                 torch.testing.assert_close(kron, lw)
+
+def test_kron_mvp(fisher_type, loss_type, data_size, padding, cuda):
+    pass
+
+def test_kronA_linear(fisher_type, loss_type, cuda):
+    device = torch.device('cuda' if cuda else 'cpu')
+    bs = 4
+    model = nn.Linear(20, 10).to(device)
+    in_data = torch.randn(bs, 20).to(device)
+    if loss_type == LOSS_CROSS_ENTROPY:
+        y = torch.tensor([0]*bs, dtype=torch.long).to(device)
+    else:
+        y = torch.randn(bs, 10).to(device)
+    f = calculate_fisher(model, fisher_type, asdl.SHAPE_KRON, loss_type, inputs=in_data, targets=y)
+    kron_A = f.get_fisher_tensor(model, 'kron', 'A')
+    shape = list(in_data.shape)
+    shape[1] = 1
+    ones = in_data.new_ones(shape)
+    in_data_ext = torch.cat((in_data, ones), dim=1)
+    torch.testing.assert_close(kron_A, torch.matmul(in_data_ext.T, in_data_ext).div(bs), rtol=0., atol=0.)
+
+def test_kronA_conv(fisher_type, loss_type, cuda):
+    device = torch.device('cuda' if cuda else 'cpu')
+    bs = 4
+    model = nn.Sequential(nn.Conv2d(3, 4, 5), nn.Flatten()).to(device)
+    in_data = torch.randn(bs, 3, 6, 6).to(device)
+    if loss_type == LOSS_CROSS_ENTROPY:
+        y = torch.tensor([0]*bs, dtype=torch.long).to(device)
+    else:
+        y = torch.randn(bs, 16).to(device)
+    f = calculate_fisher(model, fisher_type, asdl.SHAPE_KRON, loss_type, inputs=in_data, targets=y)
+    for module in model.modules():
+        kron_A = f.get_fisher_tensor(module, 'kron', 'A')
+        if kron_A is None:
+            continue
+        in_data = asdl.im2col_2d(in_data, module)
+        shape = list(in_data.shape)
+        shape[1] = 1
+        ones = in_data.new_ones(shape)
+        in_data_ext = torch.cat((in_data, ones), dim=1)
+        out_size = in_data.shape[-1]
+        m = in_data_ext.transpose(0, 1).flatten(start_dim=1)  # (c_in)(kernel_size) x n(out_size)
+        kron_A_other = torch.matmul(m, m.T).div(out_size*bs)
+        torch.testing.assert_close(kron_A, kron_A_other, rtol=0., atol=0.)
 
 def test_fisher_esd(model, fisher_type, fisher_shape, loss_type, data):
     torch.random.manual_seed(1)

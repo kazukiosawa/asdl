@@ -1,3 +1,4 @@
+import argparse
 import pytest
 import torch
 import torch.nn as nn
@@ -8,12 +9,12 @@ from asdfghjkl import SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE,
 from asdfghjkl import Scale, Bias
 
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self, bias=True):
         super().__init__()
         self.embedding = nn.Embedding(4, 16)
-        self.conv = nn.Conv2d(1, 2, 3)
+        self.conv = nn.Conv2d(1, 2, 3, bias=bias)
         self.batchnorm2 = nn.BatchNorm2d(2)
-        self.linear = nn.Linear(8, 5)
+        self.linear = nn.Linear(8, 5, bias=bias)
         self.batchnorm1 = nn.BatchNorm1d(5)
         self.scale = Scale()
         self.bias = Bias()
@@ -29,17 +30,17 @@ class Net(nn.Module):
         return x
 
 @pytest.fixture
-def model():
-    device = torch.device('cuda' if torch.cuda.is_available() else "cpu")
-    return Net().to(device)
+def model(cuda, bias):
+    device = torch.device('cuda' if cuda and torch.cuda.is_available() else "cpu")
+    return Net(bias).to(device)
 
 @pytest.fixture
-def data(loss_type):
-    x = torch.randint(high=4, size=(32,))
+def data(loss_type, batch_size):
+    x = torch.randint(high=4, size=(batch_size,), dtype=torch.long)
     if loss_type == LOSS_CROSS_ENTROPY:
-        y = torch.tensor([0]*32, dtype=torch.long)
+        y = torch.tensor([0]*batch_size, dtype=torch.long)
     else:
-        y = torch.randn(32, 5)
+        y = torch.randn(batch_size, 5)
     return x, y
 
 def pytest_addoption(parser):
@@ -50,6 +51,8 @@ def pytest_addoption(parser):
     parser.addoption("--cuda", action="store_true")
     parser.addoption("--data_size", action="store", type=int, default=16)
     parser.addoption("--padding", action="store", type=int, default=0)
+    parser.addoption("--bias", action=argparse.BooleanOptionalAction, default=True)
+    parser.addoption("--batch_size", type=int, default=32)
 
 def pytest_generate_tests(metafunc):
     torch.backends.cuda.matmul.allow_tf32 = False
@@ -89,3 +92,12 @@ def pytest_generate_tests(metafunc):
         if padding is not None:
             metafunc.parametrize("padding", [padding])
     
+    if "bias" in metafunc.fixturenames:
+        bias = metafunc.config.getoption("bias")
+        if bias is not None:
+            metafunc.parametrize("bias", [bias])
+    
+    if "batch_size" in metafunc.fixturenames:
+        batch_size = metafunc.config.getoption("batch_size")
+        if batch_size is not None:
+            metafunc.parametrize("batch_size", [batch_size])
