@@ -11,14 +11,12 @@ from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 import asdfghjkl as asdl
-from asdfghjkl import FISHER_EXACT, FISHER_MC, FISHER_EMP
-from asdfghjkl import SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG
 
 import wandb
 
 OPTIM_SGD = 'sgd'
 OPTIM_ADAM = 'adam'
-OPTIM_NGD = 'ngd'
+OPTIM_KFAC = 'kfac'
 OPTIM_SMW_NGD = 'smw_ngd'
 OPTIM_FULL_PSGD = 'full_psgd'
 OPTIM_KRON_PSGD = 'kron_psgd'
@@ -110,9 +108,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=1e-2,
                         help='learning rate')
     parser.add_argument('--weight_decay', type=float, default=0)
-    parser.add_argument('--optim', default=OPTIM_NGD)
-    parser.add_argument('--fisher_type', choices=[FISHER_EXACT, FISHER_MC, FISHER_EMP], default=FISHER_EXACT)
-    parser.add_argument('--fisher_shape', choices=[SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG], default=SHAPE_FULL)
+    parser.add_argument('--optim', default=OPTIM_KFAC)
     parser.add_argument('--damping', type=float, default=1e-3)
     parser.add_argument('--hidden_dim', type=int, default=16)
     parser.add_argument('--seed', type=int, default=1,
@@ -160,12 +156,10 @@ if __name__ == '__main__':
     else:
         optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
-    if args.optim == OPTIM_NGD:
+    if args.optim == OPTIM_KFAC:
         config = asdl.NaturalGradientConfig(data_size=args.batch_size,
-                                            fisher_type=args.fisher_type,
-                                            fisher_shape=args.fisher_shape,
                                             damping=args.damping)
-        grad_maker = asdl.NaturalGradientMaker(model, config)
+        grad_maker = asdl.KfacGradientMaker(model, config)
     elif args.optim == OPTIM_SMW_NGD:
         config = asdl.SmwEmpNaturalGradientConfig(data_size=args.batch_size,
                                                   damping=args.damping)
@@ -191,9 +185,6 @@ if __name__ == '__main__':
 
     config = vars(args).copy()
     config.pop('wandb')
-    if args.optim != OPTIM_NGD:
-        config.pop('fisher_type')
-        config.pop('fisher_shape')
     if args.optim in [OPTIM_SGD, OPTIM_ADAM]:
         config.pop('damping')
     if args.wandb:
