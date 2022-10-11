@@ -74,6 +74,7 @@ class FisherMaker(GradientMaker):
                              fvp=False,
                              damping=None,
                              vec: ParamVector = None) -> Union[Tuple[Any, Tensor], Any]:
+        assert not (accumulate and calc_inv), 'accumulate and calc_inv cannot be True at the same time.'
         model = self.model
         fisher_shapes = self.config.fisher_shapes
         if isinstance(fisher_shapes, str):
@@ -94,8 +95,8 @@ class FisherMaker(GradientMaker):
 
         kwargs = dict(ignore_modules=ignore_modules, cvp=fvp, vectors=vec, calc_inv=calc_inv)
         with no_centered_cov(model, fisher_shapes, **kwargs) as cxt:
-#            if accumulate:
-#                self.register_fisher(cxt)
+            if accumulate:
+                self.register_fisher(cxt)
             if damping is not None:
                 cxt.set_damping(damping)
             cxt.set_scale(scale)
@@ -117,10 +118,7 @@ class FisherMaker(GradientMaker):
             else:
                 self._fisher_loop(closure)
 
-            if calc_inv:
-                self.extract_fisher(cxt)
-            else:
-                self.accumulate_fisher(cxt, scale, fvp=fvp)
+            self.extract_fisher(cxt)
 
         if calc_loss_grad_after_fisher:
             loss.backward()
@@ -146,9 +144,10 @@ class FisherMaker(GradientMaker):
 
     def extract_fisher(self, cxt: OperationContext):
         for module in self.model.modules():
-            fisher = cxt.cov_symmatrix(module, pop=True)
-            if fisher is not None:
-                setattr(module, self.config.fisher_attr, fisher)
+            if getattr(module, self.config.fisher_attr, None) is None:
+                fisher = cxt.cov_symmatrix(module, pop=True)
+                if fisher is not None:
+                    setattr(module, self.config.fisher_attr, fisher)
 
     def _call_loss_fn(self) -> Tensor:
         assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
