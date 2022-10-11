@@ -207,13 +207,7 @@ class NaturalGradientMaker(GradientMaker):
     @nvtx_range('update_curvature')
     def update_curvature(self,
                          accumulate=False,
-                         cxt: OperationContext = None,
-                         closure: Callable = None,
-                         calc_inv=False,
-                         module_name=None,
-                         num_batches=None,
-                         kron=None,
-                         no_save=False):
+                         calc_inv=False):
         config = self.config
         fisher_maker = self.fisher_maker
         scale = config.scale
@@ -224,41 +218,14 @@ class NaturalGradientMaker(GradientMaker):
             scale *= ema_decay
             self._scale_fisher(1 - ema_decay)
 
-        if cxt is not None or closure is not None:
-            assert config.fisher_type == FISHER_EMP, f'fisher_type needs to be {FISHER_EMP} ' \
-                                                   f'for computation based on {OperationContext} or a closure.'
-            if not accumulate:
-                fisher_maker.zero_fisher()
-            if cxt is None:
-                with no_centered_cov(self.model, config.fisher_shape, ignore_modules=config.ignore_modules) as cxt:
-                    closure()
-                    if not no_save:
-                        self.save_curvature(cxt, scale)
-            else:
-                for shape in _module_level_shapes:
-                    for name, module in self.named_modules_for(shape):
-                        if module_name is not None and name != module_name:
-                            continue
-                        cxt.calc_cov(module,
-                                     shape,
-                                     clear_in_out=True,
-                                     kron=kron,
-                                     tag=self.nvtx_tag(name),
-                                     num_batches=num_batches)
-                        if not no_save:
-                            self.save_curvature(cxt, scale, module=module)
-        else:
-            self.delegate_forward_and_backward(fisher_maker,
-                                               data_size=self.config.data_size,
-                                               scale=scale,
-                                               accumulate=accumulate,
-                                               calc_loss_grad=True,
-                                               calc_inv=calc_inv,
-                                               damping=self.config.damping
-                                               )
-
-    def save_curvature(self, cxt, scale=1., module=None, module_name=None):
-        self.fisher_maker.accumulate_fisher(cxt, scale, target_module=module, target_module_name=module_name)
+        self.delegate_forward_and_backward(fisher_maker,
+                                           data_size=self.config.data_size,
+                                           scale=scale,
+                                           accumulate=accumulate,
+                                           calc_loss_grad=True,
+                                           calc_inv=calc_inv,
+                                           damping=self.config.damping
+                                           )
 
     @nvtx_range('update_inv')
     def update_inv(self, damping=None, module_name=None, kron=None, zero_curvature=False, partition_aware=False):

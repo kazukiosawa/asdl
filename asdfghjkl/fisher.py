@@ -161,47 +161,6 @@ class FisherMaker(GradientMaker):
     def _fisher_loop(self, closure):
         raise NotImplementedError
 
-    def accumulate_fisher(self, cxt, scale=1., target_module=None, target_module_name=None, fvp=False):
-        model = self.model
-        for name, module in model.named_modules():
-            if target_module is not None and module != target_module:
-                continue
-            if target_module_name is not None and name != target_module_name:
-                continue
-            # accumulate layer-wise fisher/fvp
-            if fvp:
-                self._accumulate_fvp(module, cxt.cvp_paramvector(module, pop=True), scale)
-            else:
-                self._accumulate_fisher(module, cxt.cov_symmatrix(module, pop=True), scale)
-            if target_module is not None:
-                break
-            if target_module_name is not None:
-                target_module = module
-                break
-
-        if target_module is None or target_module == model:
-            # accumulate full fisher/fvp
-            if fvp:
-                self._accumulate_fvp(model, cxt.full_cvp_paramvector(model, pop=True), scale)
-            else:
-                self._accumulate_fisher(model, cxt.full_cov_symmatrix(model, pop=True), scale)
-
-    def _accumulate_fisher(self, module: nn.Module, new_fisher, scale=1., fvp=False):
-        if new_fisher is None:
-            return
-        if scale != 1:
-            new_fisher.mul_(scale)
-        dst_attr = self.config.fvp_attr if fvp else self.config.fisher_attr
-        dst_fisher = getattr(module, dst_attr, None)
-        if dst_fisher is None:
-            setattr(module, dst_attr, new_fisher)
-        else:
-            # this must be __iadd__ to preserve inv
-            dst_fisher += new_fisher
-
-    def _accumulate_fvp(self, module: nn.Module, new_fisher, scale=1.):
-        self._accumulate_fisher(module, new_fisher, scale, fvp=True)
-
     def get_fisher_tensor(self, module: nn.Module, *keys) -> Union[torch.Tensor, None]:
         fisher = getattr(module, self.config.fisher_attr, None)
         if fisher is None:
