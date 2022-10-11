@@ -151,6 +151,7 @@ class Operation:
     def forward_post_process(self, in_data: torch.Tensor, out_data: torch.Tensor):
         module = self._module
         op_names = self._op_names
+        scale = self._scale
 
         if OP_SAVE_INPUTS in op_names:
             self.accumulate_result([in_data], OP_SAVE_INPUTS, extend=True)
@@ -164,10 +165,10 @@ class Operation:
             if op_name not in FWD_OPS:
                 continue
             if op_name == OP_COV_KRON:
-                A = self.cov_kron_A(module, in_data)
+                A = self.cov_kron_A(module, in_data).mul_(scale)
                 self.accumulate_result(A, OP_COV_KRON, 'A')
             elif op_name == OP_COV_SWIFT_KRON:
-                A = self.cov_swift_kron_A(module, in_data)
+                A = self.cov_swift_kron_A(module, in_data).mul_(scale)
                 self.accumulate_result(A, OP_COV_KRON, 'A')  # not OP_COV_SWIFT_KRON
             elif op_name == OP_RFIM_RELU:
                 self.accumulate_result(self.rfim_relu(module, in_data, out_data), OP_RFIM_RELU)
@@ -185,6 +186,7 @@ class Operation:
     def backward_pre_process(self, out_grads, vector: torch.Tensor = None):
         module = self._module
         op_names = self._op_names
+        scale = self._scale
 
         if any(op_name in BWD_OPS for op_name in op_names):
             out_grads = self.preprocess_out_grads(module, out_grads)
@@ -219,10 +221,9 @@ class Operation:
                 else:
                     self.accumulate_result(cvp.view_as(module.bias), OP_CVP, 'bias')
             elif op_name == OP_COV_KRON:
-                B = self.cov_kron_B(module, out_grads)
+                B = self.cov_kron_B(module, out_grads).mul_(scale)
                 self.accumulate_result(B, OP_COV_KRON, 'B')
             elif op_name == OP_COV_KRON_INV:
-                scale = self._scale
                 damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
                 A = self.cov_kron_A(module, in_data).mul_(scale)
                 del in_data
@@ -234,10 +235,9 @@ class Operation:
             elif op_name == OP_COV_KRON_PRECOND:
                 self.cov_kron_precondition(module, in_data, out_grads)
             elif op_name == OP_COV_SWIFT_KRON:
-                B = self.cov_swift_kron_B(module, out_grads)
+                B = self.cov_swift_kron_B(module, out_grads).mul_(scale)
                 self.accumulate_result(B, OP_COV_KRON, 'B')  # not OP_COV_SWIFT_KRON
             elif op_name == OP_COV_SWIFT_KRON_INV:
-                scale = self._scale
                 damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
                 A = self.cov_swift_kron_A(module, in_data)
                 del in_data
