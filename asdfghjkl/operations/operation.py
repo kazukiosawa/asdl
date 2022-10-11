@@ -192,8 +192,8 @@ class Operation:
                 self.accumulate_result([out_grads], OP_SAVE_OUTGRADS, extend=True)
         in_data = None
         if any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names):
-            in_data = self.get_result(OP_SAVE_INPUTS, pop=True)[-1]
-            out_data = self.get_result(OP_SAVE_OUTPUTS, pop=True)[-1]
+            in_data = self.get_result(OP_SAVE_INPUTS)[-1]
+            out_data = self.get_result(OP_SAVE_OUTPUTS)[-1]
             in_data = self.preprocess_in_data(module, in_data, out_data)
             del out_data
 
