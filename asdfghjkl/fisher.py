@@ -452,5 +452,3 @@ def get_fisher_maker(model: nn.Module, config: FisherConfig):
             return FisherMCCrossEntropy(model, config)
         else:
             return FisherMCMSE(model, config)
-
-
