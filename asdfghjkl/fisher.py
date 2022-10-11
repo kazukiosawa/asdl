@@ -97,8 +97,8 @@ class FisherMaker(GradientMaker):
 #            if accumulate:
 #                self.register_fisher(cxt)
             if damping is not None:
-                cxt.set_damping_all(damping)
-            cxt.set_scale_all(scale)
+                cxt.set_damping(damping)
+            cxt.set_scale(scale)
 
             self.forward()
             loss = self._loss

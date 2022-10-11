@@ -832,16 +832,10 @@ class OperationContext:
     def bfgs_kron_s_As(self, module):
         return self.get_result(module, OP_BFGS_KRON_S_AS)
 
-    def set_damping(self, module, value):
-        self.get_operation(module).set_damping(value)
-
-    def set_damping_all(self, value):
+    def set_damping(self, value):
         for operation in self._operations.values():
             operation.set_damping(value)
 
-    def set_scale(self, module, value):
-        self.get_operation(module).set_scale(value)
-
-    def set_scale_all(self, value):
+    def set_scale(self, value):
         for operation in self._operations.values():
             operation.set_scale(value)
