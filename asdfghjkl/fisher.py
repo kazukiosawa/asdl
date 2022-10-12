@@ -99,7 +99,7 @@ class FisherMaker(GradientMaker):
                 self.register_fisher(cxt)
             if damping is not None:
                 cxt.set_damping(damping)
-            cxt.set_scale(scale)
+            cxt.set_cov_scale(scale)
 
             self.forward()
             loss = self._loss
@@ -109,9 +109,9 @@ class FisherMaker(GradientMaker):
                 with skip_param_grad(model, disable=calc_loss_grad_with_fisher):
                     nll_expr().backward(retain_graph=retain_graph or calc_loss_grad_after_fisher)
                 if fvp:
-                    cxt.calc_full_cvp(model)
+                    cxt.calc_full_cvp(model, scale=scale)
                 else:
-                    cxt.calc_full_cov(model)
+                    cxt.calc_full_cov(model, scale=scale)
 
             if self.is_fisher_emp:
                 closure(lambda: loss)

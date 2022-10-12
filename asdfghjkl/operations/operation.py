@@ -87,7 +87,7 @@ class Operation:
         self._op_names = op_names
         self._op_results = {}
         self._damping = 1.e-7
-        self._scale = 1.
+        self._cov_scale = 1.
 
     def accumulate_result(self, value, *keys, extend=False):
         """
@@ -145,13 +145,13 @@ class Operation:
     def set_damping(self, value):
         self._damping = value
 
-    def set_scale(self, value):
-        self._scale = value
+    def set_cov_scale(self, value):
+        self._cov_scale = value
 
     def forward_post_process(self, in_data: torch.Tensor, out_data: torch.Tensor):
         module = self._module
         op_names = self._op_names
-        scale = self._scale
+        cov_scale = self._cov_scale
 
         if OP_SAVE_INPUTS in op_names:
             self.accumulate_result([in_data], OP_SAVE_INPUTS, extend=True)
@@ -165,10 +165,10 @@ class Operation:
             if op_name not in FWD_OPS:
                 continue
             if op_name == OP_COV_KRON:
-                A = self.cov_kron_A(module, in_data).mul_(scale)
+                A = self.cov_kron_A(module, in_data).mul_(cov_scale)
                 self.accumulate_result(A, OP_COV_KRON, 'A')
             elif op_name == OP_COV_SWIFT_KRON:
-                A = self.cov_swift_kron_A(module, in_data).mul_(scale)
+                A = self.cov_swift_kron_A(module, in_data).mul_(cov_scale)
                 self.accumulate_result(A, OP_COV_KRON, 'A')  # not OP_COV_SWIFT_KRON
             elif op_name == OP_RFIM_RELU:
                 self.accumulate_result(self.rfim_relu(module, in_data, out_data), OP_RFIM_RELU)
@@ -186,7 +186,7 @@ class Operation:
     def backward_pre_process(self, out_grads, vector: torch.Tensor = None):
         module = self._module
         op_names = self._op_names
-        scale = self._scale
+        cov_scale = self._cov_scale
 
         if any(op_name in BWD_OPS for op_name in op_names):
             out_grads = self.preprocess_out_grads(module, out_grads)
@@ -204,13 +204,13 @@ class Operation:
                 continue
             if op_name == OP_COV:
                 _, _, batch_g = self.collect_batch_grads(in_data, out_grads)
-                self.accumulate_result(torch.matmul(batch_g.T, batch_g), OP_COV)
+                self.accumulate_result(torch.matmul(batch_g.T, batch_g).mul_(cov_scale), OP_COV)
             elif op_name == OP_CVP:
                 _, _, batch_g = self.collect_batch_grads(in_data, out_grads)
                 assert vector is not None
                 assert vector.ndim == 1
                 batch_gtv = batch_g.mul(vector.unsqueeze(0)).sum(dim=1)
-                cvp = torch.einsum('ni,n->i', batch_g, batch_gtv)
+                cvp = torch.einsum('ni,n->i', batch_g, batch_gtv).mul_(cov_scale)
                 if original_requires_grad(module, 'weight'):
                     if original_requires_grad(module, 'bias'):
                         w_numel = module.weight.numel()
@@ -221,34 +221,34 @@ class Operation:
                 else:
                     self.accumulate_result(cvp.view_as(module.bias), OP_CVP, 'bias')
             elif op_name == OP_COV_KRON:
-                B = self.cov_kron_B(module, out_grads).mul_(scale)
+                B = self.cov_kron_B(module, out_grads).mul_(cov_scale)
                 self.accumulate_result(B, OP_COV_KRON, 'B')
             elif op_name == OP_COV_KRON_INV:
                 damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
-                A = self.cov_kron_A(module, in_data).mul_(scale)
+                A = self.cov_kron_A(module, in_data).mul_(cov_scale)
                 del in_data
                 A_inv = cholesky_inv(A, damping_A)
                 del A
-                B_inv = cholesky_inv(self.cov_kron_B(module, out_grads).mul_(scale), damping_B)
+                B_inv = cholesky_inv(self.cov_kron_B(module, out_grads).mul_(cov_scale), damping_B)
                 self.accumulate_result(A_inv, OP_COV_KRON_INV, 'A')
                 self.accumulate_result(B_inv, OP_COV_KRON_INV, 'B')
             elif op_name == OP_COV_KRON_PRECOND:
                 self.cov_kron_precondition(module, in_data, out_grads)
             elif op_name == OP_COV_SWIFT_KRON:
-                B = self.cov_swift_kron_B(module, out_grads).mul_(scale)
+                B = self.cov_swift_kron_B(module, out_grads).mul_(cov_scale)
                 self.accumulate_result(B, OP_COV_KRON, 'B')  # not OP_COV_SWIFT_KRON
             elif op_name == OP_COV_SWIFT_KRON_INV:
                 damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
                 A = self.cov_swift_kron_A(module, in_data)
                 del in_data
                 if A.shape[0] == A.shape[1]:
-                    A_inv = cholesky_inv(A.mul_(scale), damping_A)
+                    A_inv = cholesky_inv(A.mul_(cov_scale), damping_A)
                 else:
                     A_inv = smw_inv(A, damping_A)
                 del A
                 B = self.cov_swift_kron_B(module, out_grads)
                 if B.shape[0] == B.shape[1]:
-                    B_inv = cholesky_inv(B.mul_(scale), damping_B)
+                    B_inv = cholesky_inv(B.mul_(cov_scale), damping_B)
                 else:
                     B_inv = smw_inv(B, damping_B)
                 del B
@@ -260,7 +260,7 @@ class Operation:
                         f'Both weight and bias have to require grad for {OP_COV_UNIT_WISE} (module: {module}).'
                 elif original_requires_grad(module, 'bias'):
                     in_data = self.extend_in_data(in_data)
-                rst = self.cov_unit_wise(module, in_data, out_grads)
+                rst = self.cov_unit_wise(module, in_data, out_grads).mul_(cov_scale)
                 self.accumulate_result(rst, OP_COV_UNIT_WISE)
             elif op_name == OP_GRAM_HADAMARD:
                 assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
@@ -301,9 +301,13 @@ class Operation:
                 if original_requires_grad(module, 'weight'):
                     rst = getattr(self,
                                   f'{op_name}_weight')(module, in_data, out_grads)
+                    if op_name == OP_COV_DIAG:
+                        rst.mul_(cov_scale)
                     self.accumulate_result(rst, op_name, 'weight')
                 if original_requires_grad(module, 'bias'):
                     rst = getattr(self, f'{op_name}_bias')(module, out_grads)
+                    if op_name == OP_COV_DIAG:
+                        rst.mul_(cov_scale)
                     self.accumulate_result(rst, op_name, 'bias')
             elif op_name == OP_MEAN_OUTGRADS:
                 self.accumulate_result(self.out_grads_mean(module, out_grads), OP_MEAN_OUTGRADS)
@@ -598,7 +602,7 @@ class OperationContext:
     def full_cov(self, module):
         return self.get_result(module, OP_FULL_COV)
 
-    def calc_full_cov(self, module):
+    def calc_full_cov(self, module, scale=1.):
         """
         g: (p,)
         cov = sum[gg^t]: (p, p)
@@ -606,13 +610,13 @@ class OperationContext:
         bg = self.full_batch_grads(module)
         if bg is None:
             return
-        cov = torch.matmul(bg.T, bg)  # p x p
+        cov = torch.matmul(bg.T, bg).mul_(scale)  # p x p
         self.accumulate_result(module, cov, OP_FULL_COV)
 
     def full_cvp(self, module):
         return self.get_result(module, OP_FULL_CVP)
 
-    def calc_full_cvp(self, module):
+    def calc_full_cvp(self, module, scale=1.):
         """
         g: (p,)
         c = sum[gg^t]: (p, p)
@@ -625,7 +629,7 @@ class OperationContext:
             return
         assert bg.shape[1] == vector.shape[0]
         bgtv = bg.mul(vector.unsqueeze(0)).sum(dim=1)
-        cvp = torch.einsum('ni,n->i', bg, bgtv)
+        cvp = torch.einsum('ni,n->i', bg, bgtv).mul_(scale)
         self.accumulate_result(module, cvp, OP_FULL_CVP)
 
     def load_op_in_out(self, module) -> (Operation, List[torch.Tensor], List[torch.Tensor]):
@@ -843,6 +847,6 @@ class OperationContext:
         for operation in self._operations.values():
             operation.set_damping(value)
 
-    def set_scale(self, value):
+    def set_cov_scale(self, value):
         for operation in self._operations.values():
-            operation.set_scale(value)
+            operation.set_cov_scale(value)
