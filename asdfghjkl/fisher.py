@@ -107,6 +107,8 @@ class FisherMaker(GradientMaker):
 
             self.forward()
             loss = self._loss
+
+            # check after the forward pass to see the logits dimension for FISHER_EXACT
             assert not (self.do_local_accumulate and calc_inv), f'calc_inv cannot be True when ' \
                                                                 f'fisher_type = {FISHER_EXACT} (with out_dim > 1) or' \
                                                                 f' {FISHER_MC} (with n_mc_samples > 1).'
