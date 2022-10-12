@@ -583,6 +583,102 @@ class KFE:
         return mvp_w
 
 
+class UnitWise:
+    def __init__(self, data=None):
+        self.data = data
+        self.inv = None
+
+    def __add__(self, other):
+        # NOTE: inv will not be preserved
+        if not other.has_data:
+            return self
+        if self.has_data:
+            data = self.data.add(other.data)
+        else:
+            data = other.data
+        return UnitWise(data=data)
+
+    def __iadd__(self, other):
+        if not other.has_data:
+            return self
+        if self.has_data:
+            self.data.add_(other.data)
+        else:
+            self.data = other.data
+        return self
+
+    @property
+    def has_data(self):
+        return self.data is not None
+
+    def mul_(self, value):
+        if self.has_data:
+            self.data.mul_(value)
+        return self
+
+    def eigenvalues(self):
+        assert self.has_data
+        eig = [symeig(block) for block in self.data]
+        eig = torch.cat(eig)
+        return torch.sort(eig, descending=True)[0]
+
+    def top_eigenvalue(self):
+        top = max([symeig(block).max().item() for block in self.data])
+        return top
+
+    def trace(self):
+        trace = sum([torch.trace(block).item() for block in self.data])
+        return trace
+
+    def save(self, root, relative_dir):
+        relative_path = os.path.join(relative_dir, 'unit_wise.npy')
+        absolute_path = os.path.join(root, relative_path)
+        _save_as_numpy(absolute_path, self.data)
+        return relative_path
+
+    def load(self, path=None, device='cpu'):
+        if path:
+            self.data = _load_from_numpy(path, device)
+
+    def to_matrices(self, unflatten, pointer):
+        if self.has_data:
+            pointer = unflatten(self.data, pointer)
+        return pointer
+
+    def update_inv(self, damping=_default_damping, replace=False):
+        assert self.has_data
+        data = self.data
+        if not torch.all(data == 0):
+            diag = torch.diagonal(data, dim1=1, dim2=2)
+            diag += damping
+            self.inv = torch.inverse(data)
+            diag -= damping
+            if replace:
+                del self.data
+                self.data = None
+
+    def mvp(self, vec_weight, vec_bias, use_inv=False, inplace=False):
+        mat = self.inv if use_inv else self.data  # (f, 2, 2) or (f_out, f_in+1, f_in+1)
+        if vec_weight.shape == vec_bias.shape and mat.ndim == 3 and mat.shape[-1] == mat.shape[-2]:
+            # for BatchNormNd and LayerNorm
+            v = torch.stack([vec_weight, vec_bias], dim=1)  # (f, 2)
+            v = v.unsqueeze(2)  # (f, 2, 1)
+            mvp_wb = torch.matmul(mat, v).squeeze(2)  # (f, 2)
+            mvp_w = mvp_wb[:, 0]
+            mvp_b = mvp_wb[:, 1]
+        else:
+            v = torch.hstack([vec_weight, vec_bias.unsqueeze(dim=1)])  # (f_out, f_in+1)
+            v = v.unsqueeze(2)  # (f_out, f_in+1, 1)
+            mvp_wb = torch.matmul(mat, v).squeeze(2)  # (f_out, f_in+1)
+            mvp_w = mvp_wb[:, :-1]
+            mvp_b = mvp_wb[:, -1]
+
+        if inplace:
+            vec_weight.copy_(mvp_w)
+            vec_bias.copy_(mvp_b)
+        return mvp_w, mvp_b
+
+
 class Diag:
     def __init__(self, weight=None, bias=None):
         self.weight = weight
@@ -723,99 +819,3 @@ class Diag:
                 mvp_b = vec_bias.mul(mat_b)
             rst.append(mvp_b)
         return rst
-
-
-class UnitWise:
-    def __init__(self, data=None):
-        self.data = data
-        self.inv = None
-
-    def __add__(self, other):
-        # NOTE: inv will not be preserved
-        if not other.has_data:
-            return self
-        if self.has_data:
-            data = self.data.add(other.data)
-        else:
-            data = other.data
-        return UnitWise(data=data)
-
-    def __iadd__(self, other):
-        if not other.has_data:
-            return self
-        if self.has_data:
-            self.data.add_(other.data)
-        else:
-            self.data = other.data
-        return self
-
-    @property
-    def has_data(self):
-        return self.data is not None
-
-    def mul_(self, value):
-        if self.has_data:
-            self.data.mul_(value)
-        return self
-
-    def eigenvalues(self):
-        assert self.has_data
-        eig = [symeig(block) for block in self.data]
-        eig = torch.cat(eig)
-        return torch.sort(eig, descending=True)[0]
-
-    def top_eigenvalue(self):
-        top = max([symeig(block).max().item() for block in self.data])
-        return top
-
-    def trace(self):
-        trace = sum([torch.trace(block).item() for block in self.data])
-        return trace
-
-    def save(self, root, relative_dir):
-        relative_path = os.path.join(relative_dir, 'unit_wise.npy')
-        absolute_path = os.path.join(root, relative_path)
-        _save_as_numpy(absolute_path, self.data)
-        return relative_path
-
-    def load(self, path=None, device='cpu'):
-        if path:
-            self.data = _load_from_numpy(path, device)
-
-    def to_matrices(self, unflatten, pointer):
-        if self.has_data:
-            pointer = unflatten(self.data, pointer)
-        return pointer
-
-    def update_inv(self, damping=_default_damping, replace=False):
-        assert self.has_data
-        data = self.data
-        if not torch.all(data == 0):
-            diag = torch.diagonal(data, dim1=1, dim2=2)
-            diag += damping
-            self.inv = torch.inverse(data)
-            diag -= damping
-            if replace:
-                del self.data
-                self.data = None
-
-    def mvp(self, vec_weight, vec_bias, use_inv=False, inplace=False):
-        mat = self.inv if use_inv else self.data  # (f, 2, 2) or (f_out, f_in+1, f_in+1)
-        if vec_weight.shape == vec_bias.shape and mat.ndim == 3 and mat.shape[-1] == mat.shape[-2]:
-            # for BatchNormNd and LayerNorm
-            v = torch.stack([vec_weight, vec_bias], dim=1)  # (f, 2)
-            v = v.unsqueeze(2)  # (f, 2, 1)
-            mvp_wb = torch.matmul(mat, v).squeeze(2)  # (f, 2)
-            mvp_w = mvp_wb[:, 0]
-            mvp_b = mvp_wb[:, 1]
-        else:
-            v = torch.hstack([vec_weight, vec_bias.unsqueeze(dim=1)])  # (f_out, f_in+1)
-            v = v.unsqueeze(2)  # (f_out, f_in+1, 1)
-            mvp_wb = torch.matmul(mat, v).squeeze(2)  # (f_out, f_in+1)
-            mvp_w = mvp_wb[:, :-1]
-            mvp_b = mvp_wb[:, -1]
-
-        if inplace:
-            vec_weight.copy_(mvp_w)
-            vec_bias.copy_(mvp_b)
-        return mvp_w, mvp_b
