@@ -65,6 +65,10 @@ class FisherMaker(GradientMaker):
     def is_fisher_emp(self):
         return False
 
+    @property
+    def do_local_accumulate(self) -> bool:
+        raise NotImplementedError
+
     def forward_and_backward(self,
                              data_size=1,
                              scale=1.,
@@ -103,6 +107,9 @@ class FisherMaker(GradientMaker):
 
             self.forward()
             loss = self._loss
+            assert not (self.do_local_accumulate and calc_inv), f'calc_inv cannot be True when ' \
+                                                                f'fisher_type = {FISHER_EXACT} (with out_dim > 1) or' \
+                                                                f' {FISHER_MC} (with n_mc_samples > 1).'
 
             def closure(nll_expr, retain_graph=False):
                 cxt.clear_batch_grads()
@@ -386,6 +393,10 @@ class FisherMaker(GradientMaker):
 
 
 class FisherExactCrossEntropy(FisherMaker):
+    @property
+    def do_local_accumulate(self) -> bool:
+        return self._logits.shape[-1] > 1
+
     def _fisher_loop(self, closure):
         logits = self._logits
         log_probs = F.log_softmax(logits, dim=-1)
@@ -404,6 +415,10 @@ class FisherExactCrossEntropy(FisherMaker):
 
 
 class FisherMCCrossEntropy(FisherMaker):
+    @property
+    def do_local_accumulate(self) -> bool:
+        return self.config.n_mc_samples > 1
+
     def _fisher_loop(self, closure):
         logits = self._logits
         log_probs = F.log_softmax(logits, dim=-1)
@@ -420,6 +435,10 @@ class FisherMCCrossEntropy(FisherMaker):
 
 
 class FisherExactMSE(FisherMaker):
+    @property
+    def do_local_accumulate(self) -> bool:
+        return self._logits.shape[-1] > 1
+
     def _fisher_loop(self, closure):
         logits = self._logits
         n_dims = logits.size(-1)
@@ -428,6 +447,10 @@ class FisherExactMSE(FisherMaker):
 
 
 class FisherMCMSE(FisherMaker):
+    @property
+    def do_local_accumulate(self) -> bool:
+        return self.config.n_mc_samples > 1
+
     def _fisher_loop(self, closure):
         logits = self._logits
         n_mc_samples = self.config.n_mc_samples
@@ -441,6 +464,10 @@ class FisherMCMSE(FisherMaker):
 
 
 class FisherEmp(FisherMaker):
+    @property
+    def do_local_accumulate(self) -> bool:
+        return False
+
     @property
     def is_fisher_emp(self):
         return True
