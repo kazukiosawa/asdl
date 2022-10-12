@@ -288,15 +288,18 @@ class SymMatrix:
 
         return pointer
 
-    def update_inv(self, damping=_default_damping):
+    def update_inv(self, damping=_default_damping, replace=False):
         if self.has_data and not torch.all(self.data == 0):
             self.inv = cholesky_inv(self.data, damping)
+            if replace:
+                del self.data
+                self.data = None
         if self.has_kron:
-            self.kron.update_inv(damping)
+            self.kron.update_inv(damping, replace=replace)
         if self.has_diag:
-            self.diag.update_inv(damping)
+            self.diag.update_inv(damping, replace=replace)
         if self.has_unit:
-            self.unit.update_inv(damping)
+            self.unit.update_inv(damping, replace=replace)
 
     def mvp(self, vectors: ParamVector = None,
             vec_weight: torch.Tensor = None, vec_bias: torch.Tensor = None,
@@ -472,7 +475,7 @@ class Kron:
         pointer = unflatten(self.B, pointer)
         return pointer
 
-    def update_inv(self, damping=_default_damping, calc_A_inv=True, calc_B_inv=True, eps=1e-7):
+    def update_inv(self, damping=_default_damping, calc_A_inv=True, calc_B_inv=True, eps=1e-7, replace=False):
         assert self.has_data
         if self.has_A and self.has_B:
             A_eig_mean = (self.A.trace() if self.A_is_square else torch.sum(self.A ** 2)) / self.A_dim
@@ -491,6 +494,9 @@ class Kron:
                     self.A_inv = cholesky_inv(self.A, damping_A)
                 else:
                     self.A_inv = smw_inv(self.A, damping_A)
+                if replace:
+                    del self.A
+                    self.A = None
         if calc_B_inv:
             assert self.has_B
             if not torch.all(self.B == 0):
@@ -498,6 +504,9 @@ class Kron:
                     self.B_inv = cholesky_inv(self.B, damping_B)
                 else:
                     self.B_inv = smw_inv(self.B, damping_B)
+                if replace:
+                    del self.B
+                    self.B = None
 
     def mvp(self, vec_weight, vec_bias=None, use_inv=False, inplace=False):
         mat_A = self.A_inv if use_inv else self.A
@@ -682,13 +691,19 @@ class Diag:
             pointer = unflatten(self.bias, pointer)
         return pointer
 
-    def update_inv(self, damping=_default_damping):
+    def update_inv(self, damping=_default_damping, replace=False):
         if self.has_weight:
             if not torch.all(self.weight == 0):
                 self.weight_inv = 1 / (self.weight + damping)
+                if replace:
+                    del self.weight
+                    self.weight = None
         if self.has_bias:
             if not torch.all(self.bias == 0):
                 self.bias_inv = 1 / (self.bias + damping)
+                if replace:
+                    del self.bias
+                    self.bias = None
 
     def mvp(self, vec_weight=None, vec_bias=None, use_inv=False, inplace=False):
         assert vec_weight is not None or vec_bias is not None
@@ -772,7 +787,7 @@ class UnitWise:
             pointer = unflatten(self.data, pointer)
         return pointer
 
-    def update_inv(self, damping=_default_damping):
+    def update_inv(self, damping=_default_damping, replace=False):
         assert self.has_data
         data = self.data
         if not torch.all(data == 0):
@@ -780,6 +795,9 @@ class UnitWise:
             diag += damping
             self.inv = torch.inverse(data)
             diag -= damping
+            if replace:
+                del self.data
+                self.data = None
 
     def mvp(self, vec_weight, vec_bias, use_inv=False, inplace=False):
         mat = self.inv if use_inv else self.data  # (f, 2, 2) or (f_out, f_in+1, f_in+1)
