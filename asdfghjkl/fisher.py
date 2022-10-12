@@ -15,6 +15,7 @@ from .grad_maker import GradientMaker
 from .matrices import *
 from .vector import ParamVector, reduce_vectors
 from .mvp import power_method, stochastic_lanczos_quadrature, conjugate_gradient_method, quadratic_form
+from .symmatrix import SymMatrix
 
 _COV_FULL = 'cov_full'
 _CVP_FULL = 'cvp_full'
@@ -96,8 +97,10 @@ class FisherMaker(GradientMaker):
 
         calc_loss_grad_with_fisher = calc_loss_grad and self.is_fisher_emp
         calc_loss_grad_after_fisher = calc_loss_grad and not self.is_fisher_emp
+        calc_inv_with_fisher = calc_inv and not self.do_local_accumulate
+        calc_inv_after_fisher = calc_inv and self.do_local_accumulate
 
-        kwargs = dict(ignore_modules=ignore_modules, cvp=fvp, vectors=vec, calc_inv=calc_inv)
+        kwargs = dict(ignore_modules=ignore_modules, cvp=fvp, vectors=vec, calc_inv=calc_inv_with_fisher)
         with no_centered_cov(model, fisher_shapes, **kwargs) as cxt:
             if accumulate:
                 self.register_fisher(cxt)
@@ -107,11 +110,6 @@ class FisherMaker(GradientMaker):
 
             self.forward()
             loss = self._loss
-
-            # check after the forward pass to see the logits dimension for FISHER_EXACT
-            assert not (self.do_local_accumulate and calc_inv), f'calc_inv cannot be True when ' \
-                                                                f'fisher_type = {FISHER_EXACT} (with out_dim > 1) or' \
-                                                                f' {FISHER_MC} (with n_mc_samples > 1).'
 
             def closure(nll_expr, retain_graph=False):
                 cxt.clear_batch_grads()
@@ -128,7 +126,8 @@ class FisherMaker(GradientMaker):
                 self._fisher_loop(closure)
 
             self.extract_fisher(cxt)
-
+        if calc_inv_after_fisher:
+            self.replace_fisher_with_inv(damping)
         if calc_loss_grad_after_fisher:
             loss.backward()
 
@@ -168,6 +167,17 @@ class FisherMaker(GradientMaker):
             fisher = cxt.full_cov_symmatrix(model, pop=True)
             if fisher is not None:
                 setattr(model, attr, fisher)
+
+    def replace_fisher_with_inv(self, damping):
+        model = self.model
+        attr = self.config.fisher_attr
+        for module in model.modules():
+            fisher: SymMatrix = getattr(module, attr, None)
+            if fisher is not None:
+                fisher.update_inv(damping=damping, replace=True)
+        fisher: SymMatrix = getattr(model, attr, None)
+        if fisher is not None:
+            fisher.update_inv(damping=damping, replace=True)
 
     def _call_loss_fn(self) -> Tensor:
         assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
@@ -397,7 +407,7 @@ class FisherMaker(GradientMaker):
 class FisherExactCrossEntropy(FisherMaker):
     @property
     def do_local_accumulate(self) -> bool:
-        return self._logits.shape[-1] > 1  # out_dim > 1
+        return True
 
     def _fisher_loop(self, closure):
         logits = self._logits
@@ -439,7 +449,7 @@ class FisherMCCrossEntropy(FisherMaker):
 class FisherExactMSE(FisherMaker):
     @property
     def do_local_accumulate(self) -> bool:
-        return self._logits.shape[-1] > 1  # out_dim > 1
+        return True
 
     def _fisher_loop(self, closure):
         logits = self._logits
