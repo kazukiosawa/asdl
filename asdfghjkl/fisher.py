@@ -137,17 +137,28 @@ class FisherMaker(GradientMaker):
             return self._model_output, loss
 
     def register_fisher(self, cxt: OperationContext):
-        for module in self.model.modules():
-            fisher = getattr(module, self.config.fisher_attr, None)
+        model = self.model
+        attr = self.config.fisher_attr
+        for module in model.modules():
+            fisher = getattr(module, attr, None)
             if fisher is not None:
                 cxt.register_symmatrix(module, fisher)
+        fisher = getattr(model, attr, None)
+        if fisher is not None:
+            cxt.register_full_symmatrix(model, fisher)
 
     def extract_fisher(self, cxt: OperationContext):
-        for module in self.model.modules():
-            if getattr(module, self.config.fisher_attr, None) is None:
+        model = self.model
+        attr = self.config.fisher_attr
+        for module in model.modules():
+            if getattr(module, attr, None) is None:
                 fisher = cxt.cov_symmatrix(module, pop=True)
                 if fisher is not None:
-                    setattr(module, self.config.fisher_attr, fisher)
+                    setattr(module, attr, fisher)
+        if getattr(model, attr, None) is None:
+            fisher = cxt.full_cov_symmatrix(model, pop=True)
+            if fisher is not None:
+                setattr(model, attr, fisher)
 
     def _call_loss_fn(self) -> Tensor:
         assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'

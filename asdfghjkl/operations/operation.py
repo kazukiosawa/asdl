@@ -769,6 +769,11 @@ class OperationContext:
             if matrix.diag.has_bias:
                 operation.accumulate_result(matrix.diag.bias, OP_COV_DIAG)
 
+    def register_full_symmatrix(self, module, matrix: SymMatrix):
+        assert matrix.has_data
+        operation = self.get_operation(module)
+        operation.accumulate_result(matrix.data, OP_FULL_COV)
+
     def full_cov_symmatrix(self, module, pop=False):
         cov = self.get_result(module, OP_FULL_COV, pop=pop)
         if cov is None:
