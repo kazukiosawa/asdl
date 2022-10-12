@@ -767,9 +767,9 @@ class OperationContext:
             operation.accumulate_result(matrix.unit.data, OP_COV_UNIT_WISE)
         if matrix.has_diag:
             if matrix.diag.has_weight:
-                operation.accumulate_result(matrix.diag.weight, OP_COV_DIAG)
+                operation.accumulate_result(matrix.diag.weight, OP_COV_DIAG, 'weight')
             if matrix.diag.has_bias:
-                operation.accumulate_result(matrix.diag.bias, OP_COV_DIAG)
+                operation.accumulate_result(matrix.diag.bias, OP_COV_DIAG, 'bias')
 
     def register_full_symmatrix(self, module, matrix: SymMatrix):
         assert matrix.has_data
