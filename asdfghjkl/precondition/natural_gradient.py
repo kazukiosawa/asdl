@@ -9,8 +9,7 @@ import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 
 from ..utils import nvtx_range
-from ..core import module_wise_assignments, modules_to_assign, no_centered_cov
-from ..operations import OperationContext
+from ..core import module_wise_assignments, modules_to_assign
 from ..matrices import *
 from ..symmatrix import SymMatrix
 from ..vector import ParamVector
