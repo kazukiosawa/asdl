@@ -408,6 +408,8 @@ class FisherMaker(GradientMaker):
 class FisherExactCrossEntropy(FisherMaker):
     @property
     def do_local_accumulate(self) -> bool:
+        if self._logits is not None:
+            return self._logits.shape[-1] > 1  # out_dim > 1
         return True
 
     def _fisher_loop(self, closure):
@@ -450,6 +452,8 @@ class FisherMCCrossEntropy(FisherMaker):
 class FisherExactMSE(FisherMaker):
     @property
     def do_local_accumulate(self) -> bool:
+        if self._logits is not None:
+            return self._logits.shape[-1] > 1  # out_dim > 1
         return True
 
     def _fisher_loop(self, closure):
