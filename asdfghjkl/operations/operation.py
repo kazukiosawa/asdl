@@ -762,7 +762,7 @@ class OperationContext:
             if matrix.kfe.has_scale:
                 operation.accumulate_result(matrix.kfe.scale, OP_COV_KFE, 'scale')
         if matrix.has_unit and matrix.unit.has_data:
-            operation.accumulate_result(matrix.unit, OP_COV_UNIT_WISE)
+            operation.accumulate_result(matrix.unit.data, OP_COV_UNIT_WISE)
         if matrix.has_diag:
             if matrix.diag.has_weight:
                 operation.accumulate_result(matrix.diag.weight, OP_COV_DIAG)
