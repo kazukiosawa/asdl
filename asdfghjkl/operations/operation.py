@@ -749,6 +749,8 @@ class OperationContext:
 
     def register_symmatrix(self, module, matrix: SymMatrix):
         operation = self.get_operation(module)
+        if matrix.has_data:
+            operation.accumulate_result(matrix.data, OP_COV)
         if matrix.has_kron:
             if matrix.kron.has_A:
                 operation.accumulate_result(matrix.kron.A, OP_COV_KRON, 'A')
