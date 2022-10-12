@@ -126,6 +126,7 @@ class FisherMaker(GradientMaker):
                 self._fisher_loop(closure)
 
             self.extract_fisher(cxt)
+
         if calc_inv_after_fisher:
             self.replace_fisher_with_inv(damping)
         if calc_loss_grad_after_fisher:
