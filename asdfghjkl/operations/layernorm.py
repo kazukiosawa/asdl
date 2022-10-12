@@ -15,18 +15,6 @@ class LayerNorm(Operation):
 
     normalized_shape: f[0] x f[1] x ... x f[-1]
     """
-    def __init__(self, module, op_names, model_for_kernel=None):
-        if OP_COV_KRON in op_names:
-            # kron operation is not supported. unit_wise will be used instead.
-            op_names.remove(OP_COV_KRON)
-            op_names.append(OP_COV_UNIT_WISE)
-
-        if OP_GRAM_HADAMARD in op_names:
-            # gram hadamard operation is not supported. gram direct will be used instead.
-            op_names.remove(OP_GRAM_HADAMARD)
-            op_names.append(OP_GRAM_DIRECT)
-
-        super().__init__(module, op_names, model_for_kernel)
 
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):
