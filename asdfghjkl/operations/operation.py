@@ -17,7 +17,6 @@ OP_COV_KRON = 'cov_kron'  # Kronecker-factored
 OP_COV_KRON_INV = 'cov_kron_inv'  # Kronecker-factored inverse
 OP_COV_SWIFT_KRON = 'cov_swift_kron'  # swift Kronecker-factored
 OP_COV_SWIFT_KRON_INV = 'cov_swift_kron_inv'  # swift Kronecker-factored inverse
-OP_COV_KRON_PRECOND = 'cov_kron_precondition'  # precondition grad with KF inverse
 OP_COV_KFE = 'cov_kfe'  # Kronecker-factored eigenbasis
 OP_COV_DIAG = 'cov_diag'  # diagonal
 OP_COV_UNIT_WISE = 'cov_unit_wise'  # unit-wise
@@ -40,7 +39,7 @@ OP_MEAN_OUTGRADS = 'mean_outgrads'  # compute the mean outgrads
 OP_BFGS_KRON_S_AS = 'bfgs_kron_s_As'  # compute s ans As for K-BFGS
 
 ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
-           OP_COV_KRON, OP_COV_KRON_INV, OP_COV_KRON_PRECOND,
+           OP_COV_KRON, OP_COV_KRON_INV,
            OP_COV_SWIFT_KRON, OP_COV_SWIFT_KRON_INV,
            OP_COV_DIAG, OP_COV_UNIT_WISE,
            OP_RFIM_RELU, OP_RFIM_SOFTMAX,
@@ -232,8 +231,6 @@ class Operation:
                 B_inv = cholesky_inv(self.cov_kron_B(module, out_grads).mul_(cov_scale), damping_B)
                 self.accumulate_result(A_inv, OP_COV_KRON, 'A_inv')
                 self.accumulate_result(B_inv, OP_COV_KRON, 'B_inv')
-            elif op_name == OP_COV_KRON_PRECOND:
-                self.cov_kron_precondition(module, in_data, out_grads)
             elif op_name == OP_COV_SWIFT_KRON:
                 B = self.cov_swift_kron_B(module, out_grads).mul_(cov_scale)
                 self.accumulate_result(B, OP_COV_KRON, 'B')  # not OP_COV_SWIFT_KRON
@@ -400,19 +397,6 @@ class Operation:
         damping_A = max(r * pi, eps)
         damping_B = max(r / pi, eps)
         return damping_A, damping_B
-
-    def cov_kron_precondition(self, module, in_data, out_grads):
-        damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
-        B = self.cov_swift_kron_B(module, out_grads)
-        grad_weight_2d = module.weight.grad.view(B.shape[0], -1)
-        grad_weight_2d.copy_(cholesky_solve(B, grad_weight_2d, damping_B))
-        if original_requires_grad(module, 'bias'):
-            grad_bias = module.bias.grad
-            grad_bias.copy_(cholesky_solve(B, grad_bias.unsqueeze(-1), self._damping).squeeze())
-        del B
-        A = self.cov_swift_kron_A(module, in_data)
-        grad_weight_2d.copy_(cholesky_solve(A, grad_weight_2d.T, damping_A).T)
-        del A
 
     @staticmethod
     def cov_kfe_A(module, in_data):

@@ -26,7 +26,6 @@ __all__ = [
     'OP_CVP',
     'OP_COV_KRON',
     'OP_COV_KRON_INV',
-    'OP_COV_KRON_PRECOND',
     'OP_COV_SWIFT_KRON',
     'OP_COV_SWIFT_KRON_INV',
     'OP_COV_KFE',
