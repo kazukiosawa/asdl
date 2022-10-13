@@ -3,7 +3,7 @@ from typing import Dict, List
 import torch
 import torch.nn as nn
 from torch.cuda import nvtx
-from ..utils import original_requires_grad, cholesky_solve, cholesky_inv, smw_inv
+from ..utils import original_requires_grad, cholesky_inv, smw_inv
 from ..matrices import *
 from ..symmatrix import *
 from ..vector import ParamVector
