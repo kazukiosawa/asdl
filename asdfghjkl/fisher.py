@@ -118,7 +118,7 @@ class FisherMaker(GradientMaker):
                 if fvp:
                     cxt.calc_full_cvp(model, scale=scale)
                 else:
-                    cxt.calc_full_cov(model, scale=scale)
+                    cxt.calc_full_cov(model, scale=scale, calc_inv=calc_inv_with_fisher, damping=damping)
 
             if self.is_fisher_emp:
                 closure(lambda: loss)
