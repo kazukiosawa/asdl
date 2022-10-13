@@ -92,7 +92,7 @@ class FisherMaker(GradientMaker):
             # set Fisher/FVP zero
             self.zero_fisher(fvp=fvp)
 
-        if seed:
+        if seed is not None:
             torch.random.manual_seed(seed)
 
         calc_loss_grad_with_fisher = calc_loss_grad and self.is_fisher_emp
