@@ -230,8 +230,8 @@ class Operation:
                 A_inv = cholesky_inv(A, damping_A)
                 del A
                 B_inv = cholesky_inv(self.cov_kron_B(module, out_grads).mul_(cov_scale), damping_B)
-                self.accumulate_result(A_inv, OP_COV_KRON_INV, 'A')
-                self.accumulate_result(B_inv, OP_COV_KRON_INV, 'B')
+                self.accumulate_result(A_inv, OP_COV_KRON, 'A_inv')
+                self.accumulate_result(B_inv, OP_COV_KRON, 'B_inv')
             elif op_name == OP_COV_KRON_PRECOND:
                 self.cov_kron_precondition(module, in_data, out_grads)
             elif op_name == OP_COV_SWIFT_KRON:
@@ -252,8 +252,8 @@ class Operation:
                 else:
                     B_inv = smw_inv(B, damping_B)
                 del B
-                self.accumulate_result(A_inv, OP_COV_KRON_INV, 'A')  # not OP_COV_SWIFT_KRON_INV
-                self.accumulate_result(B_inv, OP_COV_KRON_INV, 'B')  # not OP_COV_SWIFT_KRON_INV
+                self.accumulate_result(A_inv, OP_COV_KRON, 'A_inv')  # not OP_COV_SWIFT_KRON
+                self.accumulate_result(B_inv, OP_COV_KRON, 'B_inv')  # not OP_COV_SWIFT_KRON
             elif op_name == OP_COV_UNIT_WISE:
                 if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm)):
                     assert original_requires_grad(module, 'weight') and original_requires_grad(module, 'bias'), \
@@ -732,10 +732,8 @@ class OperationContext:
         if cov_kron is not None:
             kwargs['kron_A'] = cov_kron.pop('A', None)
             kwargs['kron_B'] = cov_kron.pop('B', None)
-        cov_kron_inv = self.get_result(module, OP_COV_KRON_INV, pop=pop)
-        if cov_kron_inv is not None:
-            kwargs['kron_A_inv'] = cov_kron_inv.pop('A', None)
-            kwargs['kron_B_inv'] = cov_kron_inv.pop('B', None)
+            kwargs['kron_A_inv'] = cov_kron.pop('A_inv', None)
+            kwargs['kron_B_inv'] = cov_kron.pop('B_inv', None)
         cov_kfe = self.get_result(module, OP_COV_KFE, pop=pop)
         if cov_kfe is not None:
             kwargs['kfe_A'] = cov_kfe.pop('A', None)
