@@ -12,14 +12,17 @@ from ..vector import ParamVector
 OP_FULL_COV = 'full_cov'  # full covariance
 OP_FULL_CVP = 'full_cvp'  # full covariance-vector product
 OP_COV = 'cov'  # layer-wise covariance
+OP_COV_INV = 'cov_inv'  # layer-wise covariance inverse
 OP_CVP = 'cvp'  # layer-wise covariance-vector product
 OP_COV_KRON = 'cov_kron'  # Kronecker-factored
 OP_COV_KRON_INV = 'cov_kron_inv'  # Kronecker-factored inverse
 OP_COV_SWIFT_KRON = 'cov_swift_kron'  # swift Kronecker-factored
 OP_COV_SWIFT_KRON_INV = 'cov_swift_kron_inv'  # swift Kronecker-factored inverse
 OP_COV_KFE = 'cov_kfe'  # Kronecker-factored eigenbasis
-OP_COV_DIAG = 'cov_diag'  # diagonal
 OP_COV_UNIT_WISE = 'cov_unit_wise'  # unit-wise
+OP_COV_UNIT_WISE_INV = 'cov_unit_wise_inv'  # unit-wise inverse
+OP_COV_DIAG = 'cov_diag'  # diagonal
+OP_COV_DIAG_INV = 'cov_diag_inv'  # diagonal inverse
 OP_RFIM_RELU = 'rfim_relu'  # relative FIM for ReLU
 OP_RFIM_SOFTMAX = 'rfim_softmax'  # relative FIM for softmax
 
@@ -38,10 +41,12 @@ OP_OUT_SPATIAL_SIZE = 'out_spatial_size'  # get the spatial size of outputs
 OP_MEAN_OUTGRADS = 'mean_outgrads'  # compute the mean outgrads
 OP_BFGS_KRON_S_AS = 'bfgs_kron_s_As'  # compute s ans As for K-BFGS
 
-ALL_OPS = [OP_FULL_COV, OP_FULL_CVP, OP_COV, OP_CVP,
+ALL_OPS = [OP_FULL_COV, OP_FULL_CVP,
+           OP_COV, OP_COV_INV, OP_CVP,
            OP_COV_KRON, OP_COV_KRON_INV,
            OP_COV_SWIFT_KRON, OP_COV_SWIFT_KRON_INV,
-           OP_COV_DIAG, OP_COV_UNIT_WISE,
+           OP_COV_UNIT_WISE, OP_COV_UNIT_WISE_INV,
+           OP_COV_DIAG, OP_COV_DIAG_INV,
            OP_RFIM_RELU, OP_RFIM_SOFTMAX,
            OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS,
            OP_SAVE_INPUTS, OP_SAVE_OUTPUTS, OP_SAVE_OUTGRADS,
@@ -53,8 +58,10 @@ FWD_OPS = [OP_SAVE_INPUTS, OP_SAVE_OUTPUTS,
            OP_COV_KRON, OP_COV_SWIFT_KRON,
            OP_RFIM_RELU, OP_RFIM_SOFTMAX,
            OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE]
-BWD_OPS_WITH_INPUTS = [OP_COV, OP_CVP, OP_COV_DIAG, OP_COV_UNIT_WISE,
+BWD_OPS_WITH_INPUTS = [OP_COV, OP_COV_INV, OP_CVP,
                        OP_COV_KRON_INV, OP_COV_SWIFT_KRON_INV,
+                       OP_COV_UNIT_WISE, OP_COV_UNIT_WISE_INV,
+                       OP_COV_DIAG, OP_COV_DIAG_INV,
                        OP_GRAM_HADAMARD, OP_GRAM_DIRECT,
                        OP_BATCH_GRADS, OP_COV_KFE]
 BWD_OPS = [OP_SAVE_OUTGRADS,
@@ -186,6 +193,7 @@ class Operation:
         module = self._module
         op_names = self._op_names
         cov_scale = self._cov_scale
+        damping = self._damping
 
         if any(op_name in BWD_OPS for op_name in op_names):
             out_grads = self.preprocess_out_grads(module, out_grads)
@@ -201,9 +209,13 @@ class Operation:
         for op_name in op_names:
             if op_name not in BWD_OPS:
                 continue
-            if op_name == OP_COV:
+            if op_name in [OP_COV, OP_COV_INV]:
                 _, _, batch_g = self.collect_batch_grads(in_data, out_grads)
-                self.accumulate_result(torch.matmul(batch_g.T, batch_g).mul_(cov_scale), OP_COV)
+                cov = torch.matmul(batch_g.T, batch_g).mul_(cov_scale)
+                if op_name == OP_COV:
+                    self.accumulate_result(cov, OP_COV, 'data')
+                else:
+                    self.accumulate_result(cholesky_inv(cov, damping), OP_COV, 'inv')
             elif op_name == OP_CVP:
                 _, _, batch_g = self.collect_batch_grads(in_data, out_grads)
                 assert vector is not None
@@ -251,14 +263,41 @@ class Operation:
                 del B
                 self.accumulate_result(A_inv, OP_COV_KRON, 'A_inv')  # not OP_COV_SWIFT_KRON
                 self.accumulate_result(B_inv, OP_COV_KRON, 'B_inv')  # not OP_COV_SWIFT_KRON
-            elif op_name == OP_COV_UNIT_WISE:
+            elif op_name == OP_COV_KFE:
+                Ua = self.cov_kfe_A(module, in_data)
+                Ub = self.cov_kfe_B(module, out_grads)
+                bias = original_requires_grad(module, 'bias')
+                self.accumulate_result(Ua, OP_COV_KFE, 'A')
+                self.accumulate_result(Ub, OP_COV_KFE, 'B')
+                self.accumulate_result(self.cov_kfe_scale(module, in_data, out_grads, Ua, Ub, bias=bias),
+                                       OP_COV_KFE, 'scale')
+            elif op_name in [OP_COV_UNIT_WISE, OP_COV_UNIT_WISE_INV]:
                 if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm)):
                     assert original_requires_grad(module, 'weight') and original_requires_grad(module, 'bias'), \
                         f'Both weight and bias have to require grad for {OP_COV_UNIT_WISE} (module: {module}).'
                 elif original_requires_grad(module, 'bias'):
                     in_data = self.extend_in_data(in_data)
-                rst = self.cov_unit_wise(module, in_data, out_grads).mul_(cov_scale)
-                self.accumulate_result(rst, OP_COV_UNIT_WISE)
+                cov = self.cov_unit_wise(module, in_data, out_grads).mul_(cov_scale)
+                if op_name == OP_COV_UNIT_WISE:
+                    self.accumulate_result(cov, OP_COV_UNIT_WISE, 'data')
+                else:
+                    diag = torch.diagonal(cov, dim1=1, dim2=2)
+                    diag += damping
+                    inv = torch.inverse(cov)
+                    self.accumulate_result(inv, OP_COV_UNIT_WISE, 'inv')
+            elif op_name in [OP_COV_DIAG, OP_COV_DIAG_INV]:
+                if original_requires_grad(module, 'weight'):
+                    cov = self.cov_diag_weight(module, in_data, out_grads).mul_(cov_scale)
+                    if op_name == OP_COV_DIAG:
+                        self.accumulate_result(cov, OP_COV_DIAG, 'weight')
+                    else:
+                        self.accumulate_result(1/(cov+damping), OP_COV_DIAG, 'weight_inv')
+                if original_requires_grad(module, 'bias'):
+                    cov = self.cov_diag_bias(module, out_grads).mul_(cov_scale)
+                    if op_name == OP_COV_DIAG:
+                        self.accumulate_result(cov, OP_COV_DIAG, 'bias')
+                    else:
+                        self.accumulate_result(1/(cov+damping), OP_COV_DIAG, 'bias_inv')
             elif op_name == OP_GRAM_HADAMARD:
                 assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
                 n_data = out_grads.shape[0]
@@ -294,28 +333,15 @@ class Operation:
                     self._model_for_kernel.kernel += torch.matmul(batch_g, batch_g2.T)
                 else:
                     self._model_for_kernel.kernel += torch.matmul(batch_g[:n1], batch_g2[n1:].T)
-            elif op_name in [OP_COV_DIAG, OP_BATCH_GRADS]:
+            elif op_name == OP_BATCH_GRADS:
                 if original_requires_grad(module, 'weight'):
-                    rst = getattr(self,
-                                  f'{op_name}_weight')(module, in_data, out_grads)
-                    if op_name == OP_COV_DIAG:
-                        rst.mul_(cov_scale)
-                    self.accumulate_result(rst, op_name, 'weight')
+                    rst = self.batch_grads_weight(module, in_data, out_grads)
+                    self.accumulate_result(rst, OP_BATCH_GRADS, 'weight')
                 if original_requires_grad(module, 'bias'):
-                    rst = getattr(self, f'{op_name}_bias')(module, out_grads)
-                    if op_name == OP_COV_DIAG:
-                        rst.mul_(cov_scale)
-                    self.accumulate_result(rst, op_name, 'bias')
+                    rst = self.batch_grads_bias(module, out_grads)
+                    self.accumulate_result(rst, OP_BATCH_GRADS, 'bias')
             elif op_name == OP_MEAN_OUTGRADS:
                 self.accumulate_result(self.out_grads_mean(module, out_grads), OP_MEAN_OUTGRADS)
-            elif op_name == OP_COV_KFE:
-                Ua = self.cov_kfe_A(module, in_data)
-                Ub = self.cov_kfe_B(module, out_grads)
-                bias = original_requires_grad(module, 'bias')
-                self.accumulate_result(Ua, OP_COV_KFE, 'A')
-                self.accumulate_result(Ub, OP_COV_KFE, 'B')
-                self.accumulate_result(self.cov_kfe_scale(module, in_data, out_grads, Ua, Ub, bias=bias),
-                                       OP_COV_KFE, 'scale')
 
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):
@@ -586,7 +612,7 @@ class OperationContext:
     def full_cov(self, module):
         return self.get_result(module, OP_FULL_COV)
 
-    def calc_full_cov(self, module, scale=1.):
+    def calc_full_cov(self, module, scale=1., calc_inv=False, damping=1.e-7):
         """
         g: (p,)
         cov = sum[gg^t]: (p, p)
@@ -595,7 +621,10 @@ class OperationContext:
         if bg is None:
             return
         cov = torch.matmul(bg.T, bg).mul_(scale)  # p x p
-        self.accumulate_result(module, cov, OP_FULL_COV)
+        if calc_inv:
+            self.accumulate_result(module, cholesky_inv(cov, damping), OP_FULL_COV, 'inv')
+        else:
+            self.accumulate_result(module, cov, OP_FULL_COV, 'data')
 
     def full_cvp(self, module):
         return self.get_result(module, OP_FULL_CVP)
@@ -710,8 +739,11 @@ class OperationContext:
         self.calc_cov(module, shape=SHAPE_DIAG, clear_in_out=clear_in_out)
 
     def cov_symmatrix(self, module, pop=False):
-        kwargs = dict(data=self.get_result(module, OP_COV, pop=pop),
-                      unit_data=self.get_result(module, OP_COV_UNIT_WISE, pop=pop))
+        kwargs = dict()
+        cov = self.get_result(module, OP_COV, pop=pop)
+        if cov is not None:
+            kwargs['data'] = cov.pop('data', None)
+            kwargs['inv'] = cov.pop('inv', None)
         cov_kron = self.get_result(module, OP_COV_KRON, pop=pop)
         if cov_kron is not None:
             kwargs['kron_A'] = cov_kron.pop('A', None)
@@ -723,20 +755,32 @@ class OperationContext:
             kwargs['kfe_A'] = cov_kfe.pop('A', None)
             kwargs['kfe_B'] = cov_kfe.pop('B', None)
             kwargs['kfe_scale'] = cov_kfe.pop('scale', None)
+        cov_unit = self.get_result(module, OP_COV_UNIT_WISE, pop=pop)
+        if cov_unit is not None:
+            kwargs['unit_data'] = cov_unit.pop('data', None)
+            kwargs['unit_inv'] = cov_unit.pop('inv', None)
         cov_diag = self.get_result(module, OP_COV_DIAG, pop=pop)
         if cov_diag is not None:
             if original_requires_grad(module, 'weight'):
-                kwargs['diag_weight'] = cov_diag['weight']
+                kwargs['diag_weight'] = cov_diag.pop('weight', None)
+                kwargs['diag_weight_inv'] = cov_diag.pop('weight_inv', None)
             if original_requires_grad(module, 'bias'):
-                kwargs['diag_bias'] = cov_diag['bias']
+                kwargs['diag_bias'] = cov_diag.pop('bias', None)
+                kwargs['diag_bias_inv'] = cov_diag.pop('bias_inv', None)
         if all(v is None for v in kwargs.values()):
             return None
         return SymMatrix(**kwargs)
 
+    def full_cov_symmatrix(self, module, pop=False):
+        cov = self.get_result(module, OP_FULL_COV, pop=pop)
+        if cov is None:
+            return
+        return SymMatrix(data=cov.pop('data', None), inv=cov.pop('inv', None))
+
     def register_symmatrix(self, module, matrix: SymMatrix):
         operation = self.get_operation(module)
         if matrix.has_data:
-            operation.accumulate_result(matrix.data, OP_COV)
+            operation.accumulate_result(matrix.data, OP_COV, 'data')
         if matrix.has_kron:
             if matrix.kron.has_A:
                 operation.accumulate_result(matrix.kron.A, OP_COV_KRON, 'A')
@@ -750,7 +794,7 @@ class OperationContext:
             if matrix.kfe.has_scale:
                 operation.accumulate_result(matrix.kfe.scale, OP_COV_KFE, 'scale')
         if matrix.has_unit and matrix.unit.has_data:
-            operation.accumulate_result(matrix.unit.data, OP_COV_UNIT_WISE)
+            operation.accumulate_result(matrix.unit.data, OP_COV_UNIT_WISE, 'data')
         if matrix.has_diag:
             if matrix.diag.has_weight:
                 operation.accumulate_result(matrix.diag.weight, OP_COV_DIAG, 'weight')
@@ -760,13 +804,7 @@ class OperationContext:
     def register_full_symmatrix(self, module, matrix: SymMatrix):
         assert matrix.has_data
         operation = self.get_operation(module)
-        operation.accumulate_result(matrix.data, OP_FULL_COV)
-
-    def full_cov_symmatrix(self, module, pop=False):
-        cov = self.get_result(module, OP_FULL_COV, pop=pop)
-        if cov is None:
-            return
-        return SymMatrix(data=cov)
+        operation.accumulate_result(matrix.data, OP_FULL_COV, 'data')
 
     def cvp_paramvector(self, module, pop=False):
         cvp = self.get_result(module, OP_CVP, pop=pop)

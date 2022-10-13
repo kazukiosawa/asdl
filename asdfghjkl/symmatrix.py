@@ -1,5 +1,5 @@
 import os
-from typing import Tuple
+from typing import Tuple, Iterable
 from operator import iadd
 
 import numpy as np
@@ -83,29 +83,34 @@ def _load_from_numpy(path, device='cpu'):
     return torch.from_numpy(data).to(device)
 
 
+def is_all_none(xs: Iterable):
+    return all(x is None for x in xs)
+
+
 class SymMatrix:
-    def __init__(self, data=None, kron=None, kfe=None, diag=None, unit=None,
+    def __init__(self, data=None, inv=None, kron=None, kfe=None, diag=None, unit=None,
                  kron_A=None, kron_B=None, kron_A_inv=None, kron_B_inv=None,
                  kfe_A=None, kfe_B=None, kfe_scale=None,
-                 diag_weight=None, diag_bias=None, unit_data=None):
+                 unit_data=None, unit_inv=None,
+                 diag_weight=None, diag_bias=None, diag_weight_inv=None, diag_bias_inv=None):
         self.data: Tensor = data
-        if not (kron_A is None and kron_B is None and kron_A_inv is None and kron_B_inv is None):
+        self.inv: Tensor = inv
+        if not is_all_none([kron_A, kron_B, kron_A_inv, kron_B_inv]):
             self.kron = Kron(kron_A, kron_B, kron_A_inv, kron_B_inv)
         else:
             self.kron: Kron = kron
-        if kfe_A is not None or kfe_B is not None or kfe_scale is not None:
+        if not is_all_none([kfe_A, kfe_B, kfe_scale]):
             self.kfe = KFE(kfe_A, kfe_B, kfe_scale)
         else:
             self.kfe: KFE = kfe
-        if diag_weight is not None or diag_bias is not None:
-            self.diag = Diag(diag_weight, diag_bias)
-        else:
-            self.diag: Diag = diag
-        if unit_data is not None:
-            self.unit = UnitWise(unit_data)
+        if not is_all_none([unit_data, unit_inv]):
+            self.unit = UnitWise(unit_data, unit_inv)
         else:
             self.unit: UnitWise = unit
-        self.inv: Tensor = None
+        if not is_all_none([diag_weight, diag_bias, diag_weight_inv, diag_bias_inv]):
+            self.diag = Diag(diag_weight, diag_bias, diag_weight_inv, diag_bias_inv)
+        else:
+            self.diag: Diag = diag
 
     def __repr__(self):
         text = ''
@@ -584,9 +589,9 @@ class KFE:
 
 
 class UnitWise:
-    def __init__(self, data=None):
+    def __init__(self, data=None, inv=None):
         self.data = data
-        self.inv = None
+        self.inv = inv
 
     def __add__(self, other):
         # NOTE: inv will not be preserved
@@ -680,11 +685,11 @@ class UnitWise:
 
 
 class Diag:
-    def __init__(self, weight=None, bias=None):
+    def __init__(self, weight=None, bias=None, weight_inv=None, bias_inv=None):
         self.weight = weight
         self.bias = bias
-        self.weight_inv = None
-        self.bias_inv = None
+        self.weight_inv = weight_inv
+        self.bias_inv = bias_inv
 
     def __add__(self, other):
         # NOTE: inv will not be preserved
