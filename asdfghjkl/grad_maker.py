@@ -128,8 +128,6 @@ class GradientMaker:
         return self._loss
 
     def forward(self) -> Union[Tuple[Any, Tensor], Any]:
-        # Performs simple model and loss evaluations.
-        # A child class should override this function.
         self.call_model()
         self.call_loss()
         if self._loss_fn is None:
@@ -138,11 +136,11 @@ class GradientMaker:
             return self._model_output, self._loss
 
     def backward(self):
-        # Performs a simple gradient calculation.
-        # A child class should override this function.
         self._loss.backward()
 
     def forward_and_backward(self) -> Union[Tuple[Any, Tensor], Any]:
+        # Performs a forward pass (model and loss evaluations) and a backward pass (gradient calculation).
+        # A child class should override this function.
         rst = self.forward()
         self.backward()
         return rst
