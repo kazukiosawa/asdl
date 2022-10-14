@@ -285,7 +285,6 @@ class Operation:
                     diag += damping
                     inv = torch.inverse(cov)
                     self.accumulate_result(inv, OP_COV_UNIT_WISE, 'inv')
-                # TODO: compute cvp
             elif op_name in [OP_COV_DIAG, OP_COV_DIAG_INV]:
                 if original_requires_grad(module, 'weight'):
                     cov = self.cov_diag_weight(module, in_data, out_grads).mul_(cov_scale)
@@ -299,7 +298,6 @@ class Operation:
                         self.accumulate_result(cov, OP_COV_DIAG, 'bias')
                     else:
                         self.accumulate_result(1/(cov+damping), OP_COV_DIAG, 'bias_inv')
-                # TODO: compute cvp
             elif op_name == OP_GRAM_HADAMARD:
                 assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
                 n_data = out_grads.shape[0]

@@ -80,6 +80,7 @@ class FisherMaker(GradientMaker):
                              damping=None,
                              vec: ParamVector = None) -> Union[Tuple[Any, Tensor], Any]:
         assert not (accumulate and calc_inv), 'accumulate and calc_inv cannot be True at the same time.'
+        assert not (fvp and calc_inv), 'fvp and calc_inv cannot be True at the same time.'
         model = self.model
         fisher_shapes = self.config.fisher_shapes
         if isinstance(fisher_shapes, str):
@@ -126,6 +127,8 @@ class FisherMaker(GradientMaker):
                 self._fisher_loop(closure)
 
             self._extract_fisher(cxt)
+            # TODO: compute fvp for kron, unit, diag
+            # TODO: extract fvp
 
         if calc_inv_after_fisher:
             self.replace_fisher_with_inv(damping)
