@@ -14,15 +14,15 @@ OP_FULL_CVP = 'full_cvp'  # full covariance-vector product
 OP_COV = 'cov'  # layer-wise covariance
 OP_COV_INV = 'cov_inv'  # layer-wise covariance inverse
 OP_CVP = 'cvp'  # layer-wise covariance-vector product
-OP_COV_KRON = 'cov_kron'  # Kronecker-factored
-OP_COV_KRON_INV = 'cov_kron_inv'  # Kronecker-factored inverse
-OP_COV_SWIFT_KRON = 'cov_swift_kron'  # swift Kronecker-factored
-OP_COV_SWIFT_KRON_INV = 'cov_swift_kron_inv'  # swift Kronecker-factored inverse
-OP_COV_KFE = 'cov_kfe'  # Kronecker-factored eigenbasis
-OP_COV_UNIT_WISE = 'cov_unit_wise'  # unit-wise
-OP_COV_UNIT_WISE_INV = 'cov_unit_wise_inv'  # unit-wise inverse
-OP_COV_DIAG = 'cov_diag'  # diagonal
-OP_COV_DIAG_INV = 'cov_diag_inv'  # diagonal inverse
+OP_COV_KRON = 'cov_kron'  # Kronecker-factored covariance
+OP_COV_KRON_INV = 'cov_kron_inv'  # Kronecker-factored covariance inverse
+OP_COV_SWIFT_KRON = 'cov_swift_kron'  # swift Kronecker-factored covariance
+OP_COV_SWIFT_KRON_INV = 'cov_swift_kron_inv'  # swift Kronecker-factored covariance inverse
+OP_COV_KFE = 'cov_kfe'  # Kronecker-factored covariance eigenbasis
+OP_COV_UNIT_WISE = 'cov_unit_wise'  # unit-wise covariance
+OP_COV_UNIT_WISE_INV = 'cov_unit_wise_inv'  # unit-wise covariance inverse
+OP_COV_DIAG = 'cov_diag'  # diagonal covariance
+OP_COV_DIAG_INV = 'cov_diag_inv'  # diagonal covariance inverse
 OP_RFIM_RELU = 'rfim_relu'  # relative FIM for ReLU
 OP_RFIM_SOFTMAX = 'rfim_softmax'  # relative FIM for softmax
 
@@ -285,6 +285,7 @@ class Operation:
                     diag += damping
                     inv = torch.inverse(cov)
                     self.accumulate_result(inv, OP_COV_UNIT_WISE, 'inv')
+                # TODO: compute cvp
             elif op_name in [OP_COV_DIAG, OP_COV_DIAG_INV]:
                 if original_requires_grad(module, 'weight'):
                     cov = self.cov_diag_weight(module, in_data, out_grads).mul_(cov_scale)
@@ -298,6 +299,7 @@ class Operation:
                         self.accumulate_result(cov, OP_COV_DIAG, 'bias')
                     else:
                         self.accumulate_result(1/(cov+damping), OP_COV_DIAG, 'bias_inv')
+                # TODO: compute cvp
             elif op_name == OP_GRAM_HADAMARD:
                 assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
                 n_data = out_grads.shape[0]
