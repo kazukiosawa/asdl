@@ -34,6 +34,8 @@ _supported_types = [FISHER_EXACT, FISHER_MC, FISHER_EMP]
 _supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG]
 _supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_LAYER_WISE]
 
+_invalid_data_size = -1
+
 
 @dataclass
 class FisherConfig:
@@ -46,7 +48,7 @@ class FisherConfig:
     fisher_attr: str = 'fisher'
     fvp_attr: str = 'fvp'
     ignore_modules: List[Any] = None
-    data_size: int = 1
+    data_size: int = _invalid_data_size
     scale: float = 1.
     is_distributed: bool = False
     all_reduce: bool = False
@@ -73,7 +75,7 @@ class FisherMaker(GradientMaker):
         raise NotImplementedError
 
     def forward_and_backward(self,
-                             data_size=None,
+                             data_size=_invalid_data_size,
                              scale=None,
                              accumulate=False,
                              calc_loss_grad=True,
@@ -90,8 +92,11 @@ class FisherMaker(GradientMaker):
             fisher_shapes = [fisher_shapes]
         ignore_modules = config.ignore_modules
         seed = config.seed
-        scale = config.scale if scale is None else scale
-        data_size = config.data_size if data_size is None else data_size
+        if data_size == _invalid_data_size:
+            data_size = config.data_size  # refer config value (default: _invalid_data_size)
+        assert data_size != _invalid_data_size, 'data_size is not specified.'
+        if scale is None:
+            scale = config.scale  # refer config value (default: 1)
         scale /= data_size
 
         if not accumulate:
