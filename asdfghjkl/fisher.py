@@ -127,8 +127,6 @@ class FisherMaker(GradientMaker):
                 self._fisher_loop(closure)
 
             self._extract_fisher(cxt)
-            # TODO: compute fvp for kron, unit, diag
-            # TODO: extract fvp
 
         if calc_inv_after_fisher:
             self.replace_fisher_with_inv(damping)
@@ -161,16 +159,20 @@ class FisherMaker(GradientMaker):
 
     def _extract_fisher(self, cxt: OperationContext):
         model = self.model
-        attr = self.config.fisher_attr
+        fisher_attr = self.config.fisher_attr
+        fvp_attr = self.config.fvp_attr
+
+        def extract_if_not_exist(_module, func, attr):
+            if getattr(_module, attr, None) is None:  # not exist
+                fisher_or_fvp = func(_module, pop=True)  # extract
+                if fisher_or_fvp is not None:
+                    setattr(_module, attr, fisher_or_fvp)
+
         for module in model.modules():
-            if getattr(module, attr, None) is None:
-                fisher = cxt.cov_symmatrix(module, pop=True)
-                if fisher is not None:
-                    setattr(module, attr, fisher)
-        if getattr(model, attr, None) is None:
-            fisher = cxt.full_cov_symmatrix(model, pop=True)
-            if fisher is not None:
-                setattr(model, attr, fisher)
+            extract_if_not_exist(module, cxt.cov_symmatrix, fisher_attr)
+            extract_if_not_exist(module, cxt.cvp_paramvector, fvp_attr)
+        extract_if_not_exist(model, cxt.full_cov_symmatrix, fisher_attr)
+        extract_if_not_exist(model, cxt.full_cvp_paramvector, fvp_attr)
 
     def replace_fisher_with_inv(self, damping):
         model = self.model
