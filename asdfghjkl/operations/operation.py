@@ -235,19 +235,20 @@ class Operation:
                 B = self.cov_kron_B(module, out_grads).mul_(cov_scale)
                 self.accumulate_result(B, OP_COV_KRON, 'B')
             elif op_name == OP_COV_KRON_INV:
-                damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
                 A = self.cov_kron_A(module, in_data).mul_(cov_scale)
                 del in_data
+                B = self.cov_kron_B(module, out_grads).mul_(cov_scale)
+                damping_A, damping_B = self.cov_kron_damping(A, B)
                 A_inv = cholesky_inv(A, damping_A)
                 del A
-                B_inv = cholesky_inv(self.cov_kron_B(module, out_grads).mul_(cov_scale), damping_B)
+                B_inv = cholesky_inv(B, damping_B)
+                del B
                 self.accumulate_result(A_inv, OP_COV_KRON, 'A_inv')
                 self.accumulate_result(B_inv, OP_COV_KRON, 'B_inv')
             elif op_name == OP_COV_SWIFT_KRON:
                 B = self.cov_swift_kron_B(module, out_grads).mul_(cov_scale)
                 self.accumulate_result(B, OP_COV_KRON, 'B')  # not OP_COV_SWIFT_KRON
             elif op_name == OP_COV_SWIFT_KRON_INV:
-                damping_A, damping_B = self.cov_kron_damping(in_data, out_grads)
                 A = self.cov_swift_kron_A(module, in_data)
                 del in_data
                 if A.shape[0] == A.shape[1]:
@@ -256,6 +257,7 @@ class Operation:
                     A_inv = smw_inv(A, damping_A)
                 del A
                 B = self.cov_swift_kron_B(module, out_grads)
+                damping_A, damping_B = self.cov_kron_damping(A, B)
                 if B.shape[0] == B.shape[1]:
                     B_inv = cholesky_inv(B.mul_(cov_scale), damping_B)
                 else:
@@ -414,10 +416,10 @@ class Operation:
     def cov_swift_kron_B(module, out_grads):
         raise NotImplementedError
 
-    def cov_kron_damping(self, in_data, out_grads, eps=1.e-7):
+    def cov_kron_damping(self, A, B, eps=1.e-7):
         damping = self._damping
-        A_eig_mean = in_data.norm() ** 2 / in_data.shape[-1]
-        B_eig_mean = out_grads.norm() ** 2 / out_grads.shape[-1]
+        A_eig_mean = (A.trace() if A.shape[0] == A.shape[1] else (A ** 2).sum()) / A.shape[-1]
+        B_eig_mean = (B.trace() if B.shape[0] == B.shape[1] else (B ** 2).sum()) / B.shape[-1]
         pi = torch.sqrt(A_eig_mean / B_eig_mean)
         r = damping**0.5
         damping_A = max(r * pi, eps)
