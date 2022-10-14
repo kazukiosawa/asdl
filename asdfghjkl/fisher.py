@@ -46,6 +46,8 @@ class FisherConfig:
     fisher_attr: str = 'fisher'
     fvp_attr: str = 'fvp'
     ignore_modules: List[Any] = None
+    data_size: int = 1
+    scale: float = 1.
     is_distributed: bool = False
     all_reduce: bool = False
     is_master: bool = True
@@ -71,8 +73,8 @@ class FisherMaker(GradientMaker):
         raise NotImplementedError
 
     def forward_and_backward(self,
-                             data_size=1,
-                             scale=1.,
+                             data_size=None,
+                             scale=None,
                              accumulate=False,
                              calc_loss_grad=True,
                              calc_inv=False,
@@ -82,11 +84,14 @@ class FisherMaker(GradientMaker):
         assert not (accumulate and calc_inv), 'accumulate and calc_inv cannot be True at the same time.'
         assert not (fvp and calc_inv), 'fvp and calc_inv cannot be True at the same time.'
         model = self.model
-        fisher_shapes = self.config.fisher_shapes
+        config = self.config
+        fisher_shapes = config.fisher_shapes
         if isinstance(fisher_shapes, str):
             fisher_shapes = [fisher_shapes]
-        ignore_modules = self.config.ignore_modules
-        seed = self.config.seed
+        ignore_modules = config.ignore_modules
+        seed = config.seed
+        scale = config.scale if scale is None else scale
+        data_size = config.data_size if data_size is None else data_size
         scale /= data_size
 
         if not accumulate:
