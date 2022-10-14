@@ -309,7 +309,7 @@ class FisherMaker(GradientMaker):
     def fisher_eig(self,
                    top_n=1,
                    max_iters=100,
-                   tol=1e-3,
+                   tol=1e-7,
                    is_distributed=False,
                    print_progress=False
                    ):
