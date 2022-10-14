@@ -28,7 +28,6 @@ __all__ = [
 ]
 
 _supported_types = [FISHER_EXACT, FISHER_MC, FISHER_EMP]
-
 _invalid_data_size = -1
 
 
