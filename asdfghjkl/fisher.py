@@ -17,9 +17,6 @@ from .vector import ParamVector, reduce_vectors
 from .mvp import power_method, stochastic_lanczos_quadrature, conjugate_gradient_method, quadratic_form
 from .symmatrix import SymMatrix
 
-_COV_FULL = 'cov_full'
-_CVP_FULL = 'cvp_full'
-
 LOSS_CROSS_ENTROPY = 'cross_entropy'
 LOSS_MSE = 'mse'
 
@@ -31,8 +28,6 @@ __all__ = [
 ]
 
 _supported_types = [FISHER_EXACT, FISHER_MC, FISHER_EMP]
-_supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG]
-_supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_LAYER_WISE]
 
 _invalid_data_size = -1
 
