@@ -72,7 +72,7 @@ class FisherMaker(GradientMaker):
                              data_size=_invalid_data_size,
                              scale=None,
                              accumulate=False,
-                             calc_loss_grad=True,
+                             calc_loss_grad=False,
                              calc_inv=False,
                              fvp=False,
                              damping=None,
@@ -113,8 +113,11 @@ class FisherMaker(GradientMaker):
                 cxt.set_damping(damping)
             cxt.set_cov_scale(scale)
 
-            self.forward()
-            loss = self._loss
+            self.call_model()
+            loss = None
+            if self.is_fisher_emp or calc_loss_grad:
+                self.call_loss()
+                loss = self._loss
 
             def closure(nll_expr, retain_graph=False):
                 cxt.clear_batch_grads()
