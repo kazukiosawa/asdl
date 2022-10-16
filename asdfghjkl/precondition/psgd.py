@@ -174,7 +174,7 @@ Pytorch functions for preconditioned SGD
 @author: XILIN LI, lixilinx@gmail.com
 Adopted from https://github.com/lixilinx/psgd_torch
 
-Replaced deprecated functions to the last ones
+Replaced deprecated functions to the latest ones
 """
 
 
