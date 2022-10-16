@@ -54,7 +54,7 @@ def extend(model,
                         except NameError:
                             # context resource is already released.
                             pass
-                handles.append(module.register_full_backward_hook(backward_hook))
+                handles.append(module.register_backward_hook(backward_hook))
         if not cxt.is_operation_registered(model):
             # register empty operation for parent model
             cxt.register_operation(model, Operation(model, []))
