@@ -15,6 +15,7 @@ from ..symmatrix import SymMatrix
 from ..vector import ParamVector
 from ..fisher import LOSS_CROSS_ENTROPY, get_fisher_maker, FisherConfig
 from ..grad_maker import GradientMaker
+from ..interval import IntervalScheduler
 
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 _invalid_ema_decay = -1
@@ -38,6 +39,7 @@ class NaturalGradientConfig:
     grad_scale: float = 1.
     upd_curvature_interval: int = 1
     upd_inv_interval: int = 1
+    interval_scheduler:IntervalScheduler =None
     ignore_modules: List[any] = None
     sync_group: dist.ProcessGroup = None
     sync_group_ranks: List[int] = None
@@ -114,9 +116,15 @@ class NaturalGradientMaker(GradientMaker):
         if not accumulate:
             assert config.upd_curvature_interval == config.upd_inv_interval, \
                 'upd_curvature_interval and upd_inv_interval needs to be the same when no curvature accumulation is performed.'
-        if self._step % self.config.upd_curvature_interval == 0:
+        
+        if config.interval_scheduler is not None:
+            update_TF = config.interval_scheduler.updateTF()
+        else:
+            update_TF = (self._step % self.config.upd_curvature_interval == 0)
+        
+        if update_TF:
             self.update_curvature(accumulate=accumulate,
-                                  calc_inv=not accumulate)
+                              calc_inv=not accumulate)
         else:
             self.forward()
             self._loss.backward()

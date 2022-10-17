@@ -9,6 +9,7 @@ from torch.nn.utils import vector_to_parameters
 from torch import Tensor
 from torch.linalg import solve_triangular
 from ..grad_maker import GradientMaker
+from ..interval import IntervalScheduler
 
 _supported_modules = (nn.Linear, nn.Conv2d)
 
@@ -28,6 +29,7 @@ def parameters_to_vector(parameters: Iterable[Tensor]) -> Tensor:
 class PsgdGradientConfig:
     precond_lr: float = 0.01
     upd_precond_interval: int = 1
+    interval_scheduler:IntervalScheduler =None
     init_scale: float = 1.
     init: torch.Tensor = None
 
@@ -57,13 +59,20 @@ class PsgdGradientMaker(GradientMaker):
         self.forward()
         loss = self._loss
         model = self.model
-        if self._step % self.config.upd_precond_interval == 0:
+
+        if self.config.interval_scheduler is not None:
+            update_TF = self.config.interval_scheduler.updateTF()
+        else:
+            update_TF = (self._step % self.config.upd_precond_interval == 0)
+
+        if update_TF:
             grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=True)
             for p, g in zip(model.parameters(), grads):
                 p.grad = g
             self.update_preconditioner(retain_graph=retain_graph)
         else:
             loss.backward()
+        
         self.precondition()
         self._step += 1
 
