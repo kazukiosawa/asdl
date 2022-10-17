@@ -11,18 +11,13 @@ import torch.distributed as dist
 from .core import no_centered_cov
 from .operations import OperationContext
 from .utils import skip_param_grad, has_reduction
-from .grad_maker import GradientMaker
+from .grad_maker import GradientMaker, LOSS_CROSS_ENTROPY, LOSS_MSE
 from .matrices import *
 from .vector import ParamVector, reduce_vectors
 from .mvp import power_method, stochastic_lanczos_quadrature, conjugate_gradient_method, quadratic_form
 from .symmatrix import SymMatrix
 
-LOSS_CROSS_ENTROPY = 'cross_entropy'
-LOSS_MSE = 'mse'
-
 __all__ = [
-    'LOSS_CROSS_ENTROPY',
-    'LOSS_MSE',
     'FisherConfig',
     'get_fisher_maker',
 ]
