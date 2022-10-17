@@ -48,17 +48,21 @@ def disable_param_grad(model):
 def im2col_2d(x: torch.Tensor, conv2d: nn.Module):
     assert x.ndimension() == 4  # n x c x h_in x w_in
     assert isinstance(conv2d, (nn.Conv2d, nn.ConvTranspose2d))
+    assert conv2d.dilation == (1, 1)
 
-    # n x c(k_h)(k_w) x (h_out)(w_out)
-    Mx = F.unfold(
-        x,
-        conv2d.kernel_size,
-        dilation=conv2d.dilation,
-        padding=conv2d.padding,
-        stride=conv2d.stride
-    )
-
-    return Mx
+    ph, pw = conv2d.padding
+    kh, kw = conv2d.kernel_size
+    sy, sx = conv2d.stride
+    if ph + pw > 0:
+        x = F.pad(x, (pw, pw, ph, ph))
+    x = x.unfold(2, kh, sy)  # n x c x h_out x w_in x kh
+    x = x.unfold(3, kw, sx)  # n x c x h_out x w_out x kh x kw
+    x = x.permute(0, 1, 4, 5, 2,
+                  3).contiguous()  # n x c x kh x kw x h_out x w_out
+    x = x.view(x.size(0),
+               x.size(1) * x.size(2) * x.size(3),
+               x.size(4) * x.size(5))  # n x c(kh)(kw) x (h_out)(w_out)
+    return x
 
 
 def im2col_2d_aug(x, conv2d):
