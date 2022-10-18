@@ -8,8 +8,8 @@ from torch import Tensor
 from asdfghjkl import GradientMaker
 
 
-__all__ = ['PreconditionedGradientMaker',
-           'get_update_schedule', 'INTERVAL_STEP', 'INTERVAL_LINEAR', 'INTERVAL_TYPES']
+__all__ = ['PreconditionedGradientMaker', 'PreconditionedGradientConfig',
+           'get_update_schedule', 'INTERVAL_CONSTANT', 'INTERVAL_STEP', 'INTERVAL_LINEAR', 'INTERVAL_TYPES']
 
 INTERVAL_CONSTANT = 'constant'
 INTERVAL_STEP = 'step'
