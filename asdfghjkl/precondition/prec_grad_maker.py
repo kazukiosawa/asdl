@@ -57,7 +57,7 @@ class PreconditionedGradientMaker(GradientMaker):
         try:
             return upd_schedule[step]
         except IndexError:
-            warnings.warn(f'Given step+1={step+1} is larger than the total number of steps ({self.config.num_total_steps})')
+            warnings.warn(f'Given step+1 ({step+1}) is larger than the total number of steps ({self.config.num_total_steps})')
             return False
 
     def do_update_preconditioner(self, step=None):
