@@ -14,11 +14,11 @@ from ..matrices import *
 from ..symmatrix import SymMatrix
 from ..vector import ParamVector
 from ..fisher import LOSS_CROSS_ENTROPY, get_fisher_maker, FisherConfig
-from ..grad_maker import GradientMaker
-from ..interval import IntervalScheduler
+from .prec_grad_maker import PreconditionedGradientMaker, PreconditionedGradientConfig
 
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 _invalid_ema_decay = -1
+_invalid_data_size = -1
 _module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_SWIFT_KRON, SHAPE_KFE, SHAPE_UNIT_WISE, SHAPE_DIAG]
 
 __all__ = [
@@ -28,8 +28,8 @@ __all__ = [
 
 
 @dataclass
-class NaturalGradientConfig:
-    data_size: int
+class NaturalGradientConfig(PreconditionedGradientConfig):
+    data_size: int = _invalid_data_size
     fisher_type: str = FISHER_MC
     fisher_shape: Union[str, List[Any]] = SHAPE_FULL
     loss_type: str = LOSS_CROSS_ENTROPY
@@ -37,9 +37,6 @@ class NaturalGradientConfig:
     ema_decay: float = _invalid_ema_decay
     scale: float = 1.
     grad_scale: float = 1.
-    upd_curvature_interval: int = 1
-    upd_inv_interval: int = 1
-    interval_scheduler:IntervalScheduler =None
     ignore_modules: List[any] = None
     sync_group: dist.ProcessGroup = None
     sync_group_ranks: List[int] = None
@@ -51,12 +48,12 @@ class NaturalGradientConfig:
     seed: int = None
 
 
-class NaturalGradientMaker(GradientMaker):
-    def __init__(self, model, config):
+class NaturalGradientMaker(PreconditionedGradientMaker):
+    def __init__(self, model, config: NaturalGradientConfig):
         from torch.nn.parallel import DistributedDataParallel as DDP
         assert not isinstance(model, DDP), f'{DDP} is not supported.'
         del DDP
-        super().__init__(model)
+        super().__init__(model, config)
         if isinstance(config.fisher_shape, str):
             config.fisher_shape = [config.fisher_shape]
         self.config = config
@@ -109,27 +106,19 @@ class NaturalGradientMaker(GradientMaker):
         self.grads = []
         self.packed_grads = []
 
-        self._step = 0
-
-    def forward_and_backward(self, accumulate=False) -> Union[Tuple[Any, Tensor], Any]:
+    def _forward_and_backward(self, accumulate=False) -> Union[Tuple[Any, Tensor], Any]:
         config = self.config
         if not accumulate:
-            assert config.upd_curvature_interval == config.upd_inv_interval, \
-                'upd_curvature_interval and upd_inv_interval needs to be the same when no curvature accumulation is performed.'
+            assert config.curvature_upd_ratio is None, \
+                'curvature_upd_ratio cannot be specified when no curvature accumulation is performed.'
         
-        if config.interval_scheduler is not None:
-            update_TF = config.interval_scheduler.updateTF()
-        else:
-            update_TF = (self._step % self.config.upd_curvature_interval == 0)
-        
-        if update_TF:
-            self.update_curvature(accumulate=accumulate,
-                              calc_inv=not accumulate)
+        if self.do_update_curvature():
+            self.update_curvature(accumulate=accumulate, calc_inv=not accumulate)
         else:
             self.forward()
             self._loss.backward()
 
-        if accumulate and self._step % self.config.upd_inv_interval == 0:
+        if accumulate and self.do_update_preconditioner():
             self.update_inv()
         self.precondition()
         self._step += 1

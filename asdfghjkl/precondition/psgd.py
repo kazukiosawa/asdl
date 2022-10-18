@@ -8,8 +8,7 @@ import torch.nn as nn
 from torch.nn.utils import vector_to_parameters
 from torch import Tensor
 from torch.linalg import solve_triangular
-from ..grad_maker import GradientMaker
-from ..interval import IntervalScheduler
+from .prec_grad_maker import PreconditionedGradientMaker, PreconditionedGradientConfig
 
 _supported_modules = (nn.Linear, nn.Conv2d)
 
@@ -26,24 +25,19 @@ def parameters_to_vector(parameters: Iterable[Tensor]) -> Tensor:
 
 
 @dataclass
-class PsgdGradientConfig:
+class PsgdGradientConfig(PreconditionedGradientConfig):
     precond_lr: float = 0.01
-    upd_precond_interval: int = 1
-    interval_scheduler:IntervalScheduler =None
     init_scale: float = 1.
     init: torch.Tensor = None
 
 
-class PsgdGradientMaker(GradientMaker):
-    def __init__(self, model: nn.Module, config: PsgdGradientConfig = None):
-        if config is None:
-            config = PsgdGradientConfig()  # default config
+class PsgdGradientMaker(PreconditionedGradientMaker):
+    def __init__(self, model: nn.Module, config: PsgdGradientConfig):
         model = nn.ModuleList([m for m in model.modules() if isinstance(m, _supported_modules)])
-        super().__init__(model)
+        super().__init__(model, config)
         self.config = config
         self._device = next(model.parameters()).device
         self._init_cholesky_factors()
-        self._step = 0
 
     def _init_cholesky_factors(self):
         num_params = sum([p.numel() for p in self.model.parameters()])
@@ -55,17 +49,12 @@ class PsgdGradientMaker(GradientMaker):
             assert init.shape == (num_params, num_params)
             self.cholesky_factor = init
 
-    def forward_and_backward(self, retain_graph=False) -> Union[Tuple[Any, Tensor], Any]:
+    def _forward_and_backward(self, retain_graph=False) -> Union[Tuple[Any, Tensor], Any]:
         self.forward()
         loss = self._loss
         model = self.model
 
-        if self.config.interval_scheduler is not None:
-            update_TF = self.config.interval_scheduler.updateTF()
-        else:
-            update_TF = (self._step % self.config.upd_precond_interval == 0)
-
-        if update_TF:
+        if self.do_update_preconditioner():
             grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=True)
             for p, g in zip(model.parameters(), grads):
                 p.grad = g
@@ -74,7 +63,6 @@ class PsgdGradientMaker(GradientMaker):
             loss.backward()
         
         self.precondition()
-        self._step += 1
 
         if self._loss_fn is None:
             return self._model_output
