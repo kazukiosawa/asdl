@@ -24,7 +24,6 @@ from .matrix_functions import ComputePower
 import numpy as np
 import torch
 import torch.optim as optim
-from ...interval import IntervalScheduler
 
 # Grafting is a technique to fix the layerwise scale of Shampoo optimizer.
 # https://arxiv.org/pdf/2002.11803.pdf studies this in detail. This
@@ -51,8 +50,6 @@ class ShampooHyperParams:
     preconditioning_compute_steps: int = 1
     # How often to compute statistics.
     statistics_compute_steps: int = 1
-    # IntervalScheduler.
-    interval_scheduler: IntervalScheduler = None
     # Block size for large layers (if > 0).
     # Block size = 1 ==> Adagrad (Don't do this, extremely inefficient!)
     # Block size should be as large as feasible under memory/time constraints.
@@ -347,12 +344,8 @@ class Shampoo(optim.Optimizer):
                 # Gather statistics, compute preconditioners
                 graft.add_statistics(grad)
 
-                if self.hps.interval_scheduler is not None:
-                    update_statistics_TF = self.hps.interval_scheduler.updateTF()
-                    update_preconditioning_TF = update_statistics_TF
-                else:
-                    update_statistics_TF = state[STEP] % hps.statistics_compute_steps == 0
-                    update_preconditioning_TF = state[STEP] % hps.preconditioning_compute_steps == 0
+                update_statistics_TF = state[STEP] % hps.statistics_compute_steps == 0
+                update_preconditioning_TF = state[STEP] % hps.preconditioning_compute_steps == 0
 
                 if update_statistics_TF:
                     preconditioner.add_statistics(grad)
