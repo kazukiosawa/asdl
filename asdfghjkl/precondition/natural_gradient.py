@@ -1,6 +1,5 @@
 from typing import List, Tuple, Union, Any
 from dataclasses import dataclass
-import warnings
 
 import torch
 from torch import Tensor
