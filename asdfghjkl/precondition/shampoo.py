@@ -16,16 +16,16 @@ __all__ = ['ShampooGradientMaker', 'ShampooGradientConfig']
 _invalid = -1
 
 
-################################################################################
-# GradientMaker for Shampoo (https://arxiv.org/abs/1802.09568).
-#
-# This implementation is based on
-# https://github.com/google-research/google-research/tree/master/scalable_shampoo/pytorch,
-# simplified and modified to be compatible with PreconditionedGradientMaker.
-#
-# The role of Shampoo"GradientMaker" is to "make param.grad", so optimization is
-# performed by a torch.optim.Optimizer (e.g., torch.optim.SGD).
-################################################################################
+"""
+GradientMaker for Shampoo (https://arxiv.org/abs/1802.09568).
+
+This implementation is based on
+https://github.com/google-research/google-research/tree/master/scalable_shampoo/pytorch,
+simplified and modified to be compatible with PreconditionedGradientMaker.
+
+The role of Shampoo"GradientMaker" is to "make param.grad", so optimization is
+performed by a torch.optim.Optimizer (e.g., torch.optim.SGD).
+"""
 
 
 @dataclass
