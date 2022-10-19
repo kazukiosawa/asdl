@@ -16,13 +16,19 @@ INTERVAL_STEP = 'step'
 INTERVAL_LINEAR = 'linear'
 INTERVAL_TYPES = [INTERVAL_CONSTANT, INTERVAL_STEP, INTERVAL_LINEAR]
 
+_default_interval = 1
+
 
 @dataclass
 class PreconditionedGradientConfig:
-    num_total_steps: int
+    num_total_steps: int = None
+    preconditioner_upd_interval: int = _default_interval
+    preconditioner_warmup_steps: int = 0
     preconditioner_upd_ratio: float = 1.
     preconditioner_warmup_ratio: float = 0.
     preconditioner_interval_type = INTERVAL_CONSTANT
+    curvature_upd_interval: int = None
+    curvature_warmup_steps: int = 0
     curvature_upd_ratio: float = None
     curvature_warmup_ratio: float = 0.
     curvature_interval_type = INTERVAL_CONSTANT
@@ -32,15 +38,24 @@ class PreconditionedGradientMaker(GradientMaker):
     def __init__(self, model: nn.Module, config: PreconditionedGradientConfig):
         super().__init__(model)
         self.config = config
-        self.preconditioner_upd_schedule = get_update_schedule(num_total_steps=config.num_total_steps,
-                                                               update_ratio=config.preconditioner_upd_ratio,
-                                                               warmup_ratio=config.preconditioner_warmup_ratio)
-        if config.curvature_upd_ratio is not None:
-            self.curvature_upd_schedule = get_update_schedule(num_total_steps=config.num_total_steps,
-                                                              update_ratio=config.curvature_upd_ratio,
-                                                              warmup_ratio=config.curvature_warmup_ratio)
+
+        self.curvature_upd_schedule = None
+        if config.num_total_steps is None:
+            self.preconditioner_upd_schedule = None
         else:
-            self.curvature_upd_schedule = None
+            if config.preconditioner_upd_interval != _default_interval:
+                warnings.warn('Since num_total_steps is specified, preconditioner_upd_interval '
+                              'is ignored and preconditioner_upd_ratio is used.')
+            self.preconditioner_upd_schedule = get_update_schedule(num_total_steps=config.num_total_steps,
+                                                                   update_ratio=config.preconditioner_upd_ratio,
+                                                                   warmup_ratio=config.preconditioner_warmup_ratio)
+            if config.curvature_upd_ratio is not None:
+                if config.curvature_upd_interval is not None:
+                    warnings.warn('Since num_total_steps is specified, curvature_upd_interval '
+                                  'is ignored and curvature_upd_ratio is used.')
+                self.curvature_upd_schedule = get_update_schedule(num_total_steps=config.num_total_steps,
+                                                                  update_ratio=config.curvature_upd_ratio,
+                                                                  warmup_ratio=config.curvature_warmup_ratio)
         self._step = 0
 
     def forward_and_backward(self, *args, **kwargs) -> Union[Tuple[Any, Tensor], Any]:
@@ -51,7 +66,7 @@ class PreconditionedGradientMaker(GradientMaker):
     def _forward_and_backward(self, *args, **kwargs) -> Union[Tuple[Any, Tensor], Any]:
         raise NotImplementedError
 
-    def _do_update(self, upd_schedule, step=None):
+    def _do_update_by_schedule(self, upd_schedule, step=None):
         if step is None:
             step = self._step
         try:
@@ -60,13 +75,25 @@ class PreconditionedGradientMaker(GradientMaker):
             warnings.warn(f'Given step+1 ({step+1}) is larger than the total number of steps ({self.config.num_total_steps})')
             return False
 
+    def _do_update_by_interval(self, interval, warmup_steps=0, step=None):
+        if step is None:
+            step = self._step
+        return step < warmup_steps or (step - warmup_steps) % interval == 0
+
     def do_update_preconditioner(self, step=None):
-        return self._do_update(self.preconditioner_upd_schedule, step)
+        if self.preconditioner_upd_schedule is not None:
+            return self._do_update_by_schedule(self.preconditioner_upd_schedule, step)
+        interval, warmup_steps = self.config.preconditioner_upd_interval, self.config.preconditioner_warmup_steps
+        return self._do_update_by_interval(interval, warmup_steps, step)
 
     def do_update_curvature(self, step=None):
-        if self.curvature_upd_schedule is None:
-            return self.do_update_preconditioner()
-        return self._do_update(self.curvature_upd_schedule, step)
+        if self.curvature_upd_schedule is not None:
+            return self._do_update_by_schedule(self.curvature_upd_schedule, step)
+        config = self.config
+        if config.curvature_upd_interval is not None:
+            interval, warmup_steps = config.curvature_upd_interval, config.curvature_warmup_steps
+            return self._do_update_by_interval(interval, warmup_steps, step)
+        return self.do_update_preconditioner()
 
 
 def get_update_schedule(num_total_steps: int,
