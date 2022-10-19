@@ -562,8 +562,6 @@ class KfacGradientMaker(NaturalGradientMaker):
 class EkfacGradientMaker(NaturalGradientMaker):
     def __init__(self, model, config: NaturalGradientConfig):
         assert config.fisher_type == FISHER_EMP, f'{EkfacGradientMaker} supports only {FISHER_EMP}.'
-        if config.upd_inv_interval > 1:
-            warnings.warn(f'{EkfacGradientMaker} ignores upd_inv_interval ({config.upd_inv_interval} is specified.)')
         config.fisher_shape = [SHAPE_KFE]
         super().__init__(model, config)
 
