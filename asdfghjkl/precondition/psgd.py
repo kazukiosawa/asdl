@@ -35,7 +35,6 @@ class PsgdGradientMaker(PreconditionedGradientMaker):
     def __init__(self, model: nn.Module, config: PsgdGradientConfig):
         model = nn.ModuleList([m for m in model.modules() if isinstance(m, _supported_modules)])
         super().__init__(model, config)
-        self.config = config
         self._device = next(model.parameters()).device
         self._init_cholesky_factors()
 
