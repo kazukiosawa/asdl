@@ -46,7 +46,7 @@ def extend(model,
                     with stream_cxt:
                         cxt.call_operations_in_forward(_module, in_data[0].detach(), out_data.detach())
                 handles.append(module.register_forward_hook(forward_hook))
-            if has_bwd_op or has_bwd_op_with_inputs:
+            if has_bwd_op:
                 def backward_hook(_module, unused, out_grads):
                     with stream_cxt:
                         try:
