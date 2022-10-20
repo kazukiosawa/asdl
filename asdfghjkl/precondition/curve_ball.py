@@ -35,7 +35,7 @@ class CurveBallGradientMaker(PreconditionedGradientMaker):
                 m.mul_(config.momentum_decay)
             m.add_(grad_of_quadratic, alpha=config.momentum)
             if p.grad is None:
-                p.grad = m
+                p.grad = m.clone()
             else:
                 p.grad.add_(m)
 
