@@ -55,6 +55,7 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         super().__init__(model, config)
         if isinstance(config.fisher_shape, str):
             config.fisher_shape = [config.fisher_shape]
+        self.config: NaturalGradientConfig = config
 
         self.named_modules_for_curvature = []
         self.modules_for_curvature = []
