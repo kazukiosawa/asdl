@@ -1,4 +1,4 @@
-from typing import List, Iterable, Union, Any, Tuple
+from typing import Union, Any, Tuple
 from dataclasses import dataclass
 
 import torch
