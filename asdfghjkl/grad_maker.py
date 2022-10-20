@@ -231,18 +231,26 @@ class GradientMaker:
 
         return logit_fn_params_only, params
 
-    def _get_stateless_model_loss_fn_params_only(self):
+    def _get_stateless_model_loss_fn_params_only(self, return_output=False):
         model_fn_params_only, params = self._get_stateless_model_fn_params_only()
 
         def model_loss_fn_params_only(params):
             self._model_output = model_fn_params_only(params)
-            return self.call_loss()
+            self.call_loss()
+            if self._loss_fn is None:
+                rst = self._model_output
+            else:
+                rst = self._model_output, self._loss
+            if return_output:
+                return self._loss, rst
+            else:
+                return self._loss
 
         return model_loss_fn_params_only, params
 
-    def _get_stateless_grad_fn_params_only(self):
-        model_loss_fn, params = self._get_stateless_model_loss_fn_params_only()
-        grad_fn = ft.grad(model_loss_fn)
+    def _get_stateless_grad_fn_params_only(self, return_output=False):
+        model_loss_fn, params = self._get_stateless_model_loss_fn_params_only(return_output=return_output)
+        grad_fn = ft.grad(model_loss_fn, has_aux=return_output)
         return grad_fn, params
 
     def _get_random_tangents(self):
@@ -250,8 +258,8 @@ class GradientMaker:
         return tuple([torch.randn_like(p) for p in self._model_fn.parameters()])
 
     @torch.no_grad()
-    def loss_grad(self) -> Tuple[Tensor, ...]:
-        grad_fn, params = self._get_stateless_grad_fn_params_only()
+    def loss_grad(self, return_output=False) -> Tuple[Tensor, ...]:
+        grad_fn, params = self._get_stateless_grad_fn_params_only(return_output=return_output)
         return grad_fn(params)
 
     @torch.no_grad()
@@ -328,16 +336,19 @@ class GradientMaker:
         return ft.hessian(model_loss_fn)(params)
 
     @torch.no_grad()
-    def loss_hvp(self, tangents=None, return_grad=False) \
+    def loss_hvp(self, tangents=None, return_grad=False, return_output=False) \
             -> Union[Tuple[Tensor, ...], Tuple[Tuple[Tensor, ...], Tuple[Tensor, ...]]]:
-        grad_fn, params = self._get_stateless_grad_fn_params_only()
+        grad_fn, params = self._get_stateless_grad_fn_params_only(return_output=return_output)
         if tangents is None:
             tangents = self._get_random_tangents()
-        grad, hvp = ft.jvp(grad_fn, (params,), (tangents,))
+        out = ft.jvp(grad_fn, (params,), (tangents,), has_aux=return_output)
+        # out = (grad, hvp) or (grad, hvp, output) if return_output
+        rst = (out[1],)
         if return_grad:
-            return hvp, grad
-        else:
-            return hvp
+            rst += (out[0],)
+        if return_output:
+            rst += (out[2],)
+        return rst[0] if len(rst) == 1 else rst
 
     @torch.no_grad()
     def logit_jacobian(self) -> Tuple[Tensor, ...]:
