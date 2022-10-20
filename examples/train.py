@@ -23,6 +23,7 @@ OPTIM_KRON_PSGD = 'kron_psgd'
 OPTIM_NEWTON = 'newton'
 OPTIM_ABS_NEWTON = 'abs_newton'
 OPTIM_KBFGS = 'kbfgs'
+OPTIM_CURVE_BALL = 'curve_ball'
 
 
 def main():
@@ -178,6 +179,9 @@ if __name__ == '__main__':
         config = asdl.KronBfgsGradientConfig(data_size=args.batch_size,
                                              damping=args.damping)
         grad_maker = asdl.KronBfgsGradientMaker(model, config)
+    elif args.optim == OPTIM_CURVE_BALL:
+        config = asdl.CurveBallGradientConfig(damping=args.damping)
+        grad_maker = asdl.CurveBallGradientMaker(model, config)
     else:
         grad_maker = asdl.GradientMaker(model)
 

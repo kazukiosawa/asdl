@@ -6,3 +6,4 @@ from .psgd import *
 from .smw import *
 from .newton import *
 from .kbfgs import *
+from .curve_ball import *
