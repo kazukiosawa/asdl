@@ -45,7 +45,7 @@ __all__ = [
     'OP_MEAN_OUTPUTS',
     'OP_OUT_SPATIAL_SIZE',
     'OP_MEAN_OUTGRADS',
-    'OP_SKETCH_INPUTS_OUTGRADS',
+    'OP_SKETCHED_GRAM',
     'OP_BFGS_KRON_S_AS',
     'ALL_OPS',
     'FWD_OPS',
