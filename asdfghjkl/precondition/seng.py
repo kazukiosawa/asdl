@@ -129,10 +129,3 @@ def maybe_flatten_to_2d(tensor: Tensor):
     if tensor.ndim > 2:
         return tensor.flatten(start_dim=1)
     return tensor
-
-
-
-
-
-
-
