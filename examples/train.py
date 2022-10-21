@@ -57,6 +57,8 @@ def train(epoch):
         grad_maker.setup_loss_call(F.cross_entropy, dummy_y, t)
         y, loss = grad_maker.forward_and_backward()
 
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
+
         optimizer.step()
 
         if batch_idx % args.log_interval == 0:

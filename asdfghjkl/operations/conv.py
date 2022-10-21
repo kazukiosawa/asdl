@@ -195,3 +195,15 @@ class Conv2d(Operation):
         indata_s = torch.mv(in_data, s)  # n
         As = torch.mv(in_data.T, indata_s)  # (c_in)(ks)
         return s, As
+
+    def random_sketch(self, in_data, out_grads):
+        rank = self._truncated_rank
+        if rank is not None and rank < in_data.shape[2]:
+            u, s, vt = torch.linalg.svd(out_grads, full_matrices=False)  # n x c_out x out_size
+            v = vt.transpose(1, 2)
+            u = u[:, :, :rank]  # n x c_out x r
+            v = v[:, :, :rank]  # n x out_size x r
+            s = s[:, :rank].unsqueeze(1)  # n x 1 x r
+            in_data = torch.bmm(in_data, v)  # n x (c_in)(ks) x r
+            out_grads = u * s.expand(u.shape)  # n x c_out x r
+        return super().random_sketch(in_data, out_grads)

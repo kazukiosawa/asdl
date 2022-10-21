@@ -35,6 +35,7 @@ OP_BATCH_GRADS = 'batch_grads'  # compute batched gradients (per-example gradien
 OP_SAVE_INPUTS = 'save_inputs'  # save inputs during a forward-pass
 OP_SAVE_OUTPUTS = 'save_outputs'  # save outputs during a forward-pass
 OP_SAVE_OUTGRADS = 'save_outgrads'  # save outgrads during a backward-pass
+OP_SKETCH_INPUTS_OUTGRADS = 'sketch_inputs_outgrads'  # apply sketching matrix to inputs and outgrads
 OP_MEAN_INPUTS = 'mean_inputs'  # compute the mean of inputs
 OP_MEAN_OUTPUTS = 'mean_outputs'  # compute the mean of outputs
 OP_OUT_SPATIAL_SIZE = 'out_spatial_size'  # get the spatial size of outputs
@@ -50,6 +51,7 @@ ALL_OPS = [OP_FULL_COV, OP_FULL_CVP,
            OP_RFIM_RELU, OP_RFIM_SOFTMAX,
            OP_GRAM_DIRECT, OP_GRAM_HADAMARD, OP_BATCH_GRADS,
            OP_SAVE_INPUTS, OP_SAVE_OUTPUTS, OP_SAVE_OUTGRADS,
+           OP_SKETCH_INPUTS_OUTGRADS,
            OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_MEAN_OUTGRADS,
            OP_OUT_SPATIAL_SIZE, OP_BFGS_KRON_S_AS,
            OP_COV_KFE]
@@ -63,7 +65,8 @@ BWD_OPS_WITH_INPUTS = [OP_COV, OP_COV_INV, OP_CVP,
                        OP_COV_UNIT_WISE, OP_COV_UNIT_WISE_INV,
                        OP_COV_DIAG, OP_COV_DIAG_INV,
                        OP_GRAM_HADAMARD, OP_GRAM_DIRECT,
-                       OP_BATCH_GRADS, OP_COV_KFE]
+                       OP_BATCH_GRADS, OP_COV_KFE,
+                       OP_SKETCH_INPUTS_OUTGRADS]
 BWD_OPS = [OP_SAVE_OUTGRADS,
            OP_COV_KRON, OP_COV_SWIFT_KRON,
            OP_RFIM_RELU, OP_RFIM_SOFTMAX,
@@ -94,6 +97,8 @@ class Operation:
         self._op_results = {}
         self._damping = 1.e-7
         self._cov_scale = 1.
+        self._sketching_size = 256
+        self._truncated_rank = None
 
     def accumulate_result(self, value, *keys, extend=False):
         """
@@ -153,6 +158,12 @@ class Operation:
 
     def set_cov_scale(self, value):
         self._cov_scale = value
+
+    def set_sketching_size(self, value):
+        self._sketching_size = value
+
+    def set_truncated_rank(self, value):
+        self._truncated_rank = value
 
     def forward_post_process(self, in_data: torch.Tensor, out_data: torch.Tensor):
         module = self._module
@@ -344,6 +355,8 @@ class Operation:
                     self.accumulate_result(rst, OP_BATCH_GRADS, 'bias')
             elif op_name == OP_MEAN_OUTGRADS:
                 self.accumulate_result(self.out_grads_mean(module, out_grads), OP_MEAN_OUTGRADS)
+            elif op_name == OP_SKETCH_INPUTS_OUTGRADS:
+                self.accumulate_result(self.random_sketch(in_data, out_grads), OP_SKETCH_INPUTS_OUTGRADS)
 
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):
@@ -477,6 +490,22 @@ class Operation:
     @staticmethod
     def bfgs_kron_s_As(module, in_data):
         raise NotImplementedError
+
+    def random_sketch(self, in_data, out_grads):
+        sketching_size = self._sketching_size
+
+        def sketch(tensor):
+            dim = tensor.shape[1]
+            if sketching_size < dim:
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                indices = torch.randperm(dim, device=device)[:sketching_size]
+                return torch.index_select(tensor, dim=1, index=indices), indices
+            else:
+                return tensor, None
+
+        in_data, in_indices = sketch(in_data)
+        out_grads, out_indices = sketch(out_grads)
+        return in_data, out_grads, (in_indices, out_indices)
 
 
 class OperationContext:
@@ -872,3 +901,11 @@ class OperationContext:
     def set_cov_scale(self, value):
         for operation in self._operations.values():
             operation.set_cov_scale(value)
+
+    def set_sketching_size(self, value):
+        for operation in self._operations.values():
+            operation.set_sketching_size(value)
+
+    def set_truncated_rank(self, value):
+        for operation in self._operations.values():
+            operation.set_truncated_rank(value)
