@@ -6,15 +6,18 @@ import torch.nn as nn
 from torch import Tensor
 from .prec_grad_maker import PreconditionedGradientMaker, PreconditionedGradientConfig
 from ..core import extend
-from ..utils import cholesky_inv
+from ..utils import cholesky_inv, has_reduction
 from ..operations import OP_SKETCHED_GRAM
 
 
 __all__ = ['SengGradientMaker', 'SengGradientConfig']
 
+_invalid_data_size = -1
+
 
 @dataclass
 class SengGradientConfig(PreconditionedGradientConfig):
+    data_size: int = _invalid_data_size
     damping: float = 1.e-7
     subsample_size: int = None
     sketching_size: int = 256
@@ -39,6 +42,7 @@ class SengGradientMaker(PreconditionedGradientMaker):
     def __init__(self, model: nn.Module, config: SengGradientConfig):
         super().__init__(model, config)
         self.config: SengGradientConfig = config
+        assert config.data_size == _invalid_data_size, 'data_size is not set.'
         self._modules = [m for m in model.modules() if isinstance(m, _supported_modules)]
         self._curvature_info: Dict[nn.Module, SketchedEmpFisherInfo] = {}
 
@@ -48,8 +52,19 @@ class SengGradientMaker(PreconditionedGradientMaker):
         else:
             rst = self.forward()
             self.backward()
+        with torch.no_grad():
+            self._loss /= self.config.data_size
         self.precondition()
         return rst
+
+    def _call_loss_fn(self) -> Tensor:
+        assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
+        if isinstance(self._loss_fn, nn.Module):
+            self._loss_fn.reduction = 'sum'
+        else:
+            self._loss_fn_kwargs['reduction'] = 'sum'
+        args, kwargs = self._get_mapped_loss_fn_args_kwargs()
+        return self._loss_fn(*args, **kwargs)
 
     def update_curvature(self):
         config = self.config
@@ -60,12 +75,13 @@ class SengGradientMaker(PreconditionedGradientMaker):
             self.backward()
             for module in self._modules:
                 data, sketches, indices, gram = cxt.sketched_inputs_outgrads_gram(module)
-                gram_inv = cholesky_inv(gram, config.damping)
+                gram_inv = cholesky_inv(gram.div_(config.data_size), config.damping)
                 self._curvature_info[module] = SketchedEmpFisherInfo(*data, *sketches, *indices, gram_inv)
         return rst
 
     @torch.no_grad()
     def precondition(self):
+        data_size = self.config.data_size
         damping = self.config.damping
         for module, info in self._curvature_info.items():
             bias = module.bias is not None and module.bias.requires_grad
@@ -77,7 +93,7 @@ class SengGradientMaker(PreconditionedGradientMaker):
             # F^{-1}g = g/d - U' @ (dI + UU')^{-1} @ Ug/d
 
             # g <- g/d
-            g.div_(damping)
+            g.div_(data_size).div_(damping)
 
             # approx Ug
             sub_in_data = maybe_unsqueeze_to_3d(info.sub_in_data)  # n x d_in_sub x r
@@ -109,6 +125,7 @@ class SengGradientMaker(PreconditionedGradientMaker):
             mat_in = torch.einsum('n,n...->...', coeff_in, in_data)  # d_in x r
             mat_out = torch.einsum('n,n...->...', coeff_out, out_grads)  # d_out x r
             m = mat_out @ mat_in.T  # d_out x {d_in or (d_in+1)}
+            m.div_(data_size ** 2)
 
             # approx g - U' @ (dI + UU')^{-1} @ Ug
             g.sub_(m)

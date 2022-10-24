@@ -186,7 +186,7 @@ if __name__ == '__main__':
         config = asdl.CurveBallGradientConfig(damping=args.damping)
         grad_maker = asdl.CurveBallGradientMaker(model, config)
     elif args.optim == OPTIM_SENG:
-        config = asdl.SengGradientConfig(damping=args.damping)
+        config = asdl.SengGradientConfig(damping=args.damping, data_size=args.batch_size)
         grad_maker = asdl.SengGradientMaker(model, config)
     else:
         grad_maker = asdl.GradientMaker(model)
