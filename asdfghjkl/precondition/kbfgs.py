@@ -27,10 +27,10 @@ class KronBfgsGradientConfig(PreconditionedGradientConfig):
     ema_decay: float = 0.1
     mu1: float = 0.2
     ignore_modules: List[Any] = None
-    minibatch_hessian_action = False
-    bfgs_attr = 'bfgs'
-    mean_outputs_attr = 'mean_outputs'
-    mean_outgrads_attr = 'mean_outgrads'
+    minibatch_hessian_action: bool = False
+    bfgs_attr: str = 'bfgs'
+    mean_outputs_attr: str = 'mean_outputs'
+    mean_outgrads_attr: str = 'mean_outgrads'
 
 
 class KronBfgsGradientMaker(PreconditionedGradientMaker):
