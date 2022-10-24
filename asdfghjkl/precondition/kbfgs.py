@@ -9,8 +9,9 @@ from torch import Tensor
 from ..core import extend, module_wise_assignments
 from ..operations import OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_MEAN_OUTGRADS,\
     OP_OUT_SPATIAL_SIZE, OP_COV_KRON, OP_BFGS_KRON_S_AS, OperationContext
-from ..grad_maker import GradientMaker
+from ..utils import cholesky_inv
 from ..symmatrix import SymMatrix
+from .prec_grad_maker import PreconditionedGradientMaker, PreconditionedGradientConfig
 
 
 _supported_modules = (nn.Linear, nn.Conv2d)
@@ -20,11 +21,10 @@ __all__ = ['KronBfgsGradientConfig', 'KronBfgsGradientMaker']
 
 
 @dataclass
-class KronBfgsGradientConfig:
+class KronBfgsGradientConfig(PreconditionedGradientConfig):
     data_size: int = 1
     damping: float = 1.e-5
     ema_decay: float = 0.1
-    upd_inv_interval: int = 1
     mu1: float = 0.2
     ignore_modules: List[Any] = None
     minibatch_hessian_action = False
@@ -33,58 +33,57 @@ class KronBfgsGradientConfig:
     mean_outgrads_attr = 'mean_outgrads'
 
 
-class KronBfgsGradientMaker(GradientMaker):
+class KronBfgsGradientMaker(PreconditionedGradientMaker):
     def __init__(self, model: nn.Module, config: KronBfgsGradientConfig):
-        model = nn.ModuleList(
-            [m for m in module_wise_assignments(model, ignore_modules=config.ignore_modules)
-             if isinstance(m, _supported_modules)])
-        super().__init__(model)
-        self.config = config
-        self._step = 0
+        super().__init__(model, config)
+        self.config: KronBfgsGradientConfig = config
+        self.modules = [m for m in module_wise_assignments(model, ignore_modules=config.ignore_modules)
+                        if isinstance(m, _supported_modules)]
         self._last_model_args = ()
         self._last_model_kwargs = dict()
         self._curr_model_args = ()
         self._curr_model_kwargs = dict()
 
-    def forward_and_backward(self) -> Union[Tuple[Any, Tensor], Any]:
-        step = self._step
-        model = self.model
-        config = self.config
-        kwargs = dict(ignore_modules=config.ignore_modules)
-        if step > 0 and (step - 1) % config.upd_inv_interval == 0:
-            self._restore_last_model_args_kwargs()
-            # another forward and backward using the previous model_args, kwargs
-            op_names = (OP_MEAN_OUTPUTS, OP_MEAN_OUTGRADS, OP_OUT_SPATIAL_SIZE)
-            with extend(model, *op_names, **kwargs) as cxt:
-                self.forward()
-                self._loss.backward()
-                self._update_B_inv(cxt)
-            self._restore_curr_model_args_kwargs()
-
-        if step % config.upd_inv_interval == 0:
-            if config.minibatch_hessian_action and step > 0:
-                op_names = (OP_BFGS_KRON_S_AS, OP_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE)
-            else:
-                op_names = (OP_COV_KRON, OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE)
-            with extend(model, *op_names, **kwargs) as cxt:
-                self.forward()
-                self._update_A_inv(cxt)
-                self._store_mean(cxt, is_forward=True)
-            with extend(model, OP_MEAN_OUTGRADS, **kwargs) as cxt:
-                self._loss.backward()
-                self._store_mean(cxt, is_forward=False)
-            self._record_model_args_kwargs()
+    def _forward_and_backward(self) -> Union[Tuple[Any, Tensor], Any]:
+        if self._step > 0 and self.do_update_preconditioner(self._step - 1):
+            self.post_preconditioner_update()
+        if self.do_update_preconditioner():
+            rst = self.update_preconditioner()
         else:
-            self.forward()
+            rst = self.forward()
             self._loss.backward()
 
         self.precondition()
 
-        self._step += 1
-        if self._loss_fn is None:
-            return self._model_output
+        return rst
+
+    def update_preconditioner(self):
+        model = self.model
+        config = self.config
+        if config.minibatch_hessian_action and self._step > 0:
+            op_names = (OP_BFGS_KRON_S_AS, OP_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE)
         else:
-            return self._model_output, self._loss
+            op_names = (OP_COV_KRON, OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE)
+        op_names += (OP_MEAN_OUTGRADS,)
+        with extend(model, *op_names, ignore_modules=config.ignore_modules) as cxt:
+            rst = self.forward()
+            self._update_A_inv(cxt)
+            self._store_mean(cxt, is_forward=True)
+            self._loss.backward()
+            self._store_mean(cxt, is_forward=False)
+        self._record_model_args_kwargs()
+        return rst
+
+    def post_preconditioner_update(self):
+        self._restore_last_model_args_kwargs()
+        # another forward and backward using the previous model_args, kwargs
+        op_names = (OP_MEAN_OUTPUTS, OP_MEAN_OUTGRADS, OP_OUT_SPATIAL_SIZE)
+        kwargs = dict(ignore_modules=self.config.ignore_modules)
+        with extend(self.model, *op_names, **kwargs) as cxt:
+            self.forward()
+            self._loss.backward()
+            self._update_B_inv(cxt)
+        self._restore_curr_model_args_kwargs()
 
     def _record_model_args_kwargs(self):
         self._last_model_args = self._model_args
@@ -102,7 +101,7 @@ class KronBfgsGradientMaker(GradientMaker):
 
     def _update_A_inv(self, cxt: OperationContext):
         config = self.config
-        for module in self.model.modules():
+        for module in self.modules:
             damping = self.get_damping(cxt, module, is_A=True)
             bfgs = getattr(module, config.bfgs_attr, None)
             if config.minibatch_hessian_action and self._step > 0:
@@ -119,8 +118,10 @@ class KronBfgsGradientMaker(GradientMaker):
                     bfgs.mul_(1 - config.ema_decay)
                     bfgs += new_bfgs  # this must be __iadd__ to preserve inv
                 A = bfgs.kron.A
+                if bfgs.kron.A_inv is None:
+                    bfgs.kron.A_inv = cholesky_inv(A, damping)
                 mean_in_data = cxt.mean_in_data(module)
-                s = torch.mv(H, mean_in_data)
+                s = torch.mv(bfgs.kron.A_inv, mean_in_data)
                 y = torch.mv(A, s) + damping * s
             assert bfgs is not None, f'Matrix for {module} is not calculated yet.'
             H = bfgs.kron.A_inv
@@ -128,7 +129,7 @@ class KronBfgsGradientMaker(GradientMaker):
 
     def _store_mean(self, cxt: OperationContext, is_forward=True):
         config = self.config
-        for module in self.model.modules():
+        for module in self.modules:
             if is_forward:
                 setattr(module, config.mean_outputs_attr, cxt.mean_out_data(module))
             else:
@@ -136,12 +137,14 @@ class KronBfgsGradientMaker(GradientMaker):
 
     def _update_B_inv(self, cxt: OperationContext):
         config = self.config
-        for module in self.model.modules():
+        for module in self.modules:
             damping = self.get_damping(cxt, module, is_A=False)
             bfgs = getattr(module, config.bfgs_attr)
-            H = bfgs.kron.B_inv
             s = cxt.mean_out_grads(module) - getattr(module, config.mean_outputs_attr)
             y = cxt.mean_out_grads(module) - getattr(module, config.mean_outgrads_attr)
+            if bfgs.kron.B_inv is None:
+                bfgs.kron.B_inv = torch.eye(s.shape[0], device=s.device)
+            H = bfgs.kron.B_inv
             if isinstance(module, nn.Conv2d):
                 s = s.mean(dim=0)
                 y = y.mean(dim=0)
@@ -165,7 +168,7 @@ class KronBfgsGradientMaker(GradientMaker):
 
     def precondition(self, vec_weight: Tensor = None, vec_bias: Tensor = None):
         config = self.config
-        for module in self.model.modules():
+        for module in self.modules:
             matrix: SymMatrix = getattr(module, config.bfgs_attr)
             if vec_weight is None and module.weight.requires_grad:
                 vec_weight = module.weight.grad
