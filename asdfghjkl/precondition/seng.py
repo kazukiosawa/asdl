@@ -83,7 +83,7 @@ class SengGradientMaker(PreconditionedGradientMaker):
             sub_in_data = maybe_unsqueeze_to_3d(info.sub_in_data)  # n x d_in_sub x r
             sub_out_grads = maybe_unsqueeze_to_3d(info.sub_out_grads)  # n x d_out_sub x r
             in_indices, out_indices = info.in_indices, info.out_indices
-            sub_g = g
+            sub_g = g[:, :-1] if bias else g
             ratio = 1
             if out_indices is not None:
                 sub_g = torch.index_select(sub_g, dim=0, index=out_indices)  # d_out_sub x d_in
@@ -92,7 +92,7 @@ class SengGradientMaker(PreconditionedGradientMaker):
                 sub_g = torch.index_select(sub_g, dim=1, index=in_indices)  # d_out_sub x d_in_sub
                 ratio *= g.shape[1] / sub_g.shape[1]  # d_in / d_in_sub
             sub_g.mul_(ratio)
-            v = torch.einsum('ij,nir,njr->n', sub_g, sub_out_grads, sub_in_data)  # n
+            v = torch.einsum('njr,njr->n', torch.einsum('ij,nir->njr', sub_g, sub_out_grads), sub_in_data)  # n
 
             # approx (dI + UU')^{-1} @ Ug
             v = torch.mv(info.gram_inv, v)  # n
