@@ -43,6 +43,7 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
         self._last_model_kwargs = dict()
         self._curr_model_args = ()
         self._curr_model_kwargs = dict()
+        self._A_inv_exists = False
 
     def _forward_and_backward(self) -> Union[Tuple[Any, Tensor], Any]:
         if self._step > 0 and self.do_update_preconditioner(self._step - 1):
@@ -60,7 +61,7 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
     def update_preconditioner(self):
         model = self.model
         config = self.config
-        if config.minibatch_hessian_action and self._step > 0:
+        if config.minibatch_hessian_action and self._A_inv_exists:
             op_names = (OP_BFGS_KRON_S_AS, OP_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE)
         else:
             op_names = (OP_COV_KRON, OP_MEAN_INPUTS, OP_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE)
@@ -104,7 +105,7 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
         for module in self.modules:
             damping = self.get_damping(cxt, module, is_A=True)
             bfgs = getattr(module, config.bfgs_attr, None)
-            if config.minibatch_hessian_action and self._step > 0:
+            if config.minibatch_hessian_action and self._A_inv_exists:
                 s, As = cxt.bfgs_kron_s_As(module)
                 y = As + damping * s
             else:
@@ -126,6 +127,7 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
             assert bfgs is not None, f'Matrix for {module} is not calculated yet.'
             H = bfgs.kron.A_inv
             bfgs_inv_update_(H, s, y)
+        self._A_inv_exists = True
 
     def _store_mean(self, cxt: OperationContext, is_forward=True):
         config = self.config
