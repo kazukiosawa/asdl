@@ -120,7 +120,6 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         if accumulate and self.do_update_preconditioner():
             self.update_preconditioner()
         self.precondition()
-        self._step += 1
         if self._loss_fn is None:
             return self._model_output
         else:
