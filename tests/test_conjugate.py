@@ -94,7 +94,7 @@ class TestCG(unittest.TestCase):
             model.zero_grad()
             ng = ng_fn(model, fisher_type=fisher_type, damping=damping)
             ng.refresh_curvature(inputs, targets, calc_emp_loss_grad=True, seed=random_seed)
-            ng.update_inv()
+            ng.update_preconditioner()
             ng.precondition()
 
             grads = []

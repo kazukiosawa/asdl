@@ -107,7 +107,7 @@ def time_kfac():
         ng.refresh_curvature(x, t, calc_emp_loss_grad=True)
 
     def upd_inv():
-        ng.update_inv()
+        ng.update_preconditioner()
 
     def precond():
         ng.precondition()

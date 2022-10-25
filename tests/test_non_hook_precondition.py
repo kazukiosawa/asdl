@@ -65,7 +65,7 @@ for loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]:
     model1.zero_grad()
     for i in range(n_iters):
         ngd1.accumulate_curvature(xs[i], ys[i], data_average=False, calc_emp_loss_grad=True)
-    ngd1.update_inv()
+    ngd1.update_preconditioner()
     ngd1.precondition()
 
     ngd2 = NaturalGradientMaker(model2,
@@ -77,7 +77,7 @@ for loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]:
             loss = loss_fn(model2(xs[i]), ys[i])
             loss.backward()
             ngd2.accumulate_curvature(cxt=cxt)
-    ngd2.update_inv()
+    ngd2.update_preconditioner()
     ngd2.precondition()
 
     ngd3 = NaturalGradientMaker(model3,
@@ -89,7 +89,7 @@ for loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]:
             loss = loss_fn(model3(xs[i]), ys[i])
             loss.backward()
         ngd3.refresh_curvature(cxt=cxt)
-    ngd3.update_inv()
+    ngd3.update_preconditioner()
     ngd3.precondition()
 
     g1 = parameters_to_vector([p.grad for p in model1.parameters()])

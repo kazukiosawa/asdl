@@ -53,14 +53,14 @@ for ngd_cls in [FullNaturalGradientMaker, LayerWiseNaturalGradientMaker, KfacGra
         for x, y in dataloader:
             ngd1.accumulate_curvature(x, y)
             break
-        ngd1.update_inv()
+        ngd1.update_preconditioner()
 
         # curvature by a pseudo-batch
         ngd2 = ngd_cls(model2, fisher_type, damping=damping)
         for pseudo_batch_loader in pbl_generator:
             ngd2.accumulate_curvature(data_loader=pseudo_batch_loader)
             break
-        ngd2.update_inv()
+        ngd2.update_preconditioner()
 
         if ngd_cls == FullNaturalGradientMaker:
             f1 = getattr(model1, fisher_type)

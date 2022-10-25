@@ -118,7 +118,7 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
             self._loss.backward()
 
         if accumulate and self.do_update_preconditioner():
-            self.update_inv()
+            self.update_preconditioner()
         self.precondition()
         self._step += 1
         if self._loss_fn is None:
@@ -223,7 +223,7 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
                                            )
 
     @nvtx_range('update_inv')
-    def update_inv(self, damping=None, module_name=None, kron=None, zero_curvature=False, partition_aware=False):
+    def update_preconditioner(self, damping=None, module_name=None, kron=None, zero_curvature=False, partition_aware=False):
         if kron is None:
             kron = ['A', 'B']
         if damping is None:
@@ -564,7 +564,7 @@ class EkfacGradientMaker(NaturalGradientMaker):
         config.fisher_shape = [SHAPE_KFE]
         super().__init__(model, config)
 
-    def update_inv(self, *args, **kwargs):
+    def update_preconditioner(self, *args, **kwargs):
         pass
 
     def precondition(self, vectors: ParamVector = None, grad_scale=None, use_inv=False):

@@ -54,7 +54,7 @@ for ngd_cls in [FullNaturalGradientMaker, LayerWiseNaturalGradientMaker, KfacGra
             for i in range(3):
                 ngd1.accumulate_curvature(x, target,
                                           seed=1 if fisher_type == FISHER_MC else None)
-            ngd1.update_inv()
+            ngd1.update_preconditioner()
             # 2nd set of accumulations to make sure inv is preserved
             for i in range(3):
                 ngd1.accumulate_curvature(x, target,
@@ -63,7 +63,7 @@ for ngd_cls in [FullNaturalGradientMaker, LayerWiseNaturalGradientMaker, KfacGra
             ngd2 = ngd_cls(model2, fisher_type, loss_type)
             ngd2.accumulate_curvature(x, target,
                                       seed=1 if fisher_type == FISHER_MC else None)
-            ngd2.update_inv()
+            ngd2.update_preconditioner()
 
             if ngd_cls == FullNaturalGradientMaker:
                 f1 = getattr(model1, fisher_type)

@@ -173,7 +173,7 @@ class FROMP:
         if is_distributed:
             self.precond.reduce_curvature()
         self.precond.accumulate_curvature(to_pre_inv=True)
-        self.precond.update_inv()
+        self.precond.update_preconditioner()
 
         # register the current task with the memorable points
         with customize_head(model, class_ids):

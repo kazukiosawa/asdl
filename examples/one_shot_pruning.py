@@ -110,7 +110,7 @@ def main():
             inputs = inputs.to(args.device)
             targets = targets.to(args.device)
             ng.update_curvature(inputs, targets, accumulate=j > 0, scale=scale)
-        ng.update_inv(1e-4)
+        ng.update_preconditioner(1e-4)
 
         # construct parameter and the diagonal of the inverse fisher
         param = param_vector.get_flatten_vector()

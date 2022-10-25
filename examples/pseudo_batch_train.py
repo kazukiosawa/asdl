@@ -78,7 +78,7 @@ def _train_by_kfac(fisher_type):
         loss = ng.refresh_curvature(data_loader=pseudo_batch_loader,
                                     calc_emp_loss_grad=True)
         # invert curvature
-        ng.update_inv()
+        ng.update_preconditioner()
         # precondition param.grad
         ng.precondition()
         # update param by param.grad

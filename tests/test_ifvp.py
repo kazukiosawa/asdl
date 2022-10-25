@@ -89,7 +89,7 @@ class TestIFVP(unittest.TestCase):
             loss = F.cross_entropy(model(inputs), targets)
             loss.backward()
 
-            precond.update_inv()
+            precond.update_preconditioner()
             precond.precondition()
 
             grads = []

@@ -68,13 +68,13 @@ for ngd_cls, shape in zip(ngd_classes, shapes):
             ngd1.refresh_curvature(x, target,
                                    seed=1 if fisher_type == FISHER_MC else None,
                                    calc_emp_loss_grad=True)
-            ngd1.update_inv()
+            ngd1.update_preconditioner()
             ngd1.precondition()
 
             ngd2.refresh_curvature(x, target,
                                    seed=1 if fisher_type == FISHER_MC else None,
                                    calc_emp_loss_grad=True)
-            ngd2.update_inv()
+            ngd2.update_preconditioner()
             ngd2.precondition()
 
             if ngd_cls == FullNaturalGradientMaker:

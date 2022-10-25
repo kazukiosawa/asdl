@@ -154,7 +154,7 @@ def train(epoch, dataset, model, criterion, opt, kfac, args):
             loss.backward()
 
         if args.inv_update_freq != -1 and i % args.inv_update_freq == 0:
-            kfac.update_inv(args.damping)
+            kfac.update_preconditioner(args.damping)
 
         #                              kl_clip
         # kl_clip: grad *= sqrt(---------------------)
