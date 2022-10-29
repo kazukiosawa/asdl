@@ -208,7 +208,7 @@ if __name__ == '__main__':
     criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
 
     # ========== MODEL ==========
-    model = torchvision.models.resnet50(num_classes=dataset.num_classes)
+    model = timm.create_model('vit_base_patch16_224', pretrained=False)
     model.to(args.device)
 
     # ========== OPTIMIZER ==========
