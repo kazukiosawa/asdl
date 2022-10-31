@@ -88,7 +88,7 @@ class Preconditioner:
         self._partitioner = BlockPartitioner(self._transformed_shape, config.block_size)
         shapes = self._partitioner.kronecker_factor_shapes()
         ndim = len(self._transformed_shape)
-        device = param.get_device()
+        device = param.device
         assert ndim > 1
         self.statistics = [
             config.init_scale * torch.eye(s[0], device=device) for s in shapes
@@ -140,7 +140,7 @@ class Preconditioner:
             preconditioned_partitioned_grads.append(precond_grad)
         merged_grad = self._partitioner.merge_partitions(
             preconditioned_partitioned_grads)
-        self.param.grad.data.copy_(merged_grad.resize_as(self.param))
+        self.param.grad.data.copy_(merged_grad.resize_as_(self.param))
 
 
 def _merge_small_dims(shape_to_merge, max_dim):
@@ -264,7 +264,7 @@ def ComputePower(mat_g,
     shape = list(mat_g.shape)
     if len(shape) == 1:
         return torch.pow(mat_g + ridge_epsilon, -1 / p)
-    identity = torch.eye(shape[0], device=mat_g.get_device())
+    identity = torch.eye(shape[0], device=mat_g.device)
     if shape[0] == 1:
         return identity
     alpha = -1.0 / p
@@ -317,7 +317,7 @@ def PowerIter(mat_g, error_tolerance=1e-6, num_iters=100):
   Returns:
     eigen vector, eigen value, num_iters
   """
-    v = torch.rand(list(mat_g.shape)[0], device=mat_g.get_device()) * 2 - 1
+    v = torch.rand(list(mat_g.shape)[0], device=mat_g.device) * 2 - 1
     error = 1
     iters = 0
     singular_val = 0
