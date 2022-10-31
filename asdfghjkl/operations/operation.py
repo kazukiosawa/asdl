@@ -38,8 +38,10 @@ OP_SAVE_OUTPUTS = 'save_outputs'  # save outputs during a forward-pass
 OP_SAVE_OUTGRADS = 'save_outgrads'  # save outgrads during a backward-pass
 OP_MEAN_INPUTS = 'mean_inputs'  # compute the mean of inputs
 OP_MEAN_OUTPUTS = 'mean_outputs'  # compute the mean of outputs
+OP_SPATIAL_MEAN_OUTPUTS = 'spatial_mean_outputs'  # compute the spatial mean of outputs (only for Conv2d)
 OP_OUT_SPATIAL_SIZE = 'out_spatial_size'  # get the spatial size of outputs
 OP_MEAN_OUTGRADS = 'mean_outgrads'  # compute the mean outgrads
+OP_SPATIAL_MEAN_OUTGRADS = 'spatial_mean_outgrads'  # compute the spatial mean of outgrads (only for Conv2d)
 OP_BFGS_KRON_S_AS = 'bfgs_kron_s_As'  # compute s ans As for K-BFGS
 
 ALL_OPS = [OP_FULL_COV, OP_FULL_CVP,
@@ -195,6 +197,8 @@ class Operation:
                 self.accumulate_result(self.in_data_mean(module, in_data), OP_MEAN_INPUTS)
             elif op_name == OP_MEAN_OUTPUTS:
                 self.accumulate_result(self.out_data_mean(module, out_data), OP_MEAN_OUTPUTS)
+            elif op_name == OP_SPATIAL_MEAN_OUTPUTS:
+                self.accumulate_result(self.out_data_spatial_mean(module, out_data), OP_SPATIAL_MEAN_OUTPUTS)
             elif op_name == OP_OUT_SPATIAL_SIZE:
                 self.accumulate_result(self.out_spatial_size(module, out_data), OP_OUT_SPATIAL_SIZE)
             elif op_name == OP_BFGS_KRON_S_AS:
@@ -355,6 +359,8 @@ class Operation:
                     self.accumulate_result(rst, OP_BATCH_GRADS, 'bias')
             elif op_name == OP_MEAN_OUTGRADS:
                 self.accumulate_result(self.out_grads_mean(module, out_grads), OP_MEAN_OUTGRADS)
+            elif op_name == OP_SPATIAL_MEAN_OUTGRADS:
+                self.accumulate_result(self.out_grads_spatial_mean(module, out_grads), OP_SPATIAL_MEAN_OUTGRADS)
             elif op_name == OP_SKETCHED_GRAM:
                 self.accumulate_result(self.random_sketch_and_gram(module, in_data, out_grads), OP_SKETCHED_GRAM)
 
@@ -479,6 +485,9 @@ class Operation:
     def out_data_mean(module, out_data):
         raise NotImplementedError
 
+    def out_data_spatial_mean(self, module, out_data):
+        return self.out_data_mean(module, out_data)
+
     @staticmethod
     def out_spatial_size(module, out_data):
         raise NotImplementedError
@@ -486,6 +495,9 @@ class Operation:
     @staticmethod
     def out_grads_mean(module, out_grads):
         raise NotImplementedError
+
+    def out_grads_spatial_mean(self, module, out_grads):
+        return self.out_grads_mean(module, out_grads)
 
     @staticmethod
     def bfgs_kron_s_As(module, in_data):

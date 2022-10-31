@@ -12,8 +12,8 @@ class Conv2d(Operation):
 
     Argument shapes
     in_data: n x (c_in)(kernel_size) x out_size
-    out_data: n x c_out x out_size
-    out_grads: n x c_out x h_out x w_out
+    out_data: n x c_out x h_out x w_out
+    out_grads: n x c_out x out_size
 
     kernel_size = (k_h)(k_w)
     out_size = output feature map size
@@ -175,6 +175,10 @@ class Conv2d(Operation):
 
     @staticmethod
     def out_data_mean(module, out_data):
+        # n x c_out x h_out x w_out -> c_out
+        return out_data.mean(dim=(0, 2, 3))  # c_out
+
+    def out_data_spatial_mean(self, module, out_data):
         # n x c_out x h_out x w_out -> n x c_out x (h_out)(w_out)
         out_data = out_data.flatten(start_dim=2)
         return out_data.mean(dim=2)  # n x c_out
@@ -185,6 +189,10 @@ class Conv2d(Operation):
 
     @staticmethod
     def out_grads_mean(module, out_grads):
+        # n x c_out x out_size -> c_out
+        return out_grads.mean(dim=(0, 2))  # c_out
+
+    def out_grads_spatial_mean(self, module, out_grads):
         return out_grads.mean(dim=2)  # n x c_out
 
     @staticmethod
