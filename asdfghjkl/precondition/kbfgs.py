@@ -133,17 +133,17 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
         config = self.config
         for module in self.modules:
             if is_forward:
-                setattr(module, config.mean_outputs_attr, cxt.mean_out_data(module))
+                setattr(module, config.mean_outputs_attr, cxt.spatial_mean_out_data(module))
             else:
-                setattr(module, config.mean_outgrads_attr, cxt.mean_out_grads(module))
+                setattr(module, config.mean_outgrads_attr, cxt.spatial_mean_out_grads(module))
 
     def _update_B_inv(self, cxt: OperationContext):
         config = self.config
         for module in self.modules:
             damping = self.get_damping(cxt, module, is_A=False)
             bfgs = getattr(module, config.bfgs_attr)
-            s = cxt.mean_out_grads(module) - getattr(module, config.mean_outputs_attr)
-            y = cxt.mean_out_grads(module) - getattr(module, config.mean_outgrads_attr)
+            s = cxt.spatial_mean_out_data(module) - getattr(module, config.mean_outputs_attr)
+            y = cxt.spatial_mean_out_grads(module) - getattr(module, config.mean_outgrads_attr)
             if bfgs.kron.B_inv is None:
                 bfgs.kron.B_inv = torch.eye(s.shape[0], device=s.device)
             H = bfgs.kron.B_inv

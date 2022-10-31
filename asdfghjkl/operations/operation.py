@@ -905,11 +905,17 @@ class OperationContext:
     def mean_out_data(self, module):
         return self.get_result(module, OP_MEAN_OUTPUTS)
 
+    def spatial_mean_out_data(self, module):
+        return self.get_result(module, OP_SPATIAL_MEAN_OUTPUTS)
+
     def out_spatial_size(self, module):
         return self.get_result(module, OP_OUT_SPATIAL_SIZE)
 
     def mean_out_grads(self, module):
         return self.get_result(module, OP_MEAN_OUTGRADS)
+
+    def spatial_mean_out_grads(self, module):
+        return self.get_result(module, OP_SPATIAL_MEAN_OUTGRADS)
 
     def bfgs_kron_s_As(self, module):
         return self.get_result(module, OP_BFGS_KRON_S_AS)
