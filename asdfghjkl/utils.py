@@ -52,7 +52,7 @@ def im2col_2d(x: torch.Tensor, conv2d: nn.Module):
     assert isinstance(conv2d, (nn.Conv2d, nn.ConvTranspose2d))
     assert conv2d.dilation == (1, 1)
 
-    ph, pw = conv2d.padding
+    ph, pw = conv2d.padding if conv2d.padding != 'valid' else (0, 0)
     kh, kw = conv2d.kernel_size
     sy, sx = conv2d.stride
     if ph + pw > 0:
@@ -71,11 +71,12 @@ def im2col_2d_slow(x: torch.Tensor, conv2d: nn.Module):
     assert x.ndimension() == 4  # n x c x h_in x w_in
     assert isinstance(conv2d, (nn.Conv2d, nn.ConvTranspose2d))
 
+    padding = conv2d.padding if conv2d.padding != 'valid' else (0, 0)
     # n x c(k_h)(k_w) x (h_out)(w_out)
     Mx = F.unfold(x,
                   conv2d.kernel_size,
                   dilation=conv2d.dilation,
-                  padding=conv2d.padding,
+                  padding=padding,
                   stride=conv2d.stride)
 
     return Mx
