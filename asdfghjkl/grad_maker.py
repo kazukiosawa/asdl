@@ -160,10 +160,7 @@ class GradientMaker:
     def forward(self) -> Union[Tuple[Any, Tensor], Any]:
         self.call_model()
         self.call_loss()
-        if self._loss_fn is None:
-            return self._model_output
-        else:
-            return self._model_output, self._loss
+        return self._model_output, self._loss
 
     def backward(self):
         self._loss.backward()

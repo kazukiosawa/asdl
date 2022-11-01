@@ -50,7 +50,7 @@ class PsgdGradientMaker(PreconditionedGradientMaker):
             self.cholesky_factor = init
 
     def _forward_and_backward(self, retain_graph=False) -> Union[Tuple[Any, Tensor], Any]:
-        self.forward()
+        rst = self.forward()
         loss = self._loss
         model = self.model
 
@@ -63,11 +63,7 @@ class PsgdGradientMaker(PreconditionedGradientMaker):
             loss.backward()
         
         self.precondition()
-
-        if self._loss_fn is None:
-            return self._model_output
-        else:
-            return self._model_output, loss
+        return rst
 
     def update_preconditioner(self, retain_graph=False):
         params = list(self.model.parameters())

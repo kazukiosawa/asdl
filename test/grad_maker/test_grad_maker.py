@@ -60,7 +60,8 @@ class TestGradientMaker:
         model.zero_grad()
         dummy_y = grad_maker.setup_model_call(model, x, t)
         grad_maker.setup_loss_repr(dummy_y[1])
-        logits_test, loss_test = grad_maker.forward_and_backward()
+        y, loss_test = grad_maker.forward_and_backward()
+        logits_test, _ = y
         g_test = parameters_to_vector([p.grad for p in model.parameters()])
 
         torch.testing.assert_close(logits_true, logits_test)
@@ -116,7 +117,8 @@ class TestGradientMaker:
         model.zero_grad()
         dummy_y = grad_maker.setup_model_call(model, x, t, return_dict=False)
         grad_maker.setup_loss_repr(dummy_y[0])
-        loss_test, logits_test = grad_maker.forward_and_backward()
+        y, loss_test = grad_maker.forward_and_backward()
+        _, logits_test = y
         g_test = parameters_to_vector([p.grad for p in model.parameters()])
 
         torch.testing.assert_close(logits_true, logits_test)

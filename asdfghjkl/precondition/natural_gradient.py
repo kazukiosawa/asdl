@@ -112,18 +112,15 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
                 'curvature_upd_ratio cannot be specified when no curvature accumulation is performed.'
         
         if self.do_update_curvature():
-            self.update_curvature(accumulate=accumulate, calc_inv=not accumulate)
+            rst = self.update_curvature(accumulate=accumulate, calc_inv=not accumulate)
         else:
-            self.forward()
+            rst = self.forward()
             self._loss.backward()
 
         if accumulate and self.do_update_preconditioner():
             self.update_preconditioner()
         self.precondition()
-        if self._loss_fn is None:
-            return self._model_output
-        else:
-            return self._model_output, self._loss
+        return rst
 
     def named_modules_for(self, shape):
         if shape not in self._named_modules_for:
@@ -212,14 +209,15 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
             scale *= ema_decay
             self._scale_fisher(1 - ema_decay)
 
-        self.delegate_forward_and_backward(fisher_maker,
-                                           data_size=self.config.data_size,
-                                           scale=scale,
-                                           accumulate=accumulate,
-                                           calc_loss_grad=True,
-                                           calc_inv=calc_inv,
-                                           damping=self.config.damping
-                                           )
+        rst = self.delegate_forward_and_backward(fisher_maker,
+                                                 data_size=self.config.data_size,
+                                                 scale=scale,
+                                                 accumulate=accumulate,
+                                                 calc_loss_grad=True,
+                                                 calc_inv=calc_inv,
+                                                 damping=self.config.damping
+                                                 )
+        return rst
 
     @nvtx_range('update_inv')
     def update_preconditioner(self, damping=None, module_name=None, kron=None, zero_curvature=False, partition_aware=False):

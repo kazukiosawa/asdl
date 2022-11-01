@@ -143,10 +143,7 @@ class FisherMaker(GradientMaker):
                     p.grad.div_(data_size)
             loss.div_(data_size)
 
-        if self._loss_fn is None:
-            return self._model_output
-        else:
-            return self._model_output, loss
+        return self._model_output, loss
 
     def _register_fisher(self, cxt: OperationContext):
         model = self.model

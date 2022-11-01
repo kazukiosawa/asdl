@@ -29,15 +29,12 @@ class NewtonGradientMaker(GradientMaker):
                              scale=1.,
                              accumulate=False
                              ) -> Union[Tuple[Any, Tensor], Any]:
-        self.delegate_forward_and_backward(self.hessian_maker,
-                                           scale=scale,
-                                           accumulate=accumulate,
-                                           calc_loss_grad=True)
+        rst = self.delegate_forward_and_backward(self.hessian_maker,
+                                                 scale=scale,
+                                                 accumulate=accumulate,
+                                                 calc_loss_grad=True)
         self.precondition()
-        if self._loss_fn is None:
-            return self._model_output
-        else:
-            return self._model_output, self._loss
+        return rst
 
     def precondition(self):
         hessian = self.model.hessian.data
