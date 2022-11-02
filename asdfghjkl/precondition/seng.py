@@ -39,6 +39,8 @@ _supported_modules = (nn.Linear, nn.Conv2d)
 
 
 class SengGradientMaker(PreconditionedGradientMaker):
+    _loss_reduction = 'sum'
+
     def __init__(self, model: nn.Module, config: SengGradientConfig):
         super().__init__(model, config)
         self.config: SengGradientConfig = config
@@ -48,15 +50,6 @@ class SengGradientMaker(PreconditionedGradientMaker):
 
     def do_forward_and_backward(self, step=None):
         return not self.do_update_curvature(step)
-
-    def _call_loss_fn(self) -> Tensor:
-        assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
-        if isinstance(self._loss_fn, nn.Module):
-            self._loss_fn.reduction = 'sum'
-        else:
-            self._loss_fn_kwargs['reduction'] = 'sum'
-        args, kwargs = self._get_mapped_loss_fn_args_kwargs()
-        return self._loss_fn(*args, **kwargs)
 
     def _update_curvature(self):
         config = self.config

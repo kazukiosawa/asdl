@@ -7,6 +7,8 @@ from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .utils import has_reduction
+
 try:
     import functorch as ft
     _is_functorch_available = True
@@ -88,6 +90,8 @@ class VmapInfo:
 
 
 class GradientMaker:
+    _loss_reduction = None
+
     def __init__(self, model: nn.Module):
         self.model = model
         self._model_fn = None
@@ -197,8 +201,23 @@ class GradientMaker:
         return args, kwargs
 
     def _call_loss_fn(self) -> Tensor:
-        args, kwargs = self._get_mapped_loss_fn_args_kwargs()
-        return self._loss_fn(*args, **kwargs)
+        def call():
+            args, kwargs = self._get_mapped_loss_fn_args_kwargs()
+            return self._loss_fn(*args, **kwargs)
+
+        reduction = self._loss_reduction
+        if reduction is not None:
+            assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
+            if isinstance(self._loss_fn, nn.Module):
+                original_reduction = self._loss_fn.reduction
+                self._loss_fn.reduction = reduction
+                rst = call()
+                self._loss_fn.reduction = original_reduction
+                return rst
+            else:
+                self._loss_fn_kwargs['reduction'] = reduction
+                return call()
+        return call()
 
     def _get_stateless_model_fn(self):
         assert _is_functorch_available, \
@@ -228,6 +247,8 @@ class GradientMaker:
         return logit_fn_params_only, params
 
     def _get_stateless_model_loss_fn_params_only(self, return_output=False):
+        assert self._loss_reduction != 'none'
+
         model_fn_params_only, params = self._get_stateless_model_fn_params_only()
 
         def model_loss_fn_params_only(params):
