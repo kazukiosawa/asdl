@@ -10,7 +10,7 @@ import torch.distributed as dist
 
 from .core import no_centered_cov
 from .operations import OperationContext
-from .utils import skip_param_grad, has_reduction
+from .utils import skip_param_grad
 from .grad_maker import GradientMaker, LOSS_CROSS_ENTROPY, LOSS_MSE
 from .matrices import *
 from .vector import ParamVector, reduce_vectors

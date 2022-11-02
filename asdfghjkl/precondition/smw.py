@@ -5,7 +5,6 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 
-from ..utils import has_reduction
 from ..core import extend
 from ..operations import OP_GRAM_HADAMARD
 from ..grad_maker import GradientMaker
@@ -42,7 +41,6 @@ class SmwEmpNaturalGradientMaker(GradientMaker):
         self.config = config
 
     def forward_and_backward(self) -> Tuple[Any, Tensor]:
-        assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
         if isinstance(self._loss_fn, nn.Module):
             data_average = self._loss_fn.reduction == 'mean'
         else:

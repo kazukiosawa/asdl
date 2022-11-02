@@ -6,7 +6,7 @@ import torch.nn as nn
 from torch import Tensor
 from .prec_grad_maker import PreconditionedGradientMaker, PreconditionedGradientConfig
 from ..core import extend
-from ..utils import cholesky_inv, has_reduction
+from ..utils import cholesky_inv
 from ..operations import OP_SKETCHED_GRAM
 
 
