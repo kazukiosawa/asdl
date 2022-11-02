@@ -440,7 +440,6 @@ class FisherMCCrossEntropy(FisherMaker):
 
     def _fisher_loop(self, closure):
         logits = self._logits
-        log_probs = F.log_softmax(logits, dim=-1)
         n_mc_samples = self.config.n_mc_samples
         probs = F.softmax(logits, dim=-1)
         log_probs = F.log_softmax(logits, dim=-1)
