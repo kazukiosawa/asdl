@@ -32,8 +32,6 @@ def train(epoch):
 
         dummy_y = grad_maker.setup_model_call(model, x)
         grad_maker.setup_loss_call(F.cross_entropy, dummy_y, t)
-        grad_maker.loss_hvp()
-
         y, loss = grad_maker.forward_and_backward()
 
         optimizer.step()
@@ -71,7 +69,7 @@ if __name__ == '__main__':
 
     lr = 0.1
     weight_decay = 5.e-4
-    damping = 1.e-3
+    damping = 1.
 
     if args.optim == OPTIM_ADAM:
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
