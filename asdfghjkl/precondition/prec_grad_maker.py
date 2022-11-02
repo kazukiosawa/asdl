@@ -62,17 +62,13 @@ class PreconditionedGradientMaker(GradientMaker):
         self._startup()
 
         if self.do_forward_and_backward(step):
-            print('fwd bwd')
             self.forward()
             self.backward()
         if self.do_update_curvature(step):
-            print('upd curv')
             self._update_curvature()
         if self.do_update_preconditioner(step):
-            print('upd prec')
             self._update_preconditioner()
 
-        print('prec')
         self._precondition()
 
         self._teardown()
