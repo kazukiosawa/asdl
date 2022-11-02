@@ -33,6 +33,9 @@ class PreconditionedGradientConfig:
 
 
 class PreconditionedGradientMaker(GradientMaker):
+    _supported_modules = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d,
+                          nn.LayerNorm, nn.Embedding)
+
     def __init__(self, model: nn.Module, config: PreconditionedGradientConfig):
         super().__init__(model)
         self.config = config
@@ -55,6 +58,9 @@ class PreconditionedGradientMaker(GradientMaker):
                                                                   update_ratio=config.curvature_upd_ratio,
                                                                   warmup_ratio=config.curvature_warmup_ratio)
         self.state = dict(step=0)
+        self.target_modules = [m for m in model.modules()
+                               if isinstance(m, self._supported_modules)
+                               and any(p.requires_grad for p in m.parameters())]
 
     def forward_and_backward(self):
         step = self.state['step']
@@ -123,6 +129,23 @@ class PreconditionedGradientMaker(GradientMaker):
         if step is None:
             step = self.state['step']
         return step < warmup_steps or (step - warmup_steps) % interval == 0
+
+
+class StatefulPGM(PreconditionedGradientMaker):
+    def __init__(self, model: nn.Module, config: PreconditionedGradientConfig):
+        super().__init__(model, config)
+
+    def state_dict(self) -> dict:
+        pass
+
+    def load_state_dict(self):
+        pass
+
+    def do_forward_and_backward(self, step=None) -> bool:
+        raise NotImplementedError
+
+    def _precondition(self):
+        pass
 
 
 def get_update_schedule(num_total_steps: int,
