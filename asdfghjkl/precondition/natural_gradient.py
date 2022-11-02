@@ -1,8 +1,7 @@
-from typing import List, Tuple, Union, Any
+from typing import List, Union, Any
 from dataclasses import dataclass
 
 import torch
-from torch import Tensor
 from torch import nn
 import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
@@ -56,6 +55,9 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         if isinstance(config.fisher_shape, str):
             config.fisher_shape = [config.fisher_shape]
         self.config: NaturalGradientConfig = config
+        if not self.do_accumulate:
+            assert config.curvature_upd_ratio is None, \
+                'curvature_upd_ratio cannot be specified when no curvature accumulation is performed.'
 
         self.named_modules_for_curvature = []
         self.modules_for_curvature = []
@@ -105,22 +107,8 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         self.grads = []
         self.packed_grads = []
 
-    def _forward_and_backward(self, accumulate=False) -> Union[Tuple[Any, Tensor], Any]:
-        config = self.config
-        if not accumulate:
-            assert config.curvature_upd_ratio is None, \
-                'curvature_upd_ratio cannot be specified when no curvature accumulation is performed.'
-        
-        if self.do_update_curvature():
-            rst = self.update_curvature(accumulate=accumulate, calc_inv=not accumulate)
-        else:
-            rst = self.forward()
-            self._loss.backward()
-
-        if accumulate and self.do_update_preconditioner():
-            self.update_preconditioner()
-        self.precondition()
-        return rst
+    def do_forward_and_backward(self, step=None):
+        return not self.do_update_curvature(step)
 
     def named_modules_for(self, shape):
         if shape not in self._named_modules_for:
@@ -195,32 +183,35 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         else:
             return '' + self.config.nvtx_tag
 
+    @property
+    def do_accumulate(self):
+        return self.config.ema_decay != _invalid_ema_decay
+
     @nvtx_range('update_curvature')
-    def update_curvature(self,
-                         accumulate=False,
-                         calc_inv=False):
+    def _update_curvature(self):
         config = self.config
         fisher_maker = self.fisher_maker
         scale = config.scale
 
         ema_decay = config.ema_decay
         if ema_decay != _invalid_ema_decay:
-            accumulate = True
             scale *= ema_decay
             self._scale_fisher(1 - ema_decay)
 
-        rst = self.delegate_forward_and_backward(fisher_maker,
-                                                 data_size=self.config.data_size,
-                                                 scale=scale,
-                                                 accumulate=accumulate,
-                                                 calc_loss_grad=True,
-                                                 calc_inv=calc_inv,
-                                                 damping=self.config.damping
-                                                 )
-        return rst
+        self.delegate_forward_and_backward(fisher_maker,
+                                           data_size=self.config.data_size,
+                                           scale=scale,
+                                           accumulate=self.do_accumulate,
+                                           calc_loss_grad=True,
+                                           calc_inv=not self.do_accumulate,
+                                           damping=self.config.damping
+                                           )
 
     @nvtx_range('update_inv')
-    def update_preconditioner(self, damping=None, module_name=None, kron=None, zero_curvature=False, partition_aware=False):
+    def _update_preconditioner(self, damping=None, module_name=None, kron=None, zero_curvature=False, partition_aware=False):
+        if not self.do_accumulate:
+            return
+
         if kron is None:
             kron = ['A', 'B']
         if damping is None:
@@ -275,14 +266,14 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
                     fisher.mul_(0)
 
     @nvtx_range('precondition')
-    def precondition(self, vectors: ParamVector = None, grad_scale=None, use_inv=True):
+    def _precondition(self, vectors: ParamVector = None, grad_scale=None, use_inv=True):
         if grad_scale is None:
             grad_scale = self.config.grad_scale
         for shape in _module_level_shapes:
             for module in self.modules_for(shape):
                 if not self.is_module_for_inv_and_precondition(module):
                     continue
-                self.precondition_module(module, shape, vectors, grad_scale=grad_scale, use_inv=use_inv)
+                self._precondition_module(module, shape, vectors, grad_scale=grad_scale, use_inv=use_inv)
         params = [p for p in self.parameters_for(SHAPE_FULL)]
         if len(params) > 0:
             fisher = self._get_full_fisher()
@@ -294,7 +285,7 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
                 vectors.mul_(grad_scale)
             fisher.mvp(vectors=vectors, use_inv=use_inv, inplace=True)
 
-    def precondition_module(self, module, shape=None, vectors: ParamVector = None,
+    def _precondition_module(self, module, shape=None, vectors: ParamVector = None,
                             vec_weight: torch.Tensor = None, vec_bias: torch.Tensor = None,
                             grad_scale=None, use_inv=True):
         if grad_scale is None:
@@ -561,12 +552,12 @@ class EkfacGradientMaker(NaturalGradientMaker):
         config.fisher_shape = [SHAPE_KFE]
         super().__init__(model, config)
 
-    def update_preconditioner(self, *args, **kwargs):
+    def _update_preconditioner(self, *args, **kwargs):
         pass
 
-    def precondition(self, vectors: ParamVector = None, grad_scale=None, use_inv=False):
+    def _precondition(self, vectors: ParamVector = None, grad_scale=None, use_inv=False):
         assert not use_inv, 'EKFAC does not calculate the inverse matrix.'
-        super().precondition(vectors=vectors, grad_scale=grad_scale, use_inv=False)
+        super()._precondition(vectors=vectors, grad_scale=grad_scale, use_inv=False)
 
 
 class UnitWiseNaturalGradientMaker(NaturalGradientMaker):

@@ -1,4 +1,4 @@
-from typing import List, Iterable, Union, Any, Tuple
+from typing import List, Iterable, Tuple
 from dataclasses import dataclass
 
 import numpy as np
@@ -49,31 +49,16 @@ class PsgdGradientMaker(PreconditionedGradientMaker):
             assert init.shape == (num_params, num_params)
             self.cholesky_factor = init
 
-    def _forward_and_backward(self, retain_graph=False) -> Union[Tuple[Any, Tensor], Any]:
-        rst = self.forward()
-        loss = self._loss
-        model = self.model
+    def do_forward_and_backward(self, step=None):
+        return not self.do_update_preconditioner(step)
 
-        if self.do_update_preconditioner():
-            grads = torch.autograd.grad(loss, list(model.parameters()), create_graph=True)
-            for p, g in zip(model.parameters(), grads):
-                p.grad = g
-            self.update_preconditioner(retain_graph=retain_graph)
-        else:
-            loss.backward()
-        
-        self.precondition()
-        return rst
-
-    def update_preconditioner(self, retain_graph=False):
-        params = list(self.model.parameters())
-        grads = [p.grad for p in params]
-        vs = [torch.randn_like(p) for p in params]
-        Hvs = list(torch.autograd.grad(grads, params, vs, retain_graph=retain_graph))
-        self._update_preconditioner(vs, Hvs)
+    def _update_preconditioner(self, retain_graph=False):
+        vs = tuple([torch.randn_like(p) for p in self.model.parameters()])
+        Hvs = self.loss_hvp(tangents=vs)
+        self._update_preconditioner_core(list(vs), list(Hvs))
 
     @torch.no_grad()
-    def _update_preconditioner(self, dxs: List[Tensor], dgs: List[Tensor], eps=1.2e-38):
+    def _update_preconditioner_core(self, dxs: List[Tensor], dgs: List[Tensor], eps=1.2e-38):
         dx = parameters_to_vector(dxs)
         dg = parameters_to_vector(dgs)
         Q = self.cholesky_factor
@@ -87,24 +72,22 @@ class PsgdGradientMaker(PreconditionedGradientMaker):
         Q.sub_(grad.mm(Q), alpha=float(lr))
 
     @torch.no_grad()
-    def precondition(self):
+    def _precondition(self):
         grads = [p.grad for p in self.model.parameters()]
         g = parameters_to_vector(grads)
         Q = self.cholesky_factor
         vector_to_parameters(Q.T.mv(Q.mv(g)), grads)
 
-    def criterion(self, n_samples=1, retain_graph=False):
-        params = list(self.model.parameters())
-        grads = [p.grad for p in params]
+    def criterion(self, n_samples=1):
         total = 0
         for i in range(n_samples):
-            vs = [torch.randn_like(p) for p in params]
-            Hvs = list(torch.autograd.grad(grads, params, vs, retain_graph=i < n_samples - 1 or retain_graph))
+            vs = tuple([torch.randn_like(p) for p in self.model.parameters()])
+            Hvs = self.loss_hvp(tangents=vs)
             total += self._criterion(vs, Hvs)
         return total / n_samples
 
     @torch.no_grad()
-    def _criterion(self, dxs: List[Tensor], dgs: List[Tensor]):
+    def _criterion(self, dxs: Tuple[Tensor], dgs: Tuple[Tensor]):
         dx = parameters_to_vector(dxs)
         dg = parameters_to_vector(dgs)
         Q = self.cholesky_factor
@@ -128,7 +111,7 @@ class KronPsgdGradientMaker(PsgdGradientMaker):
             self.cholesky_factors[module] = (Ql, Qr)
 
     @torch.no_grad()
-    def _update_preconditioner(self, dxs: List[Tensor], dgs: List[Tensor]):
+    def _update_preconditioner_core(self, dxs: List[Tensor], dgs: List[Tensor]):
         for module in self.model.children():
             dX = dxs.pop(0)
             dG = dgs.pop(0)
@@ -144,7 +127,7 @@ class KronPsgdGradientMaker(PsgdGradientMaker):
         assert len(dgs) == 0
 
     @torch.no_grad()
-    def precondition(self):
+    def _precondition(self):
         grads = [p.grad for p in self.model.parameters()]
         for module in self.model.children():
             G = grads.pop(0)

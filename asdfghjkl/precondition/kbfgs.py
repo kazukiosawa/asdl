@@ -1,4 +1,4 @@
-from typing import Tuple, Union, Any, List
+from typing import Any, List
 from dataclasses import dataclass
 import math
 
@@ -45,20 +45,15 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
         self._curr_model_kwargs = dict()
         self._A_inv_exists = False
 
-    def _forward_and_backward(self) -> Union[Tuple[Any, Tensor], Any]:
-        if self._step > 0 and self.do_update_preconditioner(self._step - 1):
-            self.post_preconditioner_update()
-        if self.do_update_preconditioner():
-            rst = self.update_preconditioner()
-        else:
-            rst = self.forward()
-            self._loss.backward()
+    def do_forward_and_backward(self, step=None):
+        return not self.do_update_preconditioner(step)
 
-        self.precondition()
+    def _startup(self):
+        step = self.state['step']
+        if step > 0 and self.do_update_preconditioner(step - 1):
+            self._post_preconditioner_update()
 
-        return rst
-
-    def update_preconditioner(self):
+    def _update_preconditioner(self):
         model = self.model
         config = self.config
         if config.minibatch_hessian_action and self._A_inv_exists:
@@ -75,7 +70,7 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
         self._record_model_args_kwargs()
         return rst
 
-    def post_preconditioner_update(self):
+    def _post_preconditioner_update(self):
         self._restore_last_model_args_kwargs()
         # another forward and backward using the previous model_args, kwargs
         op_names = (OP_SPATIAL_MEAN_OUTPUTS, OP_SPATIAL_MEAN_OUTGRADS, OP_OUT_SPATIAL_SIZE)
@@ -85,6 +80,18 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
             self._loss.backward()
             self._update_B_inv(cxt)
         self._restore_curr_model_args_kwargs()
+
+    def _precondition(self, vec_weight: Tensor = None, vec_bias: Tensor = None):
+        config = self.config
+        for module in self.modules:
+            matrix: SymMatrix = getattr(module, config.bfgs_attr)
+            if vec_weight is None and module.weight.requires_grad:
+                vec_weight = module.weight.grad
+            assert vec_weight is not None, 'gradient has not been calculated.'
+            if module.bias is not None and module.bias.requires_grad:
+                vec_bias = module.bias.grad
+                assert vec_bias is not None, 'gradient has not been calculated.'
+            matrix.kron.mvp(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=True, inplace=True)
 
     def _record_model_args_kwargs(self):
         self._last_model_args = self._model_args
@@ -103,7 +110,7 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
     def _update_A_inv(self, cxt: OperationContext):
         config = self.config
         for module in self.modules:
-            damping = self.get_damping(cxt, module, is_A=True)
+            damping = self._get_damping(cxt, module, is_A=True)
             bfgs = getattr(module, config.bfgs_attr, None)
             if config.minibatch_hessian_action and self._A_inv_exists:
                 s, As = cxt.bfgs_kron_s_As(module)
@@ -140,7 +147,7 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
     def _update_B_inv(self, cxt: OperationContext):
         config = self.config
         for module in self.modules:
-            damping = self.get_damping(cxt, module, is_A=False)
+            damping = self._get_damping(cxt, module, is_A=False)
             bfgs = getattr(module, config.bfgs_attr)
             s = cxt.spatial_mean_out_data(module) - getattr(module, config.mean_outputs_attr)
             y = cxt.spatial_mean_out_grads(module) - getattr(module, config.mean_outgrads_attr)
@@ -153,7 +160,7 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
             powell_lm_damping_(H, s, y, mu1=config.mu1, mu2=damping)
             bfgs_inv_update_(H, s, y)
 
-    def get_damping(self, cxt: OperationContext, module: nn.Module, is_A=True):
+    def _get_damping(self, cxt: OperationContext, module: nn.Module, is_A=True):
         damping = self.config.damping
         sqrt_damping = math.sqrt(damping)
         if isinstance(module, nn.Conv2d):
@@ -167,18 +174,6 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
                 return sqrt_damping / sqrt_spatial_size
         else:
             return sqrt_damping
-
-    def precondition(self, vec_weight: Tensor = None, vec_bias: Tensor = None):
-        config = self.config
-        for module in self.modules:
-            matrix: SymMatrix = getattr(module, config.bfgs_attr)
-            if vec_weight is None and module.weight.requires_grad:
-                vec_weight = module.weight.grad
-            assert vec_weight is not None, 'gradient has not been calculated.'
-            if module.bias is not None and module.bias.requires_grad:
-                vec_bias = module.bias.grad
-                assert vec_bias is not None, 'gradient has not been calculated.'
-            matrix.kron.mvp(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=True, inplace=True)
 
 
 def powell_lm_damping_(H: Tensor, s: Tensor, y: Tensor, mu1: float, mu2: float):

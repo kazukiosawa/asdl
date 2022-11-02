@@ -1,4 +1,4 @@
-from typing import Union, Any, Tuple, Dict
+from typing import Dict
 from dataclasses import dataclass
 
 import torch
@@ -46,16 +46,8 @@ class SengGradientMaker(PreconditionedGradientMaker):
         self._modules = [m for m in model.modules() if isinstance(m, _supported_modules)]
         self._curvature_info: Dict[nn.Module, SketchedEmpFisherInfo] = {}
 
-    def _forward_and_backward(self, *args, **kwargs) -> Union[Tuple[Any, Tensor], Any]:
-        if self.do_update_curvature():
-            rst = self.update_curvature()
-        else:
-            rst = self.forward()
-            self.backward()
-        with torch.no_grad():
-            self._loss /= self.config.data_size
-        self.precondition()
-        return rst
+    def do_forward_and_backward(self, step=None):
+        return not self.do_update_curvature(step)
 
     def _call_loss_fn(self) -> Tensor:
         assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
@@ -66,7 +58,7 @@ class SengGradientMaker(PreconditionedGradientMaker):
         args, kwargs = self._get_mapped_loss_fn_args_kwargs()
         return self._loss_fn(*args, **kwargs)
 
-    def update_curvature(self):
+    def _update_curvature(self):
         config = self.config
         with extend(self.model, OP_SKETCHED_GRAM) as cxt:
             cxt.set_sketching_size(config.sketching_size)
@@ -80,7 +72,7 @@ class SengGradientMaker(PreconditionedGradientMaker):
         return rst
 
     @torch.no_grad()
-    def precondition(self):
+    def _precondition(self):
         data_size = self.config.data_size
         damping = self.config.damping
         for module, info in self._curvature_info.items():
@@ -134,6 +126,10 @@ class SengGradientMaker(PreconditionedGradientMaker):
                 module.bias.grad.copy_(g[:, -1].flatten())  # d_out
             else:
                 module.weight.grad.copy_(g.contiguous().view_as(module.weight))  # d_out x d_in
+
+    def _teardown(self):
+        with torch.no_grad():
+            self._loss /= self.config.data_size
 
 
 def maybe_unsqueeze_to_3d(tensor: Tensor):

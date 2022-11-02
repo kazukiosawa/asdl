@@ -1,9 +1,7 @@
-from typing import Union, Any, Tuple
 from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
-from torch import Tensor
 from .prec_grad_maker import PreconditionedGradientMaker, PreconditionedGradientConfig
 
 __all__ = ['CurveBallGradientMaker', 'CurveBallGradientConfig']
@@ -23,10 +21,13 @@ class CurveBallGradientMaker(PreconditionedGradientMaker):
         self._params = [p for p in model.parameters() if p.requires_grad]
         self._momentum = tuple([torch.zeros_like(p) for p in self._params])
 
-    @torch.no_grad()
-    def _forward_and_backward(self, *args, **kwargs) -> Union[Tuple[Any, Tensor], Any]:
+    def do_forward_and_backward(self, step=None) -> bool:
+        return False
+
+    def _precondition(self):
         config = self.config
-        hvps, grads, output = self.loss_hvp(tangents=self._momentum, return_grad=True, return_output=True)
+        hvps = self.loss_hvp(tangents=self._momentum)
+        grads = [p.grad for p in self._params]
         assert len(hvps) == len(grads) == len(self._momentum)
         for p, m, hvp, grad in zip(self._params, self._momentum, hvps, grads):
             hvp.add_(m, alpha=config.damping)
@@ -38,5 +39,3 @@ class CurveBallGradientMaker(PreconditionedGradientMaker):
                 p.grad = m.clone()
             else:
                 p.grad.add_(m)
-
-        return output

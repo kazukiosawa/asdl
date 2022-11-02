@@ -1,12 +1,11 @@
 from dataclasses import dataclass
-from typing import Union, Tuple, Any, List
+from typing import Tuple, List
 import itertools
 
 import numpy as np
 
 import torch
 import torch.nn.parameter
-from torch import Tensor
 from torch.nn.parameter import Parameter
 from .prec_grad_maker import PreconditionedGradientMaker, PreconditionedGradientConfig
 
@@ -50,29 +49,18 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
         self.preconditioners: List[Preconditioner] = [
             Preconditioner(p, config) for p in model.parameters() if p.ndim > 1]
 
-    def _forward_and_backward(self, *args, **kwargs) -> Union[Tuple[Any, Tensor], Any]:
-        rst = self.forward()
-        self.backward()
+    def do_forward_and_backward(self, step=None):
+        return True
 
-        if self.do_update_curvature():
-            self.update_curvature()
-
-        if self.do_update_preconditioner():
-            self.update_preconditioner()
-
-        self.precondition()
-
-        return rst
-
-    def update_curvature(self):
+    def _update_curvature(self):
         for preconditioner in self.preconditioners:
             preconditioner.update_statistics()
 
-    def update_preconditioner(self):
+    def _update_preconditioner(self):
         for preconditioner in self.preconditioners:
             preconditioner.update_preconditioners()
 
-    def precondition(self):
+    def _precondition(self):
         for preconditioner in self.preconditioners:
             preconditioner.precondition()
 

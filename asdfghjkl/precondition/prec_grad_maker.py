@@ -1,10 +1,8 @@
 import math
 import warnings
-from typing import Union, Tuple, Any
 from dataclasses import dataclass
 
 import torch.nn as nn
-from torch import Tensor
 from asdfghjkl import GradientMaker
 
 
@@ -56,44 +54,79 @@ class PreconditionedGradientMaker(GradientMaker):
                 self.curvature_upd_schedule = get_update_schedule(num_total_steps=config.num_total_steps,
                                                                   update_ratio=config.curvature_upd_ratio,
                                                                   warmup_ratio=config.curvature_warmup_ratio)
-        self._step = 0
+        self.state = dict(step=0)
 
-    def forward_and_backward(self, *args, **kwargs) -> Union[Tuple[Any, Tensor], Any]:
-        rst = self._forward_and_backward(*args, **kwargs)
-        self._step += 1
-        return rst
+    def forward_and_backward(self):
+        step = self.state['step']
 
-    def _forward_and_backward(self, *args, **kwargs) -> Union[Tuple[Any, Tensor], Any]:
+        self._startup()
+
+        if self.do_forward_and_backward(step):
+            print('fwd bwd')
+            self.forward()
+            self.backward()
+        if self.do_update_curvature(step):
+            print('upd curv')
+            self._update_curvature()
+        if self.do_update_preconditioner(step):
+            print('upd prec')
+            self._update_preconditioner()
+
+        print('prec')
+        self._precondition()
+
+        self._teardown()
+
+        self.state['step'] += 1
+
+        return self._model_output, self._loss
+
+    def _startup(self):
+        pass
+
+    def _update_curvature(self):
+        pass
+
+    def _update_preconditioner(self):
+        pass
+
+    def _precondition(self):
         raise NotImplementedError
 
-    def _do_update_by_schedule(self, upd_schedule, step=None):
-        if step is None:
-            step = self._step
-        try:
-            return upd_schedule[step]
-        except IndexError:
-            warnings.warn(f'Given step+1 ({step+1}) is larger than the total number of steps ({self.config.num_total_steps})')
-            return False
+    def _teardown(self):
+        pass
 
-    def _do_update_by_interval(self, interval, warmup_steps=0, step=None):
-        if step is None:
-            step = self._step
-        return step < warmup_steps or (step - warmup_steps) % interval == 0
+    def do_forward_and_backward(self, step=None) -> bool:
+        raise NotImplementedError
 
-    def do_update_preconditioner(self, step=None):
-        if self.preconditioner_upd_schedule is not None:
-            return self._do_update_by_schedule(self.preconditioner_upd_schedule, step)
-        interval, warmup_steps = self.config.preconditioner_upd_interval, self.config.preconditioner_warmup_steps
-        return self._do_update_by_interval(interval, warmup_steps, step)
-
-    def do_update_curvature(self, step=None):
+    def do_update_curvature(self, step=None) -> bool:
         if self.curvature_upd_schedule is not None:
             return self._do_update_by_schedule(self.curvature_upd_schedule, step)
         config = self.config
         if config.curvature_upd_interval is not None:
             interval, warmup_steps = config.curvature_upd_interval, config.curvature_warmup_steps
             return self._do_update_by_interval(interval, warmup_steps, step)
-        return self.do_update_preconditioner()
+        return self.do_update_preconditioner(step)
+
+    def do_update_preconditioner(self, step=None) -> bool:
+        if self.preconditioner_upd_schedule is not None:
+            return self._do_update_by_schedule(self.preconditioner_upd_schedule, step)
+        interval, warmup_steps = self.config.preconditioner_upd_interval, self.config.preconditioner_warmup_steps
+        return self._do_update_by_interval(interval, warmup_steps, step)
+
+    def _do_update_by_schedule(self, upd_schedule, step=None) -> bool:
+        if step is None:
+            step = self.state['step']
+        try:
+            return upd_schedule[step]
+        except IndexError:
+            warnings.warn(f'Given step+1 ({step+1}) is larger than the total number of steps ({self.config.num_total_steps})')
+            return False
+
+    def _do_update_by_interval(self, interval, warmup_steps=0, step=None) -> bool:
+        if step is None:
+            step = self.state['step']
+        return step < warmup_steps or (step - warmup_steps) % interval == 0
 
 
 def get_update_schedule(num_total_steps: int,
