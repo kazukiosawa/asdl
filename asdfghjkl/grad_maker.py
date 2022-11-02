@@ -157,20 +157,19 @@ class GradientMaker:
             self._loss = self._call_loss_fn()
         return self._loss
 
-    def forward(self) -> Union[Tuple[Any, Tensor], Any]:
+    def forward(self):
         self.call_model()
         self.call_loss()
-        return self._model_output, self._loss
 
     def backward(self):
         self._loss.backward()
 
-    def forward_and_backward(self) -> Union[Tuple[Any, Tensor], Any]:
+    def forward_and_backward(self):
         # Performs a forward pass (model and loss evaluations) and a backward pass (gradient calculation).
         # A child class should override this function.
-        rst = self.forward()
+        self.forward()
         self.backward()
-        return rst
+        return self._model_output, self._loss
 
     def delegate_forward_and_backward(self, other, *args, **kwargs):
         other.setup_model_call(self._model_fn, *self._model_args, **self._model_kwargs)
@@ -179,10 +178,10 @@ class GradientMaker:
         else:
             other.setup_loss_call(self._loss_fn, *self._loss_fn_args, **self._loss_fn_kwargs)
         other.setup_logits_repr(self._dummy_logits)
-        rst = other.forward_and_backward(*args, **kwargs)
+        other.forward_and_backward(*args, **kwargs)
         self._model_output = other.model_output
         self._loss = other.loss
-        return rst
+        return self._model_output, self._loss
 
     def _get_mapped_loss_fn_args_kwargs(self):
         def mapping(value):
@@ -234,12 +233,8 @@ class GradientMaker:
         def model_loss_fn_params_only(params):
             self._model_output = model_fn_params_only(params)
             self.call_loss()
-            if self._loss_fn is None:
-                rst = self._model_output
-            else:
-                rst = self._model_output, self._loss
             if return_output:
-                return self._loss, rst
+                return self._loss, self._model_output
             else:
                 return self._loss
 
