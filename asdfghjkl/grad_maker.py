@@ -333,19 +333,19 @@ class GradientMaker:
         return ft.hessian(model_loss_fn)(params)
 
     @torch.no_grad()
-    def loss_hvp(self, tangents=None, return_grad=False, return_output=False) \
-            -> Union[Tuple[Tensor, ...], Tuple[Tuple[Tensor, ...], Tuple[Tensor, ...]]]:
-        grad_fn, params = self._get_stateless_grad_fn_params_only(return_output=return_output)
+    def loss_hvp(self, tangents=None, accumulate_grad=True) -> Tuple[Tensor, ...]:
+        grad_fn, params = self._get_stateless_grad_fn_params_only()
         if tangents is None:
             tangents = self._get_random_tangents()
-        out = ft.jvp(grad_fn, (params,), (tangents,), has_aux=return_output)
-        # out = (grad, hvp) or (grad, hvp, output) if return_output
-        rst = (out[1],)
-        if return_grad:
-            rst += (out[0],)
-        if return_output:
-            rst += (out[2],)
-        return rst[0] if len(rst) == 1 else rst
+        grads, hvps = ft.jvp(grad_fn, (params,), (tangents,))
+        if accumulate_grad:
+            params = [p for p in self.model.parameters() if p.requires_grad]
+            for param, grad in zip(params, grads):
+                if param.grad is None:
+                    param.grad = grad
+                else:
+                    param.grad.add_(grad)
+        return hvps
 
     @torch.no_grad()
     def logit_jacobian(self) -> Tuple[Tensor, ...]:
