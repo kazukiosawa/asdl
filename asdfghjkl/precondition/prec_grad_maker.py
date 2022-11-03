@@ -62,6 +62,12 @@ class PreconditionedGradientMaker(GradientMaker):
                                if isinstance(m, self._supported_modules)
                                and any(p.requires_grad for p in m.parameters())]
 
+    def state_dict(self) -> dict:
+        return self.state
+
+    def load_state_dict(self, state_dict: dict):
+        self.state['step'] = state_dict['step']
+
     def forward_and_backward(self):
         step = self.state['step']
 
@@ -129,23 +135,6 @@ class PreconditionedGradientMaker(GradientMaker):
         if step is None:
             step = self.state['step']
         return step < warmup_steps or (step - warmup_steps) % interval == 0
-
-
-class StatefulPGM(PreconditionedGradientMaker):
-    def __init__(self, model: nn.Module, config: PreconditionedGradientConfig):
-        super().__init__(model, config)
-
-    def state_dict(self) -> dict:
-        pass
-
-    def load_state_dict(self):
-        pass
-
-    def do_forward_and_backward(self, step=None) -> bool:
-        raise NotImplementedError
-
-    def _precondition(self):
-        pass
 
 
 def get_update_schedule(num_total_steps: int,
