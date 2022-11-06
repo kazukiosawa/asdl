@@ -77,11 +77,11 @@ class PreconditionedGradientMaker(GradientMaker):
             self.forward()
             self.backward()
         if self.do_update_curvature(step):
-            self._update_curvature()
+            self.update_curvature()
         if self.do_update_preconditioner(step):
-            self._update_preconditioner()
+            self.update_preconditioner()
 
-        self._precondition()
+        self.precondition()
 
         self._teardown()
 
@@ -92,13 +92,13 @@ class PreconditionedGradientMaker(GradientMaker):
     def _startup(self):
         pass
 
-    def _update_curvature(self):
+    def update_curvature(self):
         pass
 
-    def _update_preconditioner(self):
+    def update_preconditioner(self):
         pass
 
-    def _precondition(self):
+    def precondition(self):
         raise NotImplementedError
 
     def _teardown(self):

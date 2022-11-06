@@ -53,7 +53,7 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
         if step > 0 and self.do_update_preconditioner(step - 1):
             self._post_preconditioner_update()
 
-    def _update_preconditioner(self):
+    def update_preconditioner(self):
         model = self.model
         config = self.config
         if config.minibatch_hessian_action and self._A_inv_exists:
@@ -81,7 +81,7 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
             self._update_B_inv(cxt)
         self._restore_curr_model_args_kwargs()
 
-    def _precondition(self, vec_weight: Tensor = None, vec_bias: Tensor = None):
+    def precondition(self, vec_weight: Tensor = None, vec_bias: Tensor = None):
         config = self.config
         for module in self.modules:
             matrix: SymMatrix = getattr(module, config.bfgs_attr)

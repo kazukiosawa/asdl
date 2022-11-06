@@ -52,15 +52,15 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
     def do_forward_and_backward(self, step=None):
         return True
 
-    def _update_curvature(self):
+    def update_curvature(self):
         for preconditioner in self.preconditioners:
             preconditioner.update_statistics()
 
-    def _update_preconditioner(self):
+    def update_preconditioner(self):
         for preconditioner in self.preconditioners:
             preconditioner.update_preconditioners()
 
-    def _precondition(self):
+    def precondition(self):
         for preconditioner in self.preconditioners:
             preconditioner.precondition()
 

@@ -51,7 +51,7 @@ class SengGradientMaker(PreconditionedGradientMaker):
     def do_forward_and_backward(self, step=None):
         return not self.do_update_curvature(step)
 
-    def _update_curvature(self):
+    def update_curvature(self):
         config = self.config
         with extend(self.model, OP_SKETCHED_GRAM) as cxt:
             cxt.set_sketching_size(config.sketching_size)
@@ -65,7 +65,7 @@ class SengGradientMaker(PreconditionedGradientMaker):
         return rst
 
     @torch.no_grad()
-    def _precondition(self):
+    def precondition(self):
         data_size = self.config.data_size
         damping = self.config.damping
         for module, info in self._curvature_info.items():

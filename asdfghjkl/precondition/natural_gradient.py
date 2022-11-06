@@ -188,7 +188,7 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         return self.config.ema_decay != _invalid_ema_decay
 
     @nvtx_range('update_curvature')
-    def _update_curvature(self):
+    def update_curvature(self):
         config = self.config
         fisher_maker = self.fisher_maker
         scale = config.scale
@@ -208,7 +208,7 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
                                            )
 
     @nvtx_range('update_inv')
-    def _update_preconditioner(self, damping=None, module_name=None, kron=None, zero_curvature=False, partition_aware=False):
+    def update_preconditioner(self, damping=None, module_name=None, kron=None, zero_curvature=False, partition_aware=False):
         if not self.do_accumulate:
             return
 
@@ -266,7 +266,7 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
                     fisher.mul_(0)
 
     @nvtx_range('precondition')
-    def _precondition(self, vectors: ParamVector = None, grad_scale=None, use_inv=True):
+    def precondition(self, vectors: ParamVector = None, grad_scale=None, use_inv=True):
         if grad_scale is None:
             grad_scale = self.config.grad_scale
         for shape in _module_level_shapes:
