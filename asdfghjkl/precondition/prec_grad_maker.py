@@ -1,6 +1,7 @@
 import math
 import warnings
 from dataclasses import dataclass
+from typing import Dict
 
 import torch.nn as nn
 from .. import GradientMaker
@@ -58,9 +59,9 @@ class PreconditionedGradientMaker(GradientMaker):
                                                                   update_ratio=config.curvature_upd_ratio,
                                                                   warmup_ratio=config.curvature_warmup_ratio)
         self.state = dict(step=0)
-        self.target_modules = [m for m in model.modules()
-                               if isinstance(m, self._supported_modules)
-                               and any(p.requires_grad for p in m.parameters())]
+        self.target_modules: Dict[str, nn.Module] = {name: m for name, m in model.named_modules()
+                                                     if isinstance(m, self._supported_modules)
+                                                     and any(p.requires_grad for p in m.parameters())}
 
     def state_dict(self) -> dict:
         return self.state
