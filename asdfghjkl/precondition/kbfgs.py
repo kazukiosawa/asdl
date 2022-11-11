@@ -83,16 +83,19 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
             self._update_B_inv(cxt)
         self._restore_curr_model_args_kwargs()
 
-    def precondition(self, vec_weight: Tensor = None, vec_bias: Tensor = None):
+    def precondition(self):
+        if not self._B_inv_exists:
+            return
         config = self.config
-        for module in self.modules:
+        for module in self.module_dict.values():
             matrix: SymMatrix = getattr(module, config.bfgs_attr)
-            if vec_weight is None and module.weight.requires_grad:
-                vec_weight = module.weight.grad
+            vec_weight = module.weight.grad
             assert vec_weight is not None, 'gradient has not been calculated.'
             if module.bias is not None and module.bias.requires_grad:
                 vec_bias = module.bias.grad
                 assert vec_bias is not None, 'gradient has not been calculated.'
+            else:
+                vec_bias = None
             matrix.kron.mvp(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=True, inplace=True)
 
     def _record_model_args_kwargs(self):
