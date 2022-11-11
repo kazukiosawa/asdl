@@ -40,6 +40,7 @@ _supported_modules = (nn.Linear, nn.Conv2d)
 
 class SengGradientMaker(PreconditionedGradientMaker):
     _loss_reduction = 'sum'
+    _supported_classes = (nn.Linear, nn.Conv2d)
 
     def __init__(self, model: nn.Module, config: SengGradientConfig):
         super().__init__(model, config)

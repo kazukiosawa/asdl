@@ -32,6 +32,8 @@ class PsgdGradientConfig(PreconditionedGradientConfig):
 
 
 class PsgdGradientMaker(PreconditionedGradientMaker):
+    _supported_classes = (nn.Linear, nn.Conv2d)
+
     def __init__(self, model: nn.Module, config: PsgdGradientConfig):
         model = nn.ModuleList([m for m in model.modules() if isinstance(m, _supported_modules)])
         super().__init__(model, config)

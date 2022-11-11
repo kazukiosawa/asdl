@@ -47,6 +47,9 @@ class NaturalGradientConfig(PreconditionedGradientConfig):
 
 
 class NaturalGradientMaker(PreconditionedGradientMaker):
+    _supported_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d,
+                          nn.LayerNorm, nn.Embedding)
+
     def __init__(self, model, config: NaturalGradientConfig):
         from torch.nn.parallel import DistributedDataParallel as DDP
         assert not isinstance(model, DDP), f'{DDP} is not supported.'

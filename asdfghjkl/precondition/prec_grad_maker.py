@@ -1,7 +1,7 @@
 import math
 import warnings
 from dataclasses import dataclass
-from typing import Dict
+from typing import List, Any
 
 import torch.nn as nn
 from .. import GradientMaker
@@ -31,11 +31,11 @@ class PreconditionedGradientConfig:
     curvature_upd_ratio: float = None
     curvature_warmup_ratio: float = 0.
     curvature_interval_type = INTERVAL_CONSTANT
+    ignore_modules: List[Any] = None
 
 
 class PreconditionedGradientMaker(GradientMaker):
-    _supported_modules = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d,
-                          nn.LayerNorm, nn.Embedding)
+    _supported_classes = None
 
     def __init__(self, model: nn.Module, config: PreconditionedGradientConfig):
         super().__init__(model)
@@ -59,9 +59,29 @@ class PreconditionedGradientMaker(GradientMaker):
                                                                   update_ratio=config.curvature_upd_ratio,
                                                                   warmup_ratio=config.curvature_warmup_ratio)
         self.state = dict(step=0)
-        self.target_modules: Dict[str, nn.Module] = {name: m for name, m in model.named_modules()
-                                                     if isinstance(m, self._supported_modules)
-                                                     and any(p.requires_grad for p in m.parameters())}
+        self.module_dict = nn.ModuleDict({name: m for name, m in model.named_modules()
+                                          if self._is_supported(name, m)})
+
+    def _is_supported(self, module_name: str, module: nn.Module) -> bool:
+        if len(list(module.children())) > 0:
+            return False
+        if self._supported_classes is not None:
+            if not isinstance(module, self._supported_classes):
+                return False
+        if all(not p.requires_grad for p in module.parameters()):
+            return False
+        ignore_modules = self.config.ignore_modules
+        if ignore_modules is not None:
+            for ignore_module in ignore_modules:
+                if isinstance(ignore_module, type):
+                    if isinstance(module, ignore_module):
+                        return False
+                elif isinstance(ignore_module, str):
+                    if ignore_module in module_name:
+                        return False
+                elif ignore_module is module:
+                    return False
+        return True
 
     def state_dict(self) -> dict:
         return self.state

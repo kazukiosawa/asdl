@@ -34,6 +34,8 @@ class KronBfgsGradientConfig(PreconditionedGradientConfig):
 
 
 class KronBfgsGradientMaker(PreconditionedGradientMaker):
+    _supported_classes = (nn.Linear, nn.Conv2d)
+
     def __init__(self, model: nn.Module, config: KronBfgsGradientConfig):
         super().__init__(model, config)
         self.config: KronBfgsGradientConfig = config
