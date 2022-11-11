@@ -410,6 +410,8 @@ class Kron:
                 self._A_dim = self.A.shape[-1]
             elif self.A_inv is not None:
                 self._A_dim = self.A_inv.shape[-1]
+            else:
+                raise ValueError('A nor A_inv has not been set.')
         return self._A_dim
 
     @property
@@ -419,6 +421,8 @@ class Kron:
                 self._B_dim = self.B.shape[-1]
             elif self.B_inv is not None:
                 self._B_dim = self.B_inv.shape[-1]
+            else:
+                raise ValueError('B nor B_inv has not been set.')
         return self._B_dim
 
     @property
