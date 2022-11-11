@@ -210,5 +210,5 @@ def bfgs_inv_update_(H: Tensor, s: Tensor, y: Tensor):
     Hyst = torch.outer(Hy, s)  # Hys^t
     ytHy = torch.dot(y, Hy)  # y^tHy
     sst = torch.outer(s, s)  # ss^t
-    H.add_((sty + ytHy) @ sst / (sty ** 2))
+    H.add_(sst.mul_(sty + ytHy).div_(sty ** 2))
     H.sub_((Hyst + Hyst.T) / sty)
