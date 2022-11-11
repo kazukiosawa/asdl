@@ -61,6 +61,7 @@ class PreconditionedGradientMaker(GradientMaker):
         self.state = dict(step=0)
         self.module_dict = nn.ModuleDict({name: m for name, m in model.named_modules()
                                           if self._is_supported(name, m)})
+        self.device = next(self.module_dict.parameters()).device
 
     def _is_supported(self, module_name: str, module: nn.Module) -> bool:
         if len(list(module.children())) > 0:

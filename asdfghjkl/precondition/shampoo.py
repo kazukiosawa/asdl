@@ -47,7 +47,7 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
     def __init__(self, model, config: ShampooGradientConfig):
         super().__init__(model, config)
         self.preconditioners: List[Preconditioner] = [
-            Preconditioner(p, config) for p in model.parameters() if p.ndim > 1]
+            Preconditioner(p, config) for p in self.module_dict.parameters() if p.ndim > 1]
 
     def do_forward_and_backward(self, step=None):
         return True

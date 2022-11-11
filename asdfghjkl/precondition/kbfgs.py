@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from ..core import extend, module_wise_assignments
+from ..core import extend
 from ..operations import OP_MEAN_INPUTS, OP_SPATIAL_MEAN_OUTPUTS, OP_SPATIAL_MEAN_OUTGRADS,\
     OP_OUT_SPATIAL_SIZE, OP_COV_KRON, OP_BFGS_KRON_S_AS, OperationContext
 from ..utils import cholesky_inv
@@ -39,13 +39,12 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
     def __init__(self, model: nn.Module, config: KronBfgsGradientConfig):
         super().__init__(model, config)
         self.config: KronBfgsGradientConfig = config
-        self.modules = [m for m in module_wise_assignments(model, ignore_modules=config.ignore_modules)
-                        if isinstance(m, _supported_modules)]
         self._last_model_args = ()
         self._last_model_kwargs = dict()
         self._curr_model_args = ()
         self._curr_model_kwargs = dict()
         self._A_inv_exists = False
+        self._B_inv_exists = False
 
     def do_forward_and_backward(self, step=None):
         return not self.do_update_preconditioner(step)
@@ -56,14 +55,13 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
             self._post_preconditioner_update()
 
     def update_preconditioner(self):
-        model = self.model
         config = self.config
         if config.minibatch_hessian_action and self._A_inv_exists:
             op_names = (OP_BFGS_KRON_S_AS, OP_SPATIAL_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE)
         else:
             op_names = (OP_COV_KRON, OP_MEAN_INPUTS, OP_SPATIAL_MEAN_OUTPUTS, OP_OUT_SPATIAL_SIZE)
         op_names += (OP_SPATIAL_MEAN_OUTGRADS,)
-        with extend(model, *op_names, ignore_modules=config.ignore_modules) as cxt:
+        with extend(self.module_dict, *op_names) as cxt:
             rst = self.forward()
             self._update_A_inv(cxt)
             self._store_mean(cxt, is_forward=True)
@@ -76,12 +74,12 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
         self._restore_last_model_args_kwargs()
         # another forward and backward using the previous model_args, kwargs
         op_names = (OP_SPATIAL_MEAN_OUTPUTS, OP_SPATIAL_MEAN_OUTGRADS, OP_OUT_SPATIAL_SIZE)
-        kwargs = dict(ignore_modules=self.config.ignore_modules)
-        with extend(self.model, *op_names, **kwargs) as cxt:
+        with extend(self.module_dict, *op_names) as cxt:
             self.forward()
             self._loss.backward()
             self._update_B_inv(cxt)
         self._restore_curr_model_args_kwargs()
+        self._B_inv_exists = True
 
     def precondition(self):
         if not self._B_inv_exists:
@@ -114,7 +112,7 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
 
     def _update_A_inv(self, cxt: OperationContext):
         config = self.config
-        for module in self.modules:
+        for module in self.module_dict.values():
             damping = self._get_damping(cxt, module, is_A=True)
             bfgs = getattr(module, config.bfgs_attr, None)
             if config.minibatch_hessian_action and self._A_inv_exists:
@@ -143,7 +141,7 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
 
     def _store_mean(self, cxt: OperationContext, is_forward=True):
         config = self.config
-        for module in self.modules:
+        for module in self.module_dict.values():
             if is_forward:
                 setattr(module, config.mean_outputs_attr, cxt.spatial_mean_out_data(module))
             else:
@@ -151,7 +149,7 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
 
     def _update_B_inv(self, cxt: OperationContext):
         config = self.config
-        for module in self.modules:
+        for module in self.module_dict.values():
             damping = self._get_damping(cxt, module, is_A=False)
             bfgs = getattr(module, config.bfgs_attr)
             s = cxt.spatial_mean_out_data(module) - getattr(module, config.mean_outputs_attr)

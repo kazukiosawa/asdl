@@ -35,18 +35,16 @@ class PsgdGradientMaker(PreconditionedGradientMaker):
     _supported_classes = (nn.Linear, nn.Conv2d)
 
     def __init__(self, model: nn.Module, config: PsgdGradientConfig):
-        model = nn.ModuleList([m for m in model.modules() if isinstance(m, _supported_modules)])
         super().__init__(model, config)
         self.config: PsgdGradientConfig = config
-        self._device = next(model.parameters()).device
         self._init_cholesky_factors()
 
     def _init_cholesky_factors(self):
-        num_params = sum([p.numel() for p in self.model.parameters()])
+        num_params = sum([p.numel() for p in self.module_dict.parameters()])
         init = self.config.init
         init_scale = self.config.init_scale
         if init is None:
-            self.cholesky_factor = init_scale * torch.eye(num_params, device=self._device)
+            self.cholesky_factor = init_scale * torch.eye(num_params, device=self.device)
         else:
             assert init.shape == (num_params, num_params)
             self.cholesky_factor = init
@@ -55,7 +53,7 @@ class PsgdGradientMaker(PreconditionedGradientMaker):
         return not self.do_update_preconditioner(step)
 
     def update_preconditioner(self, retain_graph=False):
-        vs = tuple([torch.randn_like(p) for p in self.model.parameters()])
+        vs = tuple([torch.randn_like(p) for p in self.module_dict.parameters()])
         Hvs = self.loss_hvp(tangents=vs)
         self._update_preconditioner(list(vs), list(Hvs))
 
@@ -75,7 +73,7 @@ class PsgdGradientMaker(PreconditionedGradientMaker):
 
     @torch.no_grad()
     def precondition(self):
-        grads = [p.grad for p in self.model.parameters()]
+        grads = [p.grad for p in self.module_dict.parameters()]
         g = parameters_to_vector(grads)
         Q = self.cholesky_factor
         vector_to_parameters(Q.T.mv(Q.mv(g)), grads)
@@ -83,7 +81,7 @@ class PsgdGradientMaker(PreconditionedGradientMaker):
     def criterion(self, n_samples=1):
         total = 0
         for i in range(n_samples):
-            vs = tuple([torch.randn_like(p) for p in self.model.parameters()])
+            vs = tuple([torch.randn_like(p) for p in self.module_dict.parameters()])
             Hvs = self.loss_hvp(tangents=vs)
             total += self._criterion(vs, Hvs)
         return total / n_samples
@@ -103,18 +101,18 @@ class KronPsgdGradientMaker(PsgdGradientMaker):
     def _init_cholesky_factors(self):
         init_scale = self.config.init_scale
         self.cholesky_factors = {}
-        for module in self.model.children():
+        for module in self.module_dict.children():
             in_dim = int(np.prod(module.weight.shape[1:]))
             out_dim = module.weight.shape[0]
             if module.bias is not None:
                 in_dim += 1
-            Ql = init_scale * torch.eye(out_dim, device=self._device)
-            Qr = init_scale * torch.eye(in_dim, device=self._device)
+            Ql = init_scale * torch.eye(out_dim, device=self.device)
+            Qr = init_scale * torch.eye(in_dim, device=self.device)
             self.cholesky_factors[module] = (Ql, Qr)
 
     @torch.no_grad()
     def _update_preconditioner(self, dxs: List[Tensor], dgs: List[Tensor]):
-        for module in self.model.children():
+        for module in self.module_dict.children():
             dX = dxs.pop(0)
             dG = dgs.pop(0)
             if isinstance(module, nn.Conv2d):
@@ -130,8 +128,8 @@ class KronPsgdGradientMaker(PsgdGradientMaker):
 
     @torch.no_grad()
     def precondition(self):
-        grads = [p.grad for p in self.model.parameters()]
-        for module in self.model.children():
+        grads = [p.grad for p in self.module_dict.parameters()]
+        for module in self.module_dict.children():
             G = grads.pop(0)
             if isinstance(module, nn.Conv2d):
                 G = G.flatten(start_dim=1)
