@@ -70,6 +70,3 @@ rst_prolog = '''
 html_css_files = [
     'css/custom.css',
 ]
-
-# Generate docs for config schema
-generate_docs()
