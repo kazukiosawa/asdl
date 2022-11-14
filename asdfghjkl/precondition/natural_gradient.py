@@ -50,6 +50,12 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
     _supported_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d,
                           nn.LayerNorm, nn.Embedding)
 
+    """
+    GradientMaker for calculating the `Natural Gradient <https://ieeexplore.ieee.org/document/6790500>`
+    
+    Args:
+        model (torch.nn.Module)
+    """
     def __init__(self, model, config: NaturalGradientConfig):
         from torch.nn.parallel import DistributedDataParallel as DDP
         assert not isinstance(model, DDP), f'{DDP} is not supported.'

@@ -12,3 +12,4 @@ ASDL offers:
    :maxdepth: 2
 
    setup/quickstart
+   precondition
