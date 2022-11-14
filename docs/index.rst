@@ -8,6 +8,7 @@ ASDL offers:
 
 
 .. toctree::
-   :caption User Guide
+   :caption: User Guide
+   :maxdepth: 2
 
     setup/quickstart
