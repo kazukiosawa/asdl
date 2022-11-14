@@ -21,6 +21,8 @@ extensions = [
     'sphinx.ext.intersphinx',
 ]
 
+add_module_names = False
+
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),
     'sphinx': ('https://www.sphinx-doc.org/en/master/', None),
