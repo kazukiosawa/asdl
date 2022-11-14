@@ -9,6 +9,5 @@ ASDL offers:
 
 .. toctree::
    :caption User Guide
-   :maxdepth: 2
 
     setup/quickstart
