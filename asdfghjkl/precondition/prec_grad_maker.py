@@ -59,7 +59,7 @@ class PreconditionedGradientMaker(GradientMaker):
                                                                   update_ratio=config.curvature_upd_ratio,
                                                                   warmup_ratio=config.curvature_warmup_ratio)
         self.state = dict(step=0)
-        self.module_dict = nn.ModuleDict({name: m for name, m in model.named_modules()
+        self.module_dict = nn.ModuleDict({name.replace('.', '_'): m for name, m in model.named_modules()
                                           if self._is_supported(name, m)})
         self.device = next(self.module_dict.parameters()).device
 
