@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Tuple, List
 import itertools
 
@@ -7,10 +6,10 @@ import numpy as np
 import torch
 import torch.nn.parameter
 from torch.nn.parameter import Parameter
-from .prec_grad_maker import PreconditionedGradientMaker, PreconditionedGradientConfig
+from .prec_grad_maker import PreconditionedGradientMaker, PreconditioningConfig
 
 
-__all__ = ['ShampooGradientMaker', 'ShampooGradientConfig']
+__all__ = ['ShampooGradientMaker']
 
 _invalid = -1
 
@@ -27,24 +26,18 @@ performed by a torch.optim.Optimizer (e.g., torch.optim.SGD).
 """
 
 
-@dataclass
-class ShampooGradientConfig(PreconditionedGradientConfig):
-    damping: float = 1e-12
-    init_scale: float = 1e-12
-    inverse_exponent: int = _invalid # fixed exponent for preconditioner (default: invalid)
-    ema_decay: float = _invalid
-    # Block size for large layers (default: invalid).
-    # Block size = 1 ==> AdaGrad (Don't do this, extremely inefficient!)
-    # Block size should be as large as feasible under memory/time constraints.
-    block_size: int = _invalid
-    # Automatic shape interpretation (for eg: [4, 3, 1024, 512] would result in
-    # 12 x [1024, 512] L and R statistics. Disabled by default which results in
-    # Shampoo constructing statistics [4, 4], [3, 3], [1024, 1024], [512, 512].
-    best_effort_shape_interpretation: bool = False
+#    # Block size for large layers (default: invalid).
+#    # Block size = 1 ==> AdaGrad (Don't do this, extremely inefficient!)
+#    # Block size should be as large as feasible under memory/time constraints.
+#    block_size: int = _invalid
+#    # Automatic shape interpretation (for eg: [4, 3, 1024, 512] would result in
+#    # 12 x [1024, 512] L and R statistics. Disabled by default which results in
+#    # Shampoo constructing statistics [4, 4], [3, 3], [1024, 1024], [512, 512].
+#    best_effort_shape_interpretation: bool = False
 
 
 class ShampooGradientMaker(PreconditionedGradientMaker):
-    def __init__(self, model, config: ShampooGradientConfig):
+    def __init__(self, model, config: PreconditioningConfig):
         super().__init__(model, config)
         self.preconditioners: List[Preconditioner] = [
             Preconditioner(p, config) for p in self.module_dict.parameters() if p.ndim > 1]
@@ -66,24 +59,27 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
 
 
 class Preconditioner:
-    def __init__(self, param: Parameter, config: ShampooGradientConfig):
+    def __init__(self, param: Parameter, config: PreconditioningConfig,
+                 block_size: int = _invalid, inverse_exponent: int = _invalid,
+                 best_effort_shape_interpretation: bool = False, init_scale: float = 1e-12):
         self.config = config
         self.param = param
         self._transformed_shape = param.shape
-        if config.best_effort_shape_interpretation:
-            self._transformed_shape = _merge_small_dims(param.shape, config.block_size)
+        if best_effort_shape_interpretation:
+            self._transformed_shape = _merge_small_dims(param.shape, block_size)
 
-        self._partitioner = BlockPartitioner(self._transformed_shape, config.block_size)
+        self._partitioner = BlockPartitioner(self._transformed_shape, block_size)
         shapes = self._partitioner.kronecker_factor_shapes()
         ndim = len(self._transformed_shape)
         device = param.device
         assert ndim > 1
         self.statistics = [
-            config.init_scale * torch.eye(s[0], device=device) for s in shapes
+            init_scale * torch.eye(s[0], device=device) for s in shapes
         ]
         self.preconditioners = [
             torch.eye(s[0], device=device) for s in shapes
         ]
+        self.inverse_exponent = inverse_exponent
 
     def update_statistics(self):
         """
@@ -104,7 +100,7 @@ class Preconditioner:
 
     def update_preconditioners(self):
         """Compute L^{-1/exp} for each stats matrix L."""
-        exp = self.config.inverse_exponent
+        exp = self.inverse_exponent
         if exp == _invalid:
             exp = 2 * len(self._transformed_shape)
         damping = self.config.damping

@@ -4,24 +4,15 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 from torch import Tensor
-from .prec_grad_maker import PreconditionedGradientMaker, PreconditionedGradientConfig
+from .prec_grad_maker import PreconditionedGradientMaker, PreconditioningConfig
 from ..core import extend
 from ..utils import cholesky_inv
 from ..operations import OP_SKETCHED_GRAM
 
 
-__all__ = ['SengGradientMaker', 'SengGradientConfig']
+__all__ = ['SengGradientMaker']
 
 _invalid_data_size = -1
-
-
-@dataclass
-class SengGradientConfig(PreconditionedGradientConfig):
-    data_size: int = _invalid_data_size
-    damping: float = 1.e-7
-    subsample_size: int = None
-    sketching_size: int = 256
-    truncated_rank: int = 16
 
 
 @dataclass
@@ -42,11 +33,14 @@ class SengGradientMaker(PreconditionedGradientMaker):
     _loss_reduction = 'sum'
     _supported_classes = (nn.Linear, nn.Conv2d)
 
-    def __init__(self, model: nn.Module, config: SengGradientConfig):
+    def __init__(self, model: nn.Module, config: PreconditioningConfig,
+                 subsample_size: int = None, sketching_size: int = 256, truncated_rank: int = 16):
         super().__init__(model, config)
-        self.config: SengGradientConfig = config
         assert config.data_size != _invalid_data_size, 'data_size is not set.'
         self._curvature_info: Dict[nn.Module, SketchedEmpFisherInfo] = {}
+        self.subsample_size = subsample_size
+        self.sketching_size = sketching_size
+        self.truncated_rank = truncated_rank
 
     def do_forward_and_backward(self, step=None):
         return not self.do_update_curvature(step)
@@ -54,8 +48,8 @@ class SengGradientMaker(PreconditionedGradientMaker):
     def update_curvature(self):
         config = self.config
         with extend(self.model, OP_SKETCHED_GRAM) as cxt:
-            cxt.set_sketching_size(config.sketching_size)
-            cxt.set_truncated_rank(config.truncated_rank)
+            cxt.set_sketching_size(self.sketching_size)
+            cxt.set_truncated_rank(self.truncated_rank)
             rst = self.forward()
             self.backward()
             for module in self.module_dict.values():

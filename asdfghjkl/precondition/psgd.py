@@ -1,5 +1,4 @@
 from typing import List, Iterable, Tuple
-from dataclasses import dataclass
 
 import numpy as np
 
@@ -8,11 +7,10 @@ import torch.nn as nn
 from torch.nn.utils import vector_to_parameters
 from torch import Tensor
 from torch.linalg import solve_triangular
-from .prec_grad_maker import PreconditionedGradientMaker, PreconditionedGradientConfig
+from .prec_grad_maker import PreconditionedGradientMaker, PreconditioningConfig
 
-_supported_modules = (nn.Linear, nn.Conv2d)
 
-__all__ = ['PsgdGradientConfig', 'PsgdGradientMaker', 'KronPsgdGradientMaker']
+__all__ = ['PsgdGradientMaker', 'KronPsgdGradientMaker']
 
 
 def parameters_to_vector(parameters: Iterable[Tensor]) -> Tensor:
@@ -24,30 +22,20 @@ def parameters_to_vector(parameters: Iterable[Tensor]) -> Tensor:
     return torch.cat(vec)
 
 
-@dataclass
-class PsgdGradientConfig(PreconditionedGradientConfig):
-    precond_lr: float = 0.01
-    init_scale: float = 1.
-    init: torch.Tensor = None
-
-
 class PsgdGradientMaker(PreconditionedGradientMaker):
     _supported_classes = (nn.Linear, nn.Conv2d)
 
-    def __init__(self, model: nn.Module, config: PsgdGradientConfig):
+    def __init__(self, model: nn.Module, config: PreconditioningConfig,
+                 precond_lr: float = 0.01, init_scale: float = 1.):
         super().__init__(model, config)
-        self.config: PsgdGradientConfig = config
+        self.precond_lr = precond_lr
+        self.init_scale = init_scale
         self._init_cholesky_factors()
 
     def _init_cholesky_factors(self):
         num_params = sum([p.numel() for p in self.module_dict.parameters()])
-        init = self.config.init
-        init_scale = self.config.init_scale
-        if init is None:
-            self.cholesky_factor = init_scale * torch.eye(num_params, device=self.device)
-        else:
-            assert init.shape == (num_params, num_params)
-            self.cholesky_factor = init
+        init_scale = self.init_scale
+        self.cholesky_factor = init_scale * torch.eye(num_params, device=self.device)
 
     def do_forward_and_backward(self, step=None):
         return not self.do_update_preconditioner(step)
@@ -67,7 +55,7 @@ class PsgdGradientMaker(PreconditionedGradientMaker):
         b = solve_triangular(Q.T, dx.unsqueeze(-1), upper=False).squeeze()
 
         grad = torch.triu(torch.outer(a, a) - torch.outer(b, b))
-        lr = self.config.precond_lr / (grad.abs().max() + eps)
+        lr = self.precond_lr / (grad.abs().max() + eps)
 
         Q.sub_(grad.mm(Q), alpha=float(lr))
 
@@ -99,7 +87,7 @@ class PsgdGradientMaker(PreconditionedGradientMaker):
 
 class KronPsgdGradientMaker(PsgdGradientMaker):
     def _init_cholesky_factors(self):
-        init_scale = self.config.init_scale
+        init_scale = self.init_scale
         self.cholesky_factors = {}
         for module in self.module_dict.children():
             in_dim = int(np.prod(module.weight.shape[1:]))
@@ -121,7 +109,7 @@ class KronPsgdGradientMaker(PsgdGradientMaker):
             if module.bias is not None:
                 dX = torch.cat([dX, dxs.pop(0).unsqueeze(-1)], dim=1)
                 dG = torch.cat([dG, dgs.pop(0).unsqueeze(-1)], dim=1)
-            update_precond_kron(*self.cholesky_factors[module], dX, dG, step=self.config.precond_lr)
+            update_precond_kron(*self.cholesky_factors[module], dX, dG, step=self.precond_lr)
             del dX, dG
         assert len(dxs) == 0
         assert len(dgs) == 0

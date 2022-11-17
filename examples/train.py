@@ -20,10 +20,7 @@ OPTIM_KFAC = 'kfac'
 OPTIM_SMW_NGD = 'smw_ngd'
 OPTIM_FULL_PSGD = 'full_psgd'
 OPTIM_KRON_PSGD = 'kron_psgd'
-OPTIM_NEWTON = 'newton'
-OPTIM_ABS_NEWTON = 'abs_newton'
 OPTIM_KBFGS = 'kbfgs'
-OPTIM_CURVE_BALL = 'curve_ball'
 OPTIM_SENG = 'seng'
 
 
@@ -160,35 +157,19 @@ if __name__ == '__main__':
     else:
         optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
+    config = asdl.PreconditioningConfig(data_size=args.batch_size, damping=args.damping)
+
     if args.optim == OPTIM_KFAC:
-        config = asdl.NaturalGradientConfig(data_size=args.batch_size,
-                                            damping=args.damping)
         grad_maker = asdl.KfacGradientMaker(model, config)
     elif args.optim == OPTIM_SMW_NGD:
-        config = asdl.SmwEmpNaturalGradientConfig(data_size=args.batch_size,
-                                                  damping=args.damping)
         grad_maker = asdl.SmwEmpNaturalGradientMaker(model, config)
     elif args.optim == OPTIM_FULL_PSGD:
-        grad_maker = asdl.PsgdGradientMaker(model)
+        grad_maker = asdl.PsgdGradientMaker(model, config)
     elif args.optim == OPTIM_KRON_PSGD:
-        grad_maker = asdl.KronPsgdGradientMaker(model)
-    elif args.optim == OPTIM_NEWTON:
-        config = asdl.NewtonGradientConfig(damping=args.damping)
-        grad_maker = asdl.NewtonGradientMaker(model, config)
-    elif args.optim == OPTIM_ABS_NEWTON:
-        config = asdl.NewtonGradientConfig(damping=args.damping, absolute=True)
-        grad_maker = asdl.NewtonGradientMaker(model, config)
+        grad_maker = asdl.KronPsgdGradientMaker(model, config)
     elif args.optim == OPTIM_KBFGS:
-        config = asdl.KronBfgsGradientConfig(data_size=args.batch_size,
-                                             damping=args.damping)
         grad_maker = asdl.KronBfgsGradientMaker(model, config)
-    elif args.optim == OPTIM_CURVE_BALL:
-        config = asdl.CurveBallGradientConfig(damping=args.damping)
-        grad_maker = asdl.CurveBallGradientMaker(model, config)
     elif args.optim == OPTIM_SENG:
-        config = asdl.SengGradientConfig(data_size=args.batch_size,
-                                         damping=args.damping)
-
         grad_maker = asdl.SengGradientMaker(model, config)
     else:
         grad_maker = asdl.GradientMaker(model)

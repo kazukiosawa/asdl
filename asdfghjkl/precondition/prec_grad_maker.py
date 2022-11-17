@@ -7,7 +7,7 @@ import torch.nn as nn
 from .. import GradientMaker
 
 
-__all__ = ['PreconditionedGradientMaker', 'PreconditionedGradientConfig',
+__all__ = ['PreconditionedGradientMaker', 'PreconditioningConfig',
            'get_update_schedule', 'INTERVAL_CONSTANT', 'INTERVAL_STEP', 'INTERVAL_LINEAR', 'INTERVAL_TYPES']
 
 INTERVAL_CONSTANT = 'constant'
@@ -16,10 +16,11 @@ INTERVAL_LINEAR = 'linear'
 INTERVAL_TYPES = [INTERVAL_CONSTANT, INTERVAL_STEP, INTERVAL_LINEAR]
 
 _default_interval = 1
+_invalid_value = -1
 
 
 @dataclass
-class PreconditionedGradientConfig:
+class PreconditioningConfig:
     num_total_steps: int = None
     preconditioner_upd_interval: int = _default_interval
     preconditioner_warmup_steps: int = 0
@@ -31,13 +32,16 @@ class PreconditionedGradientConfig:
     curvature_upd_ratio: float = None
     curvature_warmup_ratio: float = 0.
     curvature_interval_type = INTERVAL_CONSTANT
+    data_size: int = _invalid_value
+    damping: float = 1.e-7
+    ema_decay: float = _invalid_value
     ignore_modules: List[Any] = None
 
 
 class PreconditionedGradientMaker(GradientMaker):
     _supported_classes = None
 
-    def __init__(self, model: nn.Module, config: PreconditionedGradientConfig):
+    def __init__(self, model: nn.Module, config: PreconditioningConfig):
         super().__init__(model)
         self.config = config
 

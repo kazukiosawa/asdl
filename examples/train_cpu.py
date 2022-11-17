@@ -13,10 +13,7 @@ OPTIM_KFAC = 'kfac'
 OPTIM_SMW_NGD = 'smw_ngd'
 OPTIM_FULL_PSGD = 'full_psgd'
 OPTIM_KRON_PSGD = 'kron_psgd'
-OPTIM_NEWTON = 'newton'
-OPTIM_ABS_NEWTON = 'abs_newton'
 OPTIM_KBFGS = 'kbfgs'
-OPTIM_CURVE_BALL = 'curve_ball'
 OPTIM_SENG = 'seng'
 OPTIM_SHAMPOO = 'shampoo'
 
@@ -76,40 +73,21 @@ if __name__ == '__main__':
     else:
         optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
 
+    config = asdl.PreconditioningConfig(data_size=batch_size, damping=damping)
+
     if args.optim == OPTIM_KFAC:
-        config = asdl.NaturalGradientConfig(data_size=batch_size,
-                                            damping=damping)
         grad_maker = asdl.KfacGradientMaker(model, config)
     elif args.optim == OPTIM_SMW_NGD:
-        config = asdl.SmwEmpNaturalGradientConfig(data_size=batch_size,
-                                                  damping=damping)
         grad_maker = asdl.SmwEmpNaturalGradientMaker(model, config)
     elif args.optim == OPTIM_FULL_PSGD:
-        config = asdl.PsgdGradientConfig()
         grad_maker = asdl.PsgdGradientMaker(model, config)
     elif args.optim == OPTIM_KRON_PSGD:
-        config = asdl.PsgdGradientConfig()
         grad_maker = asdl.KronPsgdGradientMaker(model, config)
-    elif args.optim == OPTIM_NEWTON:
-        config = asdl.NewtonGradientConfig(damping=damping)
-        grad_maker = asdl.NewtonGradientMaker(model, config)
-    elif args.optim == OPTIM_ABS_NEWTON:
-        config = asdl.NewtonGradientConfig(damping=damping, absolute=True)
-        grad_maker = asdl.NewtonGradientMaker(model, config)
     elif args.optim == OPTIM_KBFGS:
-        config = asdl.KronBfgsGradientConfig(data_size=batch_size,
-                                             damping=damping)
         grad_maker = asdl.KronBfgsGradientMaker(model, config)
-    elif args.optim == OPTIM_CURVE_BALL:
-        config = asdl.CurveBallGradientConfig(damping=damping)
-        grad_maker = asdl.CurveBallGradientMaker(model, config)
     elif args.optim == OPTIM_SENG:
-        config = asdl.SengGradientConfig(data_size=batch_size,
-                                         damping=damping)
-
         grad_maker = asdl.SengGradientMaker(model, config)
     elif args.optim == OPTIM_SHAMPOO:
-        config = asdl.ShampooGradientConfig(damping=damping)
         grad_maker = asdl.ShampooGradientMaker(model, config)
     else:
         raise ValueError(f'Invalid optim: {args.optim}')
