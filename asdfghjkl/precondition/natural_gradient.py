@@ -321,10 +321,11 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
             vec_weight.data.mul_(grad_scale)
             if vec_bias is not None:
                 vec_bias.data.mul_(grad_scale)
-        kwargs = dict(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=use_inv, inplace=True)
-        if shape == SHAPE_KFE:
-            kwargs['eps'] = self.config.damping
-        matrix.mvp(**kwargs)
+        if not use_inv or matrix.has_inv:
+            kwargs = dict(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=use_inv, inplace=True)
+            if shape == SHAPE_KFE:
+                kwargs['eps'] = self.config.damping
+            matrix.mvp(**kwargs)
 
     def is_module_for_inv_and_precondition(self, module: nn.Module):
         if module not in self.modules_for_curvature:

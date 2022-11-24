@@ -14,6 +14,7 @@ __all__ = [
     'get_n_cols_by_tril',
     'SymMatrix',
     'Kron',
+    'KFE',
     'Diag',
     'UnitWise'
 ]
@@ -404,6 +405,10 @@ class Kron:
         return self.B is not None
 
     @property
+    def has_inv(self):
+        return self.A_inv is not None and self.B_inv is not None
+
+    @property
     def A_dim(self):
         if self._A_dim is None:
             if self.A is not None:
@@ -486,15 +491,16 @@ class Kron:
 
     def update_inv(self, damping=_default_damping, calc_A_inv=True, calc_B_inv=True, eps=1e-7, replace=False):
         assert self.has_data
+        damping_A = damping_B = damping
         if self.has_A and self.has_B:
             A_eig_mean = (self.A.trace() if self.A_is_square else torch.sum(self.A ** 2)) / self.A_dim
             B_eig_mean = (self.B.trace() if self.B_is_square else torch.sum(self.B ** 2)) / self.B_dim
             pi = torch.sqrt(A_eig_mean / B_eig_mean)
-            r = damping**0.5
-            damping_A = max(r * pi, eps)
-            damping_B = max(r / pi, eps)
-        else:
-            damping_A = damping_B = damping
+            if pi != 0 and pi != float('inf'):
+                r = damping**0.5
+                damping_A = max(r * pi, eps)
+                damping_B = max(r / pi, eps)
+
 
         if calc_A_inv:
             assert self.has_A
@@ -549,6 +555,11 @@ class KFE:
     @property
     def has_scale(self):
         return self.scale is not None
+    
+    @property
+    def has_inv(self):
+        # KFE does not calculate the inverse matrix.
+        return False
 
     def update_inv(self, *args, **kwargs):
         pass
@@ -619,6 +630,10 @@ class UnitWise:
     @property
     def has_data(self):
         return self.data is not None
+
+    @property
+    def has_inv(self):
+        return self.inv is not None
 
     def mul_(self, value):
         if self.has_data:
@@ -737,6 +752,13 @@ class Diag:
     @property
     def has_bias(self):
         return self.bias is not None
+
+    @property
+    def has_inv(self):
+        has_inv = self.weight_inv is not None
+        if self.has_bias:
+            has_inv = has_inv and self.bias_inv is not None
+        return has_inv
 
     def mul_(self, value):
         if self.has_weight:
