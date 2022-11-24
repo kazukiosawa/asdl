@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import torch
 import torch.nn as nn
@@ -438,13 +438,14 @@ class Operation:
         raise NotImplementedError
 
     def cov_kron_damping(self, A, B, eps=1.e-7):
-        damping = self._damping
+        damping_A = damping_B = damping = self._damping
         A_eig_mean = (A.trace() if A.shape[0] == A.shape[1] else (A ** 2).sum()) / A.shape[-1]
         B_eig_mean = (B.trace() if B.shape[0] == B.shape[1] else (B ** 2).sum()) / B.shape[-1]
         pi = torch.sqrt(A_eig_mean / B_eig_mean)
-        r = damping**0.5
-        damping_A = max(r * pi, eps)
-        damping_B = max(r / pi, eps)
+        if pi != 0 and pi != float('inf'):
+            r = damping**0.5
+            damping_A = max(r * pi, eps)
+            damping_B = max(r / pi, eps)
         return damping_A, damping_B
 
     @staticmethod
@@ -698,7 +699,7 @@ class OperationContext:
         cvp = torch.einsum('ni,n->i', bg, bgtv).mul_(scale)
         self.accumulate_result(module, cvp, OP_FULL_CVP)
 
-    def load_op_in_out(self, module) -> (Operation, List[torch.Tensor], List[torch.Tensor]):
+    def load_op_in_out(self, module) -> Tuple[Operation, List[torch.Tensor], List[torch.Tensor]]:
         operation = self.get_operation(module)
         in_data = self.in_data(module)
         out_grads = self.out_grads(module)
