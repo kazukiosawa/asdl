@@ -14,6 +14,7 @@ __all__ = [
     'get_n_cols_by_tril',
     'SymMatrix',
     'Kron',
+    'KFE',
     'Diag',
     'UnitWise'
 ]
@@ -404,6 +405,10 @@ class Kron:
         return self.B is not None
 
     @property
+    def has_inv(self):
+        return self.A_inv is not None and self.B_inv is not None
+
+    @property
     def A_dim(self):
         if self._A_dim is None:
             if self.A is not None:
@@ -549,6 +554,11 @@ class KFE:
     @property
     def has_scale(self):
         return self.scale is not None
+    
+    @property
+    def has_inv(self):
+        # KFE does not calculate the inverse matrix.
+        return False
 
     def update_inv(self, *args, **kwargs):
         pass
@@ -619,6 +629,10 @@ class UnitWise:
     @property
     def has_data(self):
         return self.data is not None
+
+    @property
+    def has_inv(self):
+        return self.inv is not None
 
     def mul_(self, value):
         if self.has_data:
@@ -737,6 +751,13 @@ class Diag:
     @property
     def has_bias(self):
         return self.bias is not None
+
+    @property
+    def has_inv(self):
+        has_inv = self.weight_inv is not None
+        if self.has_bias:
+            has_inv = has_inv and self.bias_inv is not None
+        return has_inv
 
     def mul_(self, value):
         if self.has_weight:
