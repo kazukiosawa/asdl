@@ -6,9 +6,9 @@ import torch.nn.functional as F
 import torchvision
 from torchvision import transforms
 
-from asdfghjkl import KfacGradientMaker, data_loader_gradient
-from asdfghjkl import PseudoBatchLoaderGenerator
-from asdfghjkl.fisher import LOSS_CROSS_ENTROPY
+from asdl import KfacGradientMaker, data_loader_gradient
+from asdl import PseudoBatchLoaderGenerator
+from asdl import LOSS_CROSS_ENTROPY
 
 
 class Net(nn.Module):

@@ -10,7 +10,7 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-import asdfghjkl as asdl
+import asdl
 
 import wandb
 

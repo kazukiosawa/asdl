@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.utils.data.dataset import Subset
 import torchvision
 from torchvision import transforms
-import asdfghjkl as asdl
+import asdl
 
 
 class Net(nn.Module):

@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-import asdfghjkl as asdl
+import asdl
 
 OPTIM_SGD = 'sgd'
 OPTIM_ADAM = 'adam'

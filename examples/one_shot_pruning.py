@@ -10,9 +10,9 @@ from torch.utils.data import DataLoader
 import torchvision
 from torchvision.datasets import MNIST
 
-from asdfghjkl.vector import ParamVector
-from asdfghjkl import KfacGradientMaker
-from asdfghjkl import SHAPE_KRON
+from asdl import ParamVector
+from asdl import KfacGradientMaker
+from asdl import SHAPE_KRON
 
 MODEL_URL = "https://github.com/Cecilwang/models/raw/main/net-mnist-0.9320"
 
