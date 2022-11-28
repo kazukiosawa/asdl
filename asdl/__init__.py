@@ -11,7 +11,6 @@ from .fisher import *
 from .hessian import *
 from .precondition import *
 from .kernel import *
-from .fr import *
 from .counter import *
 
 
