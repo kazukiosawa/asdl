@@ -20,7 +20,8 @@ __all__ = [
 
 def original_requires_grad(module=None, param_name=None, param=None):
     if param is None:
-        assert module is not None and param_name is not None
+        if module is None or param_name is None:
+            raise ValueError('Both module and param_name have to be set.')
         param = getattr(module, param_name, None)
     return param is not None and getattr(param, _REQUIRES_GRAD_ATTR)
 
@@ -48,9 +49,12 @@ def skip_param_grad(model, disable=False):
 
 
 def im2col_2d(x: torch.Tensor, conv2d: nn.Module):
-    assert x.ndimension() == 4  # n x c x h_in x w_in
-    assert isinstance(conv2d, (nn.Conv2d, nn.ConvTranspose2d))
-    assert conv2d.dilation == (1, 1)
+    if x.ndim != 4:  # n x c x h_in x w_in
+        raise ValueError(f'x.ndim has to be 4. Got {x.ndim}.')
+    if not isinstance(conv2d, (nn.Conv2d, nn.ConvTranspose2d)):
+        raise TypeError(f'conv2d has to be {nn.Conv2d} or {nn.ConvTranspose2d}. Got {type(conv2d)}.')
+    if conv2d.dilation != (1, 1):
+        raise ValueError(f'conv2d.dilation has to be (1, 1). Got {conv2d.dilation}.')
 
     ph, pw = conv2d.padding if conv2d.padding != 'valid' else (0, 0)
     kh, kw = conv2d.kernel_size
@@ -68,8 +72,10 @@ def im2col_2d(x: torch.Tensor, conv2d: nn.Module):
 
 
 def im2col_2d_slow(x: torch.Tensor, conv2d: nn.Module):
-    assert x.ndimension() == 4  # n x c x h_in x w_in
-    assert isinstance(conv2d, (nn.Conv2d, nn.ConvTranspose2d))
+    if x.ndim != 4:  # n x c x h_in x w_in
+        raise ValueError(f'x.ndim has to be 4. Got {x.ndim}.')
+    if not isinstance(conv2d, (nn.Conv2d, nn.ConvTranspose2d)):
+        raise TypeError(f'conv2d has to be {nn.Conv2d} or {nn.ConvTranspose2d}. Got {type(conv2d)}.')
 
     padding = conv2d.padding if conv2d.padding != 'valid' else (0, 0)
     # n x c(k_h)(k_w) x (h_out)(w_out)
@@ -140,8 +146,9 @@ class PseudoBatchLoaderGenerator:
                  drop_last=None):
         if batch_size is None:
             batch_size = base_data_loader.batch_size
-        assert pseudo_batch_size % batch_size == 0, f'pseudo_batch_size ({pseudo_batch_size}) ' \
-                                                    f'needs to be divisible by batch_size ({batch_size})'
+        if pseudo_batch_size % batch_size != 0:
+            raise ValueError(f'pseudo_batch_size ({pseudo_batch_size}) '
+                             f'needs to be divisible by batch_size ({batch_size})')
         if drop_last is None:
             drop_last = base_data_loader.drop_last
         base_dataset = base_data_loader.dataset

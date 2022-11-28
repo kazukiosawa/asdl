@@ -84,16 +84,19 @@ class Operation:
             requires_grad = module.weight.requires_grad
             if hasattr(module, 'bias') and module.bias is not None:
                 requires_grad = requires_grad or module.bias.requires_grad
-            assert requires_grad, f'One of weight or bias has to require grad (module: {module}).'
+            if not requires_grad:
+                raise ValueError(f'One of weight or bias has to require grad (module: {module}).')
         self._module = module
         self._model_for_kernel = model_for_kernel
         if isinstance(op_names, str):
             op_names = [op_names]
-        assert isinstance(op_names, list)
+        if not isinstance(op_names, list):
+            raise TypeError(f'op_names has to be a list. Got {type(op_names)}.')
         # remove duplicates
         op_names = set(op_names)
         for name in op_names:
-            assert name in ALL_OPS, f'Invalid operation name: {name}.'
+            if name not in ALL_OPS:
+                raise ValueError(f'Invalid operation name: {name}. {ALL_OPS} are supported.')
         if any(op_name in BWD_OPS_WITH_INPUTS for op_name in op_names):
             op_names.add(OP_SAVE_INPUTS)
             op_names.add(OP_SAVE_OUTPUTS)
@@ -235,8 +238,10 @@ class Operation:
                     self.accumulate_result(cholesky_inv(cov, damping), OP_COV, 'inv')
             elif op_name == OP_CVP:
                 _, _, batch_g = self.collect_batch_grads(in_data, out_grads)
-                assert vector is not None
-                assert vector.ndim == 1
+                if vector is None:
+                    raise ValueError('vector is not set.')
+                if vector.ndim != 1:
+                    raise ValueError(f'vector.ndim has to be 1. Got {vector.ndim}.')
                 batch_gtv = batch_g.mul(vector.unsqueeze(0)).sum(dim=1)
                 cvp = torch.einsum('ni,n->i', batch_g, batch_gtv).mul_(cov_scale)
                 if original_requires_grad(module, 'weight'):
@@ -292,8 +297,8 @@ class Operation:
                                        OP_COV_KFE, 'scale')
             elif op_name in [OP_COV_UNIT_WISE, OP_COV_UNIT_WISE_INV]:
                 if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm)):
-                    assert original_requires_grad(module, 'weight') and original_requires_grad(module, 'bias'), \
-                        f'Both weight and bias have to require grad for {OP_COV_UNIT_WISE} (module: {module}).'
+                    if original_requires_grad(module, 'weight') or original_requires_grad(module, 'bias'):
+                        raise ValueError(f'Both weight and bias have to require grad for {OP_COV_UNIT_WISE} (module: {module}).')
                 elif original_requires_grad(module, 'bias'):
                     in_data = self.extend_in_data(in_data)
                 cov = self.cov_unit_wise(module, in_data, out_grads).mul_(cov_scale)
@@ -318,7 +323,8 @@ class Operation:
                     else:
                         self.accumulate_result(1/(cov+damping), OP_COV_DIAG, 'bias_inv')
             elif op_name == OP_GRAM_HADAMARD:
-                assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.'
+                if self._model_for_kernel is None:
+                    raise ValueError(f'model_for_kernel needs to be set for {OP_GRAM_HADAMARD}.')
                 n_data = out_grads.shape[0]
                 n1 = self._model_for_kernel.kernel.shape[0]
                 if n_data == n1:
@@ -334,7 +340,8 @@ class Operation:
                     B = self.gram_B(module, out_grads[:n1], out_grads[n1:])
                 self._model_for_kernel.kernel += B.mul(A)
             elif op_name == OP_GRAM_DIRECT:
-                assert self._model_for_kernel is not None, f'model_for_kernel needs to be set for {OP_GRAM_DIRECT}.'
+                if self._model_for_kernel is None:
+                    raise ValueError(f'model_for_kernel needs to be set for {OP_GRAM_DIRECT}.')
                 n_data = in_data.shape[0]
                 n1 = self._model_for_kernel.kernel.shape[0]
 
@@ -385,8 +392,8 @@ class Operation:
             batch_grads_w = self.batch_grads_weight(module, in_data, out_grads)
         if original_requires_grad(module, 'bias'):
             batch_grads_b = self.batch_grads_bias(module, out_grads)
-        assert batch_grads_w is not None or batch_grads_b is not None, \
-            f'At least one of weight or bias has to require grad (module: {module}).'
+        if batch_grads_w is None and batch_grads_b is None:
+            raise ValueError(f'At least one of weight or bias has to require grad (module: {module}).')
 
         grads = [batch_grads_w, batch_grads_b]
         batch_g = torch.cat([g.flatten(start_dim=1) for g in grads if g is not None], dim=1)
@@ -615,7 +622,9 @@ class OperationContext:
     def calc_grad(self, module, scale=None):
         operation, in_data, out_grads = self.load_op_in_out(module)
         if scale is not None:
-            assert scale.shape[0] == out_grads.shape[0]
+            if scale.shape[0] != out_grads.shape[0]:
+                raise ValueError(f'scale and out_grads have to have the same first dimension. '
+                                 f'Got {scale.shape[0]} and {out_grads.shape[0]}')
             out_grads.mul_(scale.unsqueeze(-1))
         if original_requires_grad(module, 'weight'):
             grad = operation.grad_weight(module, in_data, out_grads)
@@ -694,7 +703,8 @@ class OperationContext:
         bg = self.full_batch_grads(module)
         if bg is None:
             return
-        assert bg.shape[1] == vector.shape[0]
+        if bg.shape[1] != vector.shape[0]:
+            raise ValueError(f'bg.shape[1] ({bg.shape[1]}) does not mathc vector.shape[0] ({vector.shape[0]}).')
         bgtv = bg.mul(vector.unsqueeze(0)).sum(dim=1)
         cvp = torch.einsum('ni,n->i', bg, bgtv).mul_(scale)
         self.accumulate_result(module, cvp, OP_FULL_CVP)
@@ -856,7 +866,8 @@ class OperationContext:
                 operation.accumulate_result(matrix.diag.bias, OP_COV_DIAG, 'bias')
 
     def register_full_symmatrix(self, module, matrix: SymMatrix):
-        assert matrix.has_data
+        if not matrix.has_data:
+            raise ValueError('data do not exist')
         operation = self.get_operation(module)
         operation.accumulate_result(matrix.data, OP_FULL_COV, 'data')
 

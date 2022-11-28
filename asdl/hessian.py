@@ -67,8 +67,8 @@ class HessianMaker(GradientMaker):
         # remove duplicates
         hessian_shapes = set(hessian_shapes)
         for hshape in hessian_shapes:
-            assert hshape in _supported_shapes, f'Invalid hessian_shape: {hshape}. ' \
-                                                f'hessian_shape must be in {_supported_shapes}.'
+            if hshape not in _supported_shapes:
+                raise ValueError(f'Invalid hessian_shape: {hshape}. {_supported_shapes} are supported.')
         save_attr = self.config.tmp_hessian_attr
         params = [p for p in model.parameters() if p.requires_grad]
 
@@ -218,7 +218,8 @@ def _hessian(output, inputs, out=None, allow_unused=False, create_graph=False, s
     Compute the Hessian of `output` with respect to `inputs`
     hessian((x * y).sum(), [x, y])
     '''
-    assert output.ndimension() == 0
+    if output.ndim != 0:
+        raise ValueError(f'Number of output dimensions has to be 0. Got {output.ndim}')
 
     if torch.is_tensor(inputs):
         inputs = [inputs]

@@ -30,7 +30,9 @@ class CurveBallGradientMaker(PreconditionedGradientMaker):
         config = self.config
         hvps = self.loss_hvp(tangents=self._momentum)
         grads = [p.grad for p in self._params]
-        assert len(hvps) == len(grads) == len(self._momentum)
+        if not (len(hvps) == len(grads) == len(self._momentum)):
+            raise ValueError(f'len(hvps), len(grads), and len(momentum) have to be the same. '
+                             f'Got {len(hvps)}, {len(grads)}, and {len(self._momentum)}')
         for p, m, hvp, grad in zip(self._params, self._momentum, hvps, grads):
             hvp.add_(m, alpha=config.damping)
             grad_of_quadratic = hvp + grad

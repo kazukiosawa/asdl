@@ -92,7 +92,8 @@ def save_batch_gradient(model, closure, return_outputs=False):
     
 def jacobian(model, x):
     f = model(x)
-    assert f.ndim == 2  # (n, c)
+    if f.ndim != 2:  # (n, c)
+        raise ValueError(f'Number of output dimensions has to be 2. Got {f.ndim}')
     n, c = f.shape
     rst = []
     for i in range(c):

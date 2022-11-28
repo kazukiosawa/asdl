@@ -111,8 +111,10 @@ class KronPsgdGradientMaker(PsgdGradientMaker):
                 dG = torch.cat([dG, dgs.pop(0).unsqueeze(-1)], dim=1)
             update_precond_kron(*self.cholesky_factors[module], dX, dG, step=self.precond_lr)
             del dX, dG
-        assert len(dxs) == 0
-        assert len(dgs) == 0
+        if len(dxs) != 0:
+            raise ValueError('dxs are still remaining.')
+        if len(dgs) != 0:
+            raise ValueError('dgs are still remaining.')
 
     @torch.no_grad()
     def precondition(self):
@@ -130,7 +132,8 @@ class KronPsgdGradientMaker(PsgdGradientMaker):
             else:
                 module.weight.grad.copy_(G.view_as(module.weight))
             del G
-        assert len(grads) == 0
+        if len(grads) != 0:
+            raise ValueError('grads are still remaining')
 
 
 """

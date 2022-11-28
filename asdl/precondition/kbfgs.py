@@ -73,10 +73,12 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
         for module in self.module_dict.values():
             matrix: SymMatrix = getattr(module, self.bfgs_attr)
             vec_weight = module.weight.grad
-            assert vec_weight is not None, 'gradient has not been calculated.'
+            if vec_weight is None:
+                raise ValueError('gradient has not been calculated.')
             if module.bias is not None and module.bias.requires_grad:
                 vec_bias = module.bias.grad
-                assert vec_bias is not None, 'gradient has not been calculated.'
+                if vec_bias is None:
+                    raise ValueError('gradient has not been calculated.')
             else:
                 vec_bias = None
             matrix.kron.mvp(vec_weight=vec_weight, vec_bias=vec_bias, use_inv=True, inplace=True)
@@ -119,7 +121,8 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
                 mean_in_data = cxt.mean_in_data(module)
                 s = torch.mv(bfgs.kron.A_inv, mean_in_data)
                 y = torch.mv(A, s) + damping * s
-            assert bfgs is not None, f'Matrix for {module} is not calculated yet.'
+            if bfgs is None:
+                raise ValueError(f'Matrix for {module} is not calculated yet.')
             H = bfgs.kron.A_inv
             bfgs_inv_update_(H, s, y)
         self._A_inv_exists = True
@@ -163,8 +166,10 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
 
 
 def powell_lm_damping_(H: Tensor, s: Tensor, y: Tensor, mu1: float, mu2: float):
-    assert 0 < mu1 < 1
-    assert mu2 > 0
+    if mu1 <= 0 or 1 <= mu1:
+        raise ValueError(f'mu1 has to be in (0, 1). Got {mu1}.')
+    if mu2 <= 0:
+        raise ValueError(f'mu2 has to be > 0. Got {mu2}.')
     Hy = torch.mv(H, y)
     ytHy = torch.dot(y, Hy)
     sty = torch.dot(s, y)
@@ -182,12 +187,16 @@ def bfgs_inv_update_(H: Tensor, s: Tensor, y: Tensor):
     https://en.wikipedia.org/wiki/Broyden%E2%80%93Fletcher%E2%80%93Goldfarb%E2%80%93Shanno_algorithm
     """
     msg = f'H has to be a {Tensor} containing a symmetric matrix.'
-    assert H.ndim == 2 and torch.all(H.T == H), msg
+    if H.ndim != 2 or torch.any(H.T != H):
+        raise ValueError(msg)
     d1, d2 = H.shape
-    assert d1 == d2, msg
+    if d1 != d2:
+        raise ValueError(msg)
     msg = f' has to be a {Tensor} containing a vector of same dimension as H.'
-    assert s.ndim == 1 and s.shape[0] == d1, 's' + msg
-    assert y.ndim == 1 and y.shape[0] == d1, 'y' + msg
+    if s.ndim != 1 or s.shape[0] != d1:
+        raise ValueError('s' + msg)
+    if y.ndim != 1 or y.shape[0] != d1:
+        raise ValueError('s' + msg)
 
     sty = torch.dot(s, y)  # s^ty
     Hy = torch.mv(H, y)  # Hy

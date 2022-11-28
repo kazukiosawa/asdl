@@ -83,8 +83,10 @@ class DummyObject:
 @dataclass
 class VmapInfo:
     def __init__(self, *args, **kwargs):
-        assert [v is None or isinstance(v, int) for v in args]
-        assert [v is None or isinstance(v, int) for v in kwargs.values()]
+        if any(v is not None and not isinstance(v, int) for v in args):
+            raise TypeError('Every argument in args has to be int or None.')
+        if any(v is not None and not isinstance(v, int) for v in kwargs.values()):
+            raise TypeError('Every argument in kwargs has to be int or None.')
         self.args_batch_dims: Tuple[int] = args
         self.kwargs_batch_dims: Dict[str, int] = kwargs
 
@@ -126,13 +128,13 @@ class GradientMaker:
         self._loss_vmap_info = VmapInfo(*args, **kwargs)
 
     def setup_loss_repr(self, dummy_loss: DummyObject):
-        assert isinstance(dummy_loss, DummyObject), \
-            f'dummy_loss has to be an {DummyObject}, not {type(dummy_loss)}.'
+        if not isinstance(dummy_loss, DummyObject):
+            raise TypeError(f'dummy_loss has to be an {DummyObject}, not {type(dummy_loss)}.')
         self._dummy_loss = dummy_loss
 
     def setup_logits_repr(self, dummy_logits: DummyObject):
-        assert isinstance(dummy_logits, DummyObject), \
-            f'dummy_loss has to be an {DummyObject}, not {type(dummy_logits)}.'
+        if not isinstance(dummy_loss, DummyObject):
+            raise TypeError(f'dummy_loss has to be an {DummyObject}, not {type(dummy_loss)}.')
         self._dummy_logits = dummy_logits
 
     @property
@@ -144,18 +146,17 @@ class GradientMaker:
         return self._loss
 
     def call_model(self) -> Any:
-        assert self._model_fn is not None, \
-            'model_fn is not set. Call setup_model_call() ' \
-            'before calling forward_and_backward().'
+        if self._model_fn is None:
+            raise ValueError('model_fn is not set. Call setup_model_call() before calling forward_and_backward().')
         self._model_output = self._model_fn(*self._model_args, **self._model_kwargs)
         self._logits = self._dummy_logits.eval(self._model_output)
         return self._model_output
 
     def call_loss(self) -> Tensor:
         if self._loss_fn is None:
-            assert self._dummy_loss is not None, 'Neither loss_fn nor loss_repr is not set. ' \
-                                                 'Call setup_loss_call() or setup_loss_repr() ' \
-                                                 'before calling forward_and_backward().'
+            if self._dummy_loss is None:
+                raise ValueError('Neither loss_fn nor loss_repr is not set. '
+                                 'Call setup_loss_call() or setup_loss_repr() before calling forward_and_backward().')
             self._loss = self._dummy_loss.eval(self._model_output)
         else:
             self._loss = self._call_loss_fn()
@@ -207,7 +208,8 @@ class GradientMaker:
 
         reduction = self._loss_reduction
         if reduction is not None:
-            assert has_reduction(self._loss_fn), 'loss_fn has to have "reduction" option'
+            if not has_reduction(self._loss_fn):
+                raise AttributeError('loss_fn has to have "reduction" option')
             if isinstance(self._loss_fn, nn.Module):
                 original_reduction = self._loss_fn.reduction
                 self._loss_fn.reduction = reduction
@@ -220,12 +222,13 @@ class GradientMaker:
         return call()
 
     def _get_stateless_model_fn(self):
-        assert _is_functorch_available, \
-            'functorch is not available. Follow the installation guide in https://pytorch.org/functorch/stable/.'
-        assert self._model_fn is not None, \
-            'model_fn is not set. Call setup_model_call().'
-        assert isinstance(self._model_fn, nn.Module), \
-            'model_fn has to be an object of torch.nn.Module.'
+        if not _is_functorch_available:
+            raise EnvironmentError('functorch is not available. Follow the installation guide '
+                                   'in https://pytorch.org/functorch/stable/.')
+        if self._model_fn is None:
+            raise ValueError('model_fn is not set. Call setup_model_call().')
+        if not isinstance(self._model_fn, nn.Module):
+            raise TypeError('model_fn has to be an object of torch.nn.Module.')
         model_fn, params, buffers = ft.make_functional_with_buffers(self._model_fn)
         return model_fn, params, buffers
 
@@ -247,7 +250,8 @@ class GradientMaker:
         return logit_fn_params_only, params
 
     def _get_stateless_model_loss_fn_params_only(self, return_output=False):
-        assert self._loss_reduction != 'none'
+        if self._loss_reduction == 'none':
+            raise ValueError('Stateless loss function is not available when _loss_reduction == "none".')
 
         model_fn_params_only, params = self._get_stateless_model_fn_params_only()
 
@@ -267,7 +271,8 @@ class GradientMaker:
         return grad_fn, params
 
     def _get_random_tangents(self):
-        assert isinstance(self._model_fn, nn.Module)
+        if not isinstance(self._model_fn, nn.Module):
+            raise TypeError(f'_model_fn has to be {nn.Module}. Got {type(self._model_fn)}.')
         return tuple([torch.randn_like(p) for p in self._model_fn.parameters()])
 
     @torch.no_grad()
@@ -297,9 +302,15 @@ class GradientMaker:
                     else:
                         batch_dims += (None,)
             else:
-                assert len(ref_args) == len(vmap_info.args_batch_dims)
-                assert len(ref_kwargs) == len(vmap_info.kwargs_batch_dims)
-                assert all(k in vmap_info.kwargs_batch_dims for k in ref_kwargs.keys())
+                if len(ref_args) != len(vmap_info.args_batch_dims):
+                    raise ValueError(f'len(ref_args) ({len(ref_args)}) does not match '
+                                     f'args_batch_dims ({len(vmap_info.args_batch_dims)}).')
+                if len(ref_kwargs) != len(vmap_info.kwargs_batch_dims):
+                    raise ValueError(f'len(ref_kwargs) ({len(ref_kwargs)}) does not match '
+                                     f'kwargs_batch_dims ({len(vmap_info.kwargs_batch_dims)}).')
+                for k in ref_kwargs.keys():
+                    if k not in vmap_info.kwargs_batch_dims:
+                        raise ValueError(f'Key {k} is not in kwargs_batch_dims')
                 batch_dims += vmap_info.args_batch_dims
                 for key in ref_kwargs.keys():
                     batch_dims += (vmap_info.kwargs_batch_dims[key],)
@@ -315,7 +326,9 @@ class GradientMaker:
 
         def split_args(src_args: Tuple, ref_args: Tuple, ref_kwargs: OrderedDict[str, Any]):
             # split src_args into (args, kwargs) with the same structure as (ref_args, ref_kwargs)
-            assert len(src_args) == len(ref_args) + len(ref_kwargs.values())
+            if len(src_args) != len(ref_args) + len(ref_kwargs):
+                raise ValueError(f'len(src_args) ({len(src_args)}) does not match '
+                                 f'len(ref_args)+len(ref_kwargs) ({len(ref_args) + len(ref_kwargs)})')
             args = tuple([src_args[i] for i in range(len(ref_args))])
             kwargs = {}
             for i, key in enumerate(ref_kwargs.keys()):
@@ -382,12 +395,14 @@ class GradientMaker:
 
     def fvp(self, loss_type, data_size=None, tangents=None, return_model_output=False) \
             -> Union[Tuple[Tensor, ...], Tuple[Tuple[Tensor, ...], Tuple[Tensor, ...]]]:
-        assert loss_type in [LOSS_MSE, LOSS_CROSS_ENTROPY]
+        if loss_type not in [LOSS_MSE, LOSS_CROSS_ENTROPY]:
+            raise ValueError(f'Invalid loss type: {loss_type}. {[LOSS_CROSS_ENTROPY, LOSS_MSE]} are supported.')
         logit_fn, params = self._get_stateless_logit_fn_params_only()
         if tangents is None:
             tangents = self._get_random_tangents()
         y, jvp = ft.jvp(logit_fn, (params,), (tangents,))
-        assert y.ndim == 2  # n x c
+        if y.ndim != 2:  # n x c
+            raise ValueError(f'Number of output dimensions has to be 2. Got {y.ndim}.')
         if data_size is None:
             data_size = y.shape[0]
         if loss_type == LOSS_CROSS_ENTROPY:

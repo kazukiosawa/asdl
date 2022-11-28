@@ -72,7 +72,8 @@ class Preconditioner:
         shapes = self._partitioner.kronecker_factor_shapes()
         ndim = len(self._transformed_shape)
         device = param.device
-        assert ndim > 1
+        if ndim <= 1:
+            raise ValueError(f'len(self._transformed_shape) has to be > 1. Got {ndim}.')
         self.statistics = [
             init_scale * torch.eye(s[0], device=device) for s in shapes
         ]
@@ -195,7 +196,8 @@ class BlockPartitioner:
     def partition(self, tensor):
         """Partition tensor into blocks."""
 
-        assert tensor.shape == self._shape
+        if tensor.shape != self._shape:
+            raise ValueError(f'tensor shape ({tensor.shape}) does not match self._shape ({self._shape}).')
         tensors = [tensor]
         for (i, sizes) in self._split_sizes:
             tensors_local = []
@@ -216,7 +218,8 @@ class BlockPartitioner:
                     torch.cat(partitions[ind:ind + n], axis=i))
                 ind += n
             partitions = partial_merged_tensors
-        assert len(partitions) == 1
+        if len(partitions) > 1:
+            raise ValueError(f'len(partitions) has to be 1. Got {len(partitions)}.')
         return partitions[0]
 
 

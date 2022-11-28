@@ -12,21 +12,25 @@ class ParamVector:
     def __init__(self, params: Iterable[torch.Tensor], values: Union[torch.Tensor, Iterable[torch.Tensor]]):
         if not isinstance(params, list):
             params = list(params)
-        assert len(params) > 0, 'params cannot be empty.'
+        if len(params) == 0:
+            raise ValueError('params cannot be empty.')
         self.vectors: OrderedDict[torch.Tensor, torch.Tensor] = OrderedDict()
 
         if isinstance(values, torch.Tensor):
-            assert values.ndim == 1
+            if values.ndim != 1:
+                raise ValueError(f'values.ndim has to be 1. Got {values.ndim}.')
             pointer = 0
             for p in params:
                 numel = p.numel()
                 v = values[pointer: pointer + numel]
                 self.vectors[p] = v.view_as(p)
                 pointer += numel
-            assert pointer == values.numel()
+            if pointer != values.numel():
+                raise ValueError(f'pointer has to be {values.numel()}. Got {pointer}.')
         elif isinstance(values, Iterable):
             for p, v in zip(params, values):
-                assert p.shape == v.shape
+                if p.shape != v.shape:
+                    raise ValueError(f'param.shape ({p.shape}) does not match value.shape ({v.shape}).')
                 self.vectors[p] = v
         else:
             raise TypeError(f'Invalid vectors type: {type(values)}')
@@ -56,8 +60,8 @@ class ParamVector:
         return self
 
     def extend(self, other):
-        assert not set(self.params()) & set(other.params()), \
-            'self.params and other.params cannot have a common element.'
+        if set(self.params()) & set(other.params()):
+            raise ValueError('self.params and other.params cannot have a common element.')
         self.vectors.update(other.vectors)
 
     def mul(self, value):

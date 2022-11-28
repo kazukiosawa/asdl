@@ -70,7 +70,8 @@ def extend(model,
 
 
 def no_centered_cov(model: nn.Module, shapes, ignore_modules=None, cvp=False, vectors: ParamVector = None, stream: Stream = None, calc_inv=False) -> OperationContext:
-    assert not (cvp and calc_inv), 'cvp and calc_inv cannot be True at the same time.'
+    if cvp and calc_inv:
+        raise ValueError('cvp and calc_inv cannot be True at the same time.')
     shape_to_op = {
         SHAPE_FULL: OP_BATCH_GRADS,  # full
         SHAPE_LAYER_WISE: OP_COV_INV if calc_inv else OP_COV,  # layer-wise block-diagonal
@@ -179,8 +180,8 @@ def module_wise_assignments(model, *assign_rules, ignore_modules=None, map_rule=
         bn1 ['mapped4']
         bn2 ['mapped3']
     """
-    assert all(isinstance(rule, (str, tuple)) for rule in assign_rules), \
-        f'every assign rule has to be {str} or {tuple}.'
+    if any(not isinstance(rule, (str, tuple)) for rule in assign_rules):
+        raise TypeError(f'every assign rule has to be {str} or {tuple}.')
 
     if ignore_modules is None:
         ignore_modules = []
@@ -196,12 +197,13 @@ def module_wise_assignments(model, *assign_rules, ignore_modules=None, map_rule=
             value = rule
             common_asgmts.append(map_rule(value))
         else:
-            assert len(rule) >= 2, f'Tuple length has to be >= 2. Given: {rule}.'
+            if len(rule) < 2:
+                raise ValueError(f'Tuple length has to be >= 2. Given: {rule}.')
             key, values = rule[0], rule[1:]
-            assert all(isinstance(value, str) for value in values), \
-                f'All values have to be {str}. Given: {values}.'
-            assert key not in specified_asgmts, \
-                f'({key}, _) is already assigned.'
+            if any(not isinstance(value, str) for value in values):
+                raise TypeError(f'All values have to be {str}. Given: {values}.')
+            if key in specified_asgmts:
+                raise ValueError(f'({key}, _) is already assigned.')
             specified_asgmts[key] = [map_rule(value) for value in values]
 
     for name, module in named_supported_modules(model):

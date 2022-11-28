@@ -40,14 +40,15 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
                  module_partitions: List[List[nn.Module]] = None,
                  n_mc_samples: int = 1, var: float = 1, seed: int = None):
         from torch.nn.parallel import DistributedDataParallel as DDP
-        assert not isinstance(model, DDP), f'{DDP} is not supported.'
+        if isinstance(model, DDP):
+            raise TypeError(f'{DDP} is not supported.')
         del DDP
         super().__init__(model, config)
         if isinstance(config.fisher_shape, str):
             config.fisher_shape = [config.fisher_shape]
         if not self.do_accumulate:
-            assert config.curvature_upd_ratio is None, \
-                'curvature_upd_ratio cannot be specified when no curvature accumulation is performed.'
+            if config.curvature_upd_ratio is not None:
+                raise ValueError('curvature_upd_ratio cannot be specified when no curvature accumulation is performed.')
 
         self.named_modules_for_curvature = []
         self.modules_for_curvature = []
@@ -55,8 +56,9 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         for name, module, shapes in module_wise_assignments(self.module_dict,
                                                             *config.fisher_shape,
                                                             named=True):
-            assert len(shapes) == 1, f'Each module has to be assigned one Fisher shape. ' \
-                                     f'{name} is assigned {len(shapes)} shapes.'
+            if len(shapes) != 1:
+                raise ValueError(f'Each module has to be assigned one Fisher shape. '
+                                 f'{name} is assigned {len(shapes)} shapes.')
             self.modules_for_curvature.append(module)
             self.named_modules_for_curvature.append((name, module))
             self.shape_for[module] = shapes[0]
@@ -64,11 +66,14 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         self._named_modules_for = {}
 
         if module_partitions is not None:
-            assert dist.is_initialized(), 'torch.distributed has to be initialized ' \
-                                          'when module_partitions is specified.'
+            if not dist.is_initialized():
+                raise EnvironmentError('torch.distributed has to be initialized when module_partitions is set.')
             world_size = dist.get_world_size(sync_group)
-            assert len(module_partitions) == world_size
-            assert all(len(module_partitions[0]) == len(module_partitions[i]) for i in range(1, world_size))
+            if len(module_partitions) != world_size:
+                raise ValueError(f'Number of partitions has to be world_size. Got {len(module_partitions)}')
+            if any(len(module_partitions[0]) != len(module_partitions[i]) for i in range(1, world_size)):
+                raise ValueError(f'Number of members in each partition has to be the same. '
+                                 f'Got {[len(module_partitions[i]) for i in range(world_size)]}')
             self.partitioned_modules = [m for partition in module_partitions for m in partition]
             self.num_modules_per_partition = len(module_partitions[0])
         else:
@@ -91,8 +96,11 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         self.grad_scale = grad_scale
 
         if sync_group is not None:
-            assert sync_group_ranks is not None
-            assert sync_group.size() == len(sync_group_ranks)
+            if sync_group_ranks is None:
+                raise ValueError('sync_group_ranks is not set.')
+            if sync_group.size() != len(sync_group_ranks):
+                raise ValueError(f'sync_group.size() ({sync_group.size()}) does not match '
+                                 f'len(sync_group_ranks) ({len(sync_group_ranks)}).')
         self.sync_group = sync_group
         self.sync_group_ranks = sync_group_ranks
 
@@ -261,10 +269,12 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         params = [p for p in self.parameters_for(SHAPE_FULL)]
         if len(params) > 0:
             fisher = self._get_full_fisher()
-            assert fisher is not None, f'Fisher of shape {SHAPE_FULL} has not been calculated.'
+            if fisher is None:
+                raise ValueError(f'Fisher of shape {SHAPE_FULL} has not been calculated.')
             if vectors is None:
                 vectors = ParamVector(params, [p.grad for p in params])
-            assert vectors is not None, 'gradient has not been calculated.'
+            if vectors is None:
+                raise ValueError('gradient has not been calculated.')
             if grad_scale != 1:
                 vectors.mul_(grad_scale)
             fisher.mvp(vectors=vectors, use_inv=use_inv, inplace=True)
@@ -282,16 +292,20 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         if vectors is not None:
             vec_weight = vectors.get_vector_by_param(module.weight, None)
             vec_bias = vectors.get_vector_by_param(module.bias, None)
-        assert shape is not None, f'No shape is assigned to module: {module}.'
+        if shape is None:
+            raise ValueError(f'No shape is assigned to module: {module}.')
         matrix = self._get_module_symmatrix(module, shape)
-        assert matrix is not None, f'Matrix of shape {shape} for module {module} has not been calculated.'
+        if matrix is None:
+            raise ValueError(f'Matrix of shape {shape} for module {module} has not been calculated.')
         if vec_weight is None and module.weight.requires_grad:
             vec_weight = module.weight.grad
-        assert vec_weight is not None, 'gradient has not been calculated.'
+        if vec_weight is None:
+            raise ValueError(f'weight gradient for module {module} has not been calculated.')
         if _bias_requires_grad(module):
             if vec_bias is None:
                 vec_bias = module.bias.grad
-            assert vec_bias is not None, 'gradient has not been calculated.'
+            if vec_bias is None:
+                raise ValueError(f'bias gradient for module {module} has not been calculated.')
         if grad_scale != 1:
             vec_weight.data.mul_(grad_scale)
             if vec_bias is not None:
@@ -346,7 +360,8 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
 
     def reduce_scatter_curvature(self, kron=None, diag=None, with_grad=False):
         module_partitions = self.module_partitions
-        assert module_partitions is not None, 'module_partitions is not specified.'
+        if module_partitions is None:
+            raise ValueError('module_partitions is not set.')
         handles = []
         for shape in _module_level_shapes:
             keys_list = self._keys_list_from_shape(shape, kron=kron, diag=diag)
@@ -360,7 +375,8 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
 
     def reduce_curvature(self, module_name, kron=None, diag=None, with_grad=False):
         module_partitions = self.module_partitions
-        assert module_partitions is not None, 'module_partitions is not specified.'
+        if module_partitions is None:
+            raise ValueError('module_partitions is not set.')
         try:
             module = next(m for name, m in self.named_modules_for_curvature if name == module_name)
             if module not in self.partitioned_modules:
@@ -411,14 +427,16 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         elif shape in [SHAPE_KRON, SHAPE_SWIFT_KRON]:
             if kron is None:
                 kron = ['A', 'B']
-            assert all(A_or_B in ['A', 'B'] for A_or_B in kron)
+            if any(A_or_B not in ['A', 'B'] for A_or_B in kron):
+                raise ValueError(f'kron has to be a list of "A" or "B". Got {kron}')
             return [['kron', A_or_B] for A_or_B in kron]
         elif shape == SHAPE_UNIT_WISE:
             return [['unit', 'data']]
         elif shape == SHAPE_DIAG:
             if diag is None:
                 diag = ['weight', 'bias']
-            assert all(w_or_b in ['weight', 'bias'] for w_or_b in diag)
+            if any(w_or_b not in ['weight', 'bias'] for w_or_b in diag):
+                raise ValueError(f'diag has to be a list of "weight" or "bias". Got {diag}')
             return [['diag', w_or_b] for w_or_b in diag]
 
     def reduce_scatter_grad(self, async_op=False):
@@ -428,15 +446,20 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         self._scatter_or_gather_grad('gather', async_op=async_op)
 
     def _scatter_or_gather_grad(self, scatter_or_gather, async_op=False):
-        assert dist.is_initialized()
+        if not dist.is_initialized():
+            raise EnvironmentError('torch.distributed is not initialized.')
         group = self.sync_group
         world_size = dist.get_world_size(group)
         rank = dist.get_rank(group)
         module_partitions = self.module_partitions
-        assert module_partitions is not None, 'module_partitions is not specified.'
-        assert len(module_partitions) == world_size
+        if module_partitions is None:
+            raise ValueError('module_partitions is not set.')
+        if len(module_partitions) != world_size:
+            raise ValueError(f'Number of partitions has to be world_size. Got {len(module_partitions)}')
+        if any(len(module_partitions[0]) != len(module_partitions[i]) for i in range(1, world_size)):
+            raise ValueError(f'Number of members in each partition has to be the same. '
+                             f'Got {[len(module_partitions[i]) for i in range(world_size)]}')
         num_modules_per_partition = len(module_partitions[0])
-        assert all(len(module_partitions[i]) == num_modules_per_partition for i in range(1, world_size))
         for i in range(num_modules_per_partition):
             tensor_list = []
             grads_list = []
@@ -463,7 +486,8 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
                         vector_to_parameters(tensor_list[j], grads_list[j])
 
     def all_reduce_undivided_grad(self, async_op=False):
-        assert dist.is_initialized()
+        if not dist.is_initialized():
+            raise EnvironmentError('torch.distributed is not initialized.')
         module_list = nn.ModuleList([m for m in self.modules_for_curvature if m not in self.partitioned_modules])
         self._all_reduce_grad(module_list, async_op=async_op)
 
@@ -495,7 +519,8 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
             grads = self.grads.pop(0)
             packed_grads = self.packed_grads.pop(0)
             if isinstance(grads, list) and isinstance(grads[0], list):
-                assert isinstance(packed_grads, list)
+                if not isinstance(packed_grads, list):
+                    raise TypeError(f'packed_grads has to be list. Got {type(packed_grads)}.')
                 for p, g in zip(packed_grads, grads):
                     vector_to_parameters(p, g)
             else:
@@ -527,13 +552,15 @@ class EkfacGradientMaker(NaturalGradientMaker):
     def __init__(self, model, config: PreconditioningConfig, *args, **kwargs):
         config.fisher_shape = [SHAPE_KFE]
         super().__init__(model, config, *args, **kwargs)
-        assert self.fisher_type == FISHER_EMP, f'{EkfacGradientMaker} supports only {FISHER_EMP}.'
+        if self.fisher_type != FISHER_EMP:
+            raise ValueError(f'{EkfacGradientMaker} supports only {FISHER_EMP}.')
 
     def _update_preconditioner(self, *args, **kwargs):
         pass
 
     def _precondition(self, vectors: ParamVector = None, grad_scale=None, use_inv=False):
-        assert not use_inv, 'EKFAC does not calculate the inverse matrix.'
+        if use_inv:
+            raise ValueError('EKFAC does not calculate the inverse matrix.')
         super().precondition(vectors=vectors, grad_scale=grad_scale, use_inv=False)
 
 

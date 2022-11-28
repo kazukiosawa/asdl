@@ -36,7 +36,8 @@ class SengGradientMaker(PreconditionedGradientMaker):
     def __init__(self, model: nn.Module, config: PreconditioningConfig,
                  subsample_size: int = None, sketching_size: int = 256, truncated_rank: int = 16):
         super().__init__(model, config)
-        assert config.data_size != _invalid_data_size, 'data_size is not set.'
+        if config.data_size == _invalid_data_size:
+            raise ValueError('data_size is not set.')
         self._curvature_info: Dict[nn.Module, SketchedEmpFisherInfo] = {}
         self.subsample_size = subsample_size
         self.sketching_size = sketching_size

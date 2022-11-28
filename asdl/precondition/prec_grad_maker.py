@@ -168,13 +168,19 @@ def get_update_schedule(num_total_steps: int,
                         warmup_ratio: float = 0.,
                         interval_type: str = INTERVAL_CONSTANT,
                         reverse=False):
-    assert num_total_steps > 0
-    assert 0 <= update_ratio <= 1
+    if num_total_steps <= 0:
+        raise ValueError(f'num_total_steps has to be > 0. Got {num_total_steps}.')
+    if update_ratio < 0 or 1 < update_ratio:
+        raise ValueError(f'update_ratio has to be in [0, 1]. Got {update_ratio}.')
     num_total_updates = int(num_total_steps * update_ratio)
-    assert 0 <= warmup_ratio <= 1
+    if warmup_ratio < 0 or 1 < warmup_ratio:
+        raise ValueError(f'warmup_ratio has to be in [0, 1]. Got {warmup_ratio}.')
     num_warmup_steps = int(num_total_steps * warmup_ratio)
-    assert num_warmup_steps <= num_total_updates
-    assert interval_type in INTERVAL_TYPES
+    if num_warmup_steps > num_total_updates:
+        raise ValueError(f'num_warmup_steps cannot be larger than num_total_updates ({num_total_updates}). '
+                         f'Got {num_warmup_steps}.')
+    if interval_type not in INTERVAL_TYPES:
+        raise ValueError(f'Invalid interval_type: {interval_type}. {INTERVAL_TYPES} are supported.')
 
     update_schedule = [True] * num_warmup_steps
     num_remaining_steps = num_total_steps - num_warmup_steps
@@ -199,7 +205,9 @@ def get_update_schedule(num_total_steps: int,
                 update_schedule.extend([False] * (interval + d_interval * i - 1))
                 update_schedule.append(True)
 
-    assert len(update_schedule) <= num_total_steps
+    if len(update_schedule) > num_total_steps:
+        raise ValueError(f'len(update_schedule) cannot be larger than num_total_steps ({num_total_steps}). '
+                         f'Got {len(update_schedule)}.')
     # padding with False
     update_schedule.extend([False] * (num_total_steps - len(update_schedule)))
 

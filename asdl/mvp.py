@@ -27,8 +27,10 @@ def power_method(mvp_fn: Callable[[ParamVector], ParamVector],
     # modified interface and format
     # modified for various matrices and distributed memory run
 
-    assert top_n >= 1
-    assert max_iters >= 1
+    if top_n < 1:
+        raise ValueError(f'top_n has to be >=1. Got {top_n}.')
+    if max_iters < 1:
+        raise ValueError(f'max_iters has to be >=1. Got {max_iters}.')
 
     params = [p for p in model.parameters() if p.requires_grad]
 
@@ -79,8 +81,10 @@ def stochastic_lanczos_quadrature(mvp_fn: Callable[[ParamVector], ParamVector],
                                   random_seed=None):
     # referenced from https://github.com/amirgholami/PyHessian/blob/master/pyhessian/hessian.py
 
-    assert n_v >= 1
-    assert num_iter >= 1
+    if n_v < 1:
+        raise ValueError(f'n_v has to be >=1. Got {n_v}.')
+    if num_iter < 1:
+        raise ValueError(f'num_iter has to be >=1. Got {num_iter}.')
 
     params = [p for p in model.parameters() if p.requires_grad]
     device = next(model.parameters()).device

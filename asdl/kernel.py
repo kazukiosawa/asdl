@@ -56,8 +56,8 @@ def batch(kernel_fn, model, x1, x2=None, batch_size=1, store_on_device=True, is_
         if isinstance(x, DataLoader):
             return x
         elif isinstance(x, Tensor):
-            assert x.shape[0] % batch_size == 0, \
-                f'data size ({x.shape[0]}) has to be divisible by batch size ({batch_size}).'
+            if x.shape[0] % batch_size != 0:
+                raise ValueError(f'data size ({x.shape[0]}) has to be divisible by batch size ({batch_size}).')
             return DataLoader(TensorDataset(x), batch_size)
         else:
             raise ValueError(f'x1 and x2 have to be {DataLoader} or {Tensor}. {type(x)} was given.')
@@ -79,7 +79,8 @@ def _get_inputs(data):
         inputs = data[0]
     else:
         inputs = data
-    assert isinstance(inputs, torch.Tensor)
+    if not isinstance(inputs, torch.Tensor):
+        raise TypeError(f'inputs have to be {torch.Tensor}. Got {type(inputs)}.')
     return inputs
 
 
@@ -138,7 +139,8 @@ def _get_subset_loader(loader: DataLoader, batch_indices: List):
 def _parallel(kernel_fn, model, loader1, loader2=None, store_on_device=True, gather_type=_MASTER):
     device = next(iter(model.parameters())).device
     tmp_device = device if store_on_device else 'cpu'
-    assert gather_type in [_MASTER, _ALL, _SPLIT]
+    if gather_type not in [_MASTER, _ALL, _SPLIT]:
+        raise ValueError(f'Invalid gather_type: {gather_type}. {[_MASTER, _ALL, _SPLIT]} are supported.')
     n_batches1 = len(loader1)
     is_symmetric = loader2 is None
     if is_symmetric:
@@ -153,7 +155,9 @@ def _parallel(kernel_fn, model, loader1, loader2=None, store_on_device=True, gat
     rank = dist.get_rank()
     is_master = rank == 0
     world_size = dist.get_world_size()
-    assert len(indices) >= world_size, f'At least 1 block have to be assigned to each process. There are only {len(indices)} blocks for {world_size} processes.'
+    if len(indices) < world_size:
+        raise ValueError(f'At least 1 block have to be assigned to each process. '
+                         f'There are only {len(indices)} blocks for {world_size} processes.')
     indices_split = np.array_split(indices, world_size)
 
     local_indices = indices_split[rank]
@@ -207,8 +211,8 @@ def _parallel(kernel_fn, model, loader1, loader2=None, store_on_device=True, gat
         dist.all_gather(gather_list, local_blocks)
         return _construct_block_matrix(gather_list)
 
-    assert gather_type == _SPLIT
-    assert local_blocks.ndim == 4  # local_n_blocks x bs x bs x c
+    if local_blocks.ndim != 4: # local_n_blocks x bs x bs x c
+        raise ValueError(f'local_blocks.ndim has to be 4. Got {local_blocks.ndim}')
     n_classes = local_blocks.shape[-1]
     classes_split = np.array_split(range(n_classes), world_size)
 
@@ -406,7 +410,8 @@ def natural_gradient_cross_entropy(model, inputs, targets, kernel, damping=1e-5)
 
 
 def efficient_natural_gradient_cross_entropy(model, inputs, targets, class_kernels, damping=1e-5):
-    assert class_kernels.ndim == 3  # c x n x n
+    if class_kernels.ndim != 3: # c x n x n
+        raise ValueError(f'class_kernels.ndim has to be 3. Got {class_kernels.ndim}')
     model.zero_grad()
     outputs = model(inputs)
 
@@ -446,12 +451,16 @@ def parallel_efficient_natural_gradient_cross_entropy(model, inputs, targets, lo
     # solve inverse in a class-parallel fashion
     has_local_classes = len(classes_split[rank]) > 0
     if has_local_classes:
-        assert local_class_kernels is not None
-        assert local_class_kernels.ndim == 3  # local_c x n x n
+        if local_class_kernels is None:
+            raise ValueError('local_class_kernels is not set.')
+        if local_class_kernels.ndim != 3: # local_c x n x n
+            raise ValueError(f'local_class_kernels.ndim has to be 3. Got {local_class_kernels.ndim}.')
         local_c, n, m = local_class_kernels.shape
-        assert n == local_n * world_size
+        if n != local_n * world_size:
+            raise ValueError(f'n ({n}) does not match local_n * world_size ({local_n * world_size}).')
         v = torch.cat(gather_list).transpose(0, 1)  # local_c x n
-        assert v.shape[0] == local_c and v.shape[1] == n == m, f'rank: {rank}, v: {v.shape}, local_class_kernels: {local_class_kernels.shape}'
+        if v.shape[0] != local_c or v.shape[1] != n:
+            raise ValueError(f'rank: {rank}, v: {v.shape}, local_class_kernels: {local_class_kernels.shape}')
         v = _cholesky_solve(local_class_kernels, v)  # local_c x n
     else:
         v = None
@@ -497,7 +506,8 @@ def parallel_efficient_natural_gradient_cross_entropy(model, inputs, targets, lo
         grad = packed_tensor[pointer: pointer + numel].view_as(p.grad)
         p.grad.copy_(grad)
         pointer += numel
-    assert pointer == packed_tensor.numel()
+    if pointer != packed_tensor.numel():
+        raise ValueError(f'The pointer has to be {packed_tensor.numel()}. Got {pointer}.')
 
 
 def empirical_natural_gradient(model, inputs, targets, loss_fn=F.cross_entropy, damping=1e-5, data_average=True):
@@ -647,8 +657,10 @@ def kernel_eigenvalues(model,
                        is_distributed=False,
                        gather_type=_ALL,
                        print_progress=False):
-    assert top_n >= 1
-    assert max_iters >= 1
+    if top_n < 1:
+        raise ValueError(f'top_n has to be >= 1. Got {top_n}.')
+    if max_iters < 1:
+        raise ValueError(f'max_inters has to be >=1. Got {max_iters}.')
 
     eigvals = []
     eigvecs = []
@@ -760,7 +772,8 @@ def _add_value_to_diagonal(X, value):
     if X.ndim == 3:
         return torch.stack([_add_value_to_diagonal(X[i], value) for i in range(X.shape[0])])
     else:
-        assert X.ndim == 2
+        if X.ndim != 2:
+            raise ValueError(f'X.ndim has to be 2. Got {X.ndim}.')
 
     indices = torch.tensor([[i, i] for i in range(X.shape[0])], device=X.device).long()
 

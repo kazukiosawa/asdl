@@ -56,7 +56,8 @@ class MatrixManager:
         if isinstance(matrix_types, str):
             matrix_types = [matrix_types]
         for mat_type in matrix_types:
-            assert mat_type in _supported_types, f'Invalid matrix_type: {mat_type}. matrix_type must be in {_supported_types}.'
+            if mat_type not in _supported_types:
+                raise ValueError(f'Invalid matrix_type: {mat_type}. {_supported_types} are supported.')
         # remove duplicates
         self._matrix_types = set(matrix_types)
         # for updating stats
@@ -77,7 +78,8 @@ class MatrixManager:
     def _check_stats_name(self, stats_name):
         if stats_name is None:
             return
-        assert stats_name in self._stats_names, f'stats {stats_name} does not exist.'
+        if stats_name not in self._stats_names:
+            raise ValueError(f'stats {stats_name} does not exist.')
 
     def accumulate_matrices(
         self, stats_name=None, scale=None, smoothing_weight=None
@@ -140,7 +142,8 @@ class MatrixManager:
 
     def load_matrices(self, root, relative_paths, matrix_shapes):
         for mat_shape in matrix_shapes:
-            assert mat_shape in _supported_shapes, f'Invalid matrix_shape: {mat_shape}. matrix_shape must be in {_supported_shapes}'
+            if mat_shape not in _supported_shapes:
+                raise ValueError(f'Invalid matrix_shape: {mat_shape}. {_supported_shapes} are supported.')
 
         def root_join(path_or_dict):
             if isinstance(path_or_dict, dict):
@@ -268,7 +271,8 @@ class MatrixManager:
                     continue
                 pointer = stats.to_matrices(vec, pointer)
 
-        assert pointer == torch.numel(vec)
+        if pointer != torch.numel(vec):
+            raise ValueError(f'pointer has to be {torch.numel(vec)}. Got {pointer}.')
 
     def reduce_matrices(
         self, stats_name=None, is_master=True, all_reduce=False
@@ -299,7 +303,8 @@ class MatrixManager:
         stats_attr = self._get_save_field(matrix_type, stats_name)
         if matrix_shape == SHAPE_FULL:
             matrix = getattr(self._model, stats_attr, None)
-            assert matrix is not None and matrix.has_data, f'{matrix_type}.{matrix_shape} does not exist.'
+            if matrix is None or not matrix.has_data:
+                raise ValueError(f'{matrix_type}.{matrix_shape} does not exist.')
             return getattr(matrix, metrics_fn)()
 
         rst = init
@@ -309,19 +314,24 @@ class MatrixManager:
             if not _requires_matrix(module):
                 continue
             matrix = getattr(module, stats_attr, None)
-            assert matrix is not None, f'{matrix_type} for {mname} does not exist.'
+            if matrix is None:
+                raise ValueError(f'{matrix_type} for {mname} does not exist.')
             if matrix_shape == SHAPE_LAYER_WISE:
-                assert matrix.has_data, f'{matrix_type}.{matrix_shape} for {mname} does not exist.'
+                if not matrix.has_data:
+                    raise ValueError(f'{matrix_type}.{matrix_shape} for {mname} does not exist.')
                 rst = reduce_fn(rst, getattr(matrix, metrics_fn)())
             elif matrix_shape == SHAPE_KRON:
                 if isinstance(module, _normalizations):
-                    assert matrix.has_unit, f'{matrix_type}.unit_wise for {mname} does not exist.'
+                    if not matrix.has_unit:
+                        raise ValueError(f'{matrix_type}.unit_wise for {mname} does not exist.')
                     rst = reduce_fn(rst, getattr(matrix.unit, metrics_fn)())
                 else:
-                    assert matrix.has_kron, f'{matrix_type}.{matrix_shape} for {mname} does not exist.'
+                    if not matrix.has_kron:
+                        raise ValueError(f'{matrix_type}.{matrix_shape} for {mname} does not exist.')
                     rst = reduce_fn(rst, getattr(matrix.kron, metrics_fn)())
             elif matrix_shape == SHAPE_DIAG:
-                assert matrix.has_diag, f'{matrix_type}.{matrix_shape} for {mname} does not exist.'
+                if not matrix.has_diag:
+                    raise ValueError(f'{matrix_type}.{matrix_shape} for {mname} does not exist.')
                 rst = reduce_fn(rst, getattr(matrix.diag, metrics_fn)())
             else:
                 raise ValueError(f'Invalid matrix_shape: {matrix_shape}.')
