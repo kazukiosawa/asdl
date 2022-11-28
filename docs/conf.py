@@ -1,6 +1,6 @@
 # Configuration file for the Sphinx documentation builder.
 
-import asdfghjkl
+import asdl
 
 # -- Project information
 
@@ -8,8 +8,8 @@ project = 'ASDL'
 copyright = '2022, Kazuki Osawa'
 author = 'Kazuki Osawa'
 
-release = asdfghjkl.__version__
-version = asdfghjkl.__version__
+release = asdl.__version__
+version = asdl.__version__
 
 # -- General configuration
 
