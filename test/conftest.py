@@ -5,7 +5,7 @@ import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from asdfghjkl import LOSS_CROSS_ENTROPY
+from asdl import LOSS_CROSS_ENTROPY
 
 
 def get_mlp(in_dim, hid_dim, out_dim):

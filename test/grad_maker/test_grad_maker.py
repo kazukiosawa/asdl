@@ -3,8 +3,8 @@ import pytest
 import torch
 import torch.nn.functional as F
 from torch.nn.utils import parameters_to_vector
-from asdfghjkl import GradientMaker
-from asdfghjkl import LOSS_CROSS_ENTROPY, LOSS_MSE
+from asdl import GradientMaker
+from asdl import LOSS_CROSS_ENTROPY, LOSS_MSE
 
 
 @pytest.mark.parametrize('in_dim', [5])

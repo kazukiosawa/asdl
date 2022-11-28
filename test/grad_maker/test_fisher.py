@@ -6,11 +6,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils import parameters_to_vector
-from asdfghjkl import FisherConfig, get_fisher_maker
-from asdfghjkl import FISHER_EXACT, FISHER_MC, FISHER_EMP
-from asdfghjkl import SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_SWIFT_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG
-from asdfghjkl import LOSS_CROSS_ENTROPY, LOSS_MSE
-from asdfghjkl import ParamVector
+from asdl import FisherConfig, get_fisher_maker
+from asdl import FISHER_EXACT, FISHER_MC, FISHER_EMP
+from asdl import SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_SWIFT_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG
+from asdl import LOSS_CROSS_ENTROPY, LOSS_MSE
+from asdl import ParamVector
 
 
 _target_modules = (nn.Linear, nn.Conv2d)
