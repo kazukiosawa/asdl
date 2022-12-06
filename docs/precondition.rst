@@ -1,6 +1,6 @@
 PreconditionedGradientMaker
 ===========================
 
-.. automodule:: asdfghjkl.precondition.natural_gradient
+.. automodule:: asdl.precondition.natural_gradient
    :members:
    :undoc-members:
