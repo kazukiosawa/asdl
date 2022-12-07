@@ -63,7 +63,7 @@ class Operation:
                     raise ValueError('Fix handling bias for', type(module))
 
                 shape = list(in_data.shape)
-                const_dim = 1 if (in_data.ndim == expected_dim) else 2
+                const_dim = in_data.ndim - expected_dim + 1
                 shape[const_dim] = 1
                 ones = in_data.new_ones(shape)
                 in_data = torch.cat((in_data, ones), dim=const_dim)
