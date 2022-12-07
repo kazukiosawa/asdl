@@ -12,6 +12,14 @@ class Conv2dAug(nn.Conv2d):
         return input.reshape(-1, k_aug, *input.shape[1:])
 
 
+class Conv1dAug(nn.Conv1d):
+    
+    def forward(self, input):
+        k_aug = input.shape[1]
+        input = super().forward(input.flatten(start_dim=0, end_dim=1))
+        return input.reshape(-1, k_aug, *input.shape[1:])
+
+
 class Conv2dAugExt(Operation):
     """
     module.weight: c_out x c_in x k_h x k_w

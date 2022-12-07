@@ -21,13 +21,13 @@ class Linear(Operation):
             out_grads.unsqueeze(-1), in_data.unsqueeze(-2)
         )
         if batch_grads.ndim > 3:
-            batch_grads = batch_grads.sum(dim=1)
+            batch_grads = batch_grads.sum(tuple(range(1, in_data.ndim-1)))
         return batch_grads
 
     @staticmethod
     def batch_grads_bias(module, out_grads):
         if out_grads.ndim > 2:
-            return out_grads.sum(dim=1)
+            return out_grads.sum(tuple(range(1, out_grads.ndim-1)))
         return out_grads
 
     @staticmethod
@@ -36,25 +36,25 @@ class Linear(Operation):
             out_grads.unsqueeze(-1), in_data.unsqueeze(-2)
         )
         if batch_grads.ndim > 3:
-            batch_grads = batch_grads.sum(dim=1)
+            batch_grads = batch_grads.sum(tuple(range(1, in_data.ndim-1)))
         return batch_grads.square().sum(dim=0)
 
     @staticmethod
     def cov_diag_bias(module, out_grads):
         if out_grads.ndim > 2:
-            out_grads = out_grads.sum(dim=1)
+            out_grads = out_grads.sum(tuple(range(1, out_grads.ndim-1)))
         return out_grads.mul(out_grads).sum(dim=0)
 
     @staticmethod
     def cov_kron_A(module, in_data):
         if in_data.ndim > 2:
-            in_data = in_data.sum(dim=1)
+            in_data = in_data.mean(tuple(range(1, in_data.ndim-1, 1)))
         return torch.matmul(in_data.T, in_data)
 
     @staticmethod
     def cov_kron_B(module, out_grads):
         if out_grads.ndim > 2:
-            out_grads = out_grads.mean(dim=1)
+            out_grads = out_grads.sum(tuple(range(1, out_grads.ndim-1, 1)))
         return torch.matmul(out_grads.T, out_grads)
 
     @staticmethod

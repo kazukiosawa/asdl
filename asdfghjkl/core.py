@@ -1,9 +1,9 @@
 from typing import List
 from contextlib import contextmanager
-from asdfghjkl.operations.conv_aug import Conv2dAug
+from asdfghjkl.operations.conv_aug import Conv2dAug, Conv1dAug
 
 import torch.nn as nn
-from .utils import im2col_2d, im2col_2d_aug, record_original_requires_grad
+from .utils import im2col_2d, im2col_2d_aug, record_original_requires_grad, arr2col_1d, arr2col_1d_aug
 from .operations import OP_ACCUMULATE_GRADS, get_op_class
 
 
@@ -69,6 +69,12 @@ def _preprocess_in_data(module, in_data, out_data):
 
     elif isinstance(module, nn.Conv2d):
         in_data = im2col_2d(in_data, module)
+
+    elif isinstance(module, Conv1dAug):
+        in_data = arr2col_1d_aug(in_data, module)
+
+    elif isinstance(module, nn.Conv1d):
+        in_data = arr2col_1d(in_data, module)
 
     elif isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
         bnorm = module

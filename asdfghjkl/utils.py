@@ -70,6 +70,30 @@ def im2col_2d_aug(x, conv2d):
     x = im2col_2d(x.flatten(start_dim=0, end_dim=1), conv2d)
     return x.view(n, k_aug, *x.shape[1:])
 
+    
+def arr2col_1d(x: torch.Tensor, conv1d: nn.Module):
+    assert x.ndimension() == 3  # n x c x w_in
+    assert isinstance(conv1d, (nn.Conv1d, nn.ConvTranspose1d))
+    assert conv1d.dilation == (1,)
+
+    pw = conv1d.padding[0]
+    kw = conv1d.kernel_size[0]
+    sw = conv1d.stride[0]
+    if pw > 0:
+        x = F.pad(x, (pw,))
+    if kw == 1 and sw == 1:
+        return x
+    x = x.unfold(2, kw, sw)  # n x c x w_out x kw
+    x = x.permute(0, 1, 3, 2).contiguous()
+    x = x.view(x.size(0), x.size(1) * x.size(2), x.size(3))  # n x c(kw) x w_out
+    return x
+
+    
+def arr2col_1d_aug(x, conv1d):
+    n, k_aug = x.shape[:2]
+    x = arr2col_1d(x.flatten(start_dim=0, end_dim=1), conv1d)
+    return x.view(n, k_aug, *x.shape[1:])
+
 
 def add_value_to_diagonal(x: torch.Tensor, value):
     ndim = x.ndim

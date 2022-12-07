@@ -57,7 +57,7 @@ class Operation:
                 #      -> n x {(c_in)(kernel_size) + 1} x out_size
                 if isinstance(module, torch.nn.Linear):
                     expected_dim = 2
-                elif isinstance(module, torch.nn.Conv2d):
+                elif isinstance(module, (torch.nn.Conv2d, torch.nn.Conv1d)):
                     expected_dim = 3
                 else:
                     raise ValueError('Fix handling bias for', type(module))

@@ -6,7 +6,7 @@ from .conv import Conv2d
 from .batchnorm import BatchNorm1d, BatchNorm2d
 from .bias import Bias, BiasExt
 from .scale import Scale, ScaleExt
-from .conv_aug import Conv2dAug, Conv2dAugExt
+from .conv_aug import Conv2dAug, Conv1dAug, Conv2dAugExt
 
 __all__ = [
     'Linear',
@@ -37,6 +37,10 @@ def get_op_class(module):
     elif isinstance(module, Conv2dAug):
         return Conv2dAugExt
     elif isinstance(module, nn.Conv2d):
+        return Conv2d
+    elif isinstance(module, Conv1dAug):
+        return Conv2dAugExt
+    elif isinstance(module, nn.Conv1d):
         return Conv2d
     elif isinstance(module, nn.BatchNorm1d):
         return BatchNorm1d
