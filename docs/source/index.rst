@@ -12,10 +12,18 @@ ASDL offers:
    :maxdepth: 1
 
    notes/installation
+   notes/overview
+   notes/unified_interface
+   notes/define_prec_grad_maker
+   notes/matrix
 
 .. toctree::
    :caption: Package Reference
    :maxdepth: 1
 
    modules/grad_maker
-   modules/prec_grad_maker
+   modules/precondition
+   modules/fisher
+   modules/hessian
+   modules/kernel
+   modules/gradient
