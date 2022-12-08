@@ -187,6 +187,7 @@ def bfgs_inv_update_(H: Tensor, s: Tensor, y: Tensor):
     https://en.wikipedia.org/wiki/Broyden%E2%80%93Fletcher%E2%80%93Goldfarb%E2%80%93Shanno_algorithm
     """
     msg = f'H has to be a {Tensor} containing a symmetric matrix.'
+    H = (H+H.T)/2
     if H.ndim != 2 or torch.any(H.T != H):
         raise ValueError(msg)
     d1, d2 = H.shape
