@@ -3,7 +3,6 @@ PreconditionedGradientMaker
 
 .. autoclass:: asdl.precondition.prec_grad_maker.PreconditionedGradientMaker
    :members:
-   :undoc-members:
 
 .. autoclass:: asdl.precondition.prec_grad_maker.PreconditioningConfig
    :members:
