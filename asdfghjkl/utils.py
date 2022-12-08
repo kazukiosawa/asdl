@@ -81,8 +81,6 @@ def arr2col_1d(x: torch.Tensor, conv1d: nn.Module):
     sw = conv1d.stride[0]
     if pw > 0:
         x = F.pad(x, (pw,))
-    if kw == 1 and sw == 1:
-        return x
     x = x.unfold(2, kw, sw)  # n x c x w_out x kw
     x = x.permute(0, 1, 3, 2).contiguous()
     x = x.view(x.size(0), x.size(1) * x.size(2), x.size(3))  # n x c(kw) x w_out
