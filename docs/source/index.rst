@@ -11,6 +11,6 @@ ASDL offers:
    :caption: User Guide
    :maxdepth: 2
 
-   setup/quickstart
+   quickstart
    grad_maker
    prec_grad_maker
