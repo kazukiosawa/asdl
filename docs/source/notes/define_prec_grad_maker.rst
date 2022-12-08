@@ -1,2 +1,2 @@
-Defining Your Own PreconditionedGradientMaker
-=============================================
+Defining Your Own Gradient Preconditioning
+==========================================
