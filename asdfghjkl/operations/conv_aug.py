@@ -48,6 +48,23 @@ class Conv2dAugExt(Operation):
         return out_grads.sum(axis=[1, 3])  # n x c_out
 
     @staticmethod
+    def batch_grads_aug_weight(
+        module: nn.Module, in_data: torch.Tensor, out_grads: torch.Tensor
+    ):
+        out_grads = out_grads.sum(dim=1)
+        in_data = in_data.mean(dim=1)
+        grads = torch.matmul(
+            out_grads, in_data.transpose(-1, -2)
+        )  # n x c_out x (c_in)(kernel_size)
+        return grads.view(
+            -1, *module.weight.size()
+        )  # n x c_out x c_in x k_h x k_w
+
+    @staticmethod
+    def batch_grads_aug_bias(module: nn.Module, out_grads: torch.tensor):
+        return out_grads.sum(axis=[1, 3])  # n x c_out
+
+    @staticmethod
     def cov_diag_weight(module, in_data, out_grads):
         grads = torch.matmul(
             out_grads, in_data.transpose(-1, -2)

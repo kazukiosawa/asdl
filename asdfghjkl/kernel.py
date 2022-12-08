@@ -389,8 +389,8 @@ def _empirical_class_wise_ntk(model, x1, x2=None, hadamard=False, precond=None):
 
 
 def logits_hessian_cross_entropy(logits):
-    p = torch.softmax(logits, dim=-1)
-    L = torch.diag_embed(p) - torch.einsum('mk,mc->mck', p, p)
+    p = F.softmax(logits, dim=-1)
+    L = torch.diag_embed(p) - torch.bmm(p.unsqueeze(2), p.unsqueeze(1))  # n x c x c
     return L
 
 

@@ -31,12 +31,36 @@ class Linear(Operation):
         return out_grads
 
     @staticmethod
-    def cov_diag_weight(module, in_data, out_grads):
+    def batch_grads_aug_weight(
+        module: nn.Module, in_data: torch.Tensor, out_grads: torch.Tensor
+    ):
+        # assumes augmented in and out, i.e. n x aug x ...
+        in_data = in_data.sum(dim=1)
+        out_grads = out_grads.mean(dim=1)
         batch_grads = torch.matmul(
             out_grads.unsqueeze(-1), in_data.unsqueeze(-2)
         )
         if batch_grads.ndim > 3:
             batch_grads = batch_grads.sum(tuple(range(1, in_data.ndim-1)))
+        return batch_grads
+
+    @staticmethod
+    def batch_grads_aug_bias(module, out_grads):
+        out_grads = out_grads.sum(dim=1)
+        if out_grads.ndim > 2:
+            return out_grads.sum(tuple(range(1, out_grads.ndim-1)))
+        return out_grads
+
+    @staticmethod
+    def cov_diag_weight(module, in_data, out_grads):
+        # efficient reduction for augmentation
+        if in_data.ndim > 2:
+            in_data = in_data.mean(tuple(range(1, in_data.ndim-1, 1)))
+        if out_grads.ndim > 2:
+            out_grads = out_grads.sum(tuple(range(1, out_grads.ndim-1, 1)))
+        batch_grads = torch.matmul(
+            out_grads.unsqueeze(-1), in_data.unsqueeze(-2)
+        )
         return batch_grads.square().sum(dim=0)
 
     @staticmethod

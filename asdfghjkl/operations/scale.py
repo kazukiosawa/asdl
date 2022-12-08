@@ -30,6 +30,13 @@ class ScaleExt(Operation):
         return (out_grads * in_data).view(N, -1).sum(dim=1)
 
     @staticmethod
+    def batch_grads_aug_weight(module, in_data, out_grads):
+        N = out_grads.size(0)
+        in_data = in_data.sum(dim=1)
+        out_grads = out_grads.mean(dim=1)
+        return (out_grads * in_data).view(N, -1).sum(dim=1)
+
+    @staticmethod
     def cov_diag_weight(module, in_data, out_grads):
         N = out_grads.size(0)
         return (out_grads * in_data).view(N, -1).sum(dim=1).square().sum()

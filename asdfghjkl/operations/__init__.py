@@ -27,6 +27,7 @@ __all__ = [
     'OP_GRAM_DIRECT',
     'OP_GRAM_HADAMARD',
     'OP_BATCH_GRADS',
+    'OP_BATCH_GRADS_AUG',
     'OP_ACCUMULATE_GRADS'
 ]
 

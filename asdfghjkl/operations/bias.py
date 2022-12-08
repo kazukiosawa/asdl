@@ -30,6 +30,11 @@ class BiasExt(Operation):
         return out_grads.view(N, -1).sum(dim=1)
 
     @staticmethod
+    def batch_grads_aug_weight(module, in_data, out_grads):
+        N = out_grads.size(0)
+        return out_grads.view(N, -1).sum(dim=1)
+
+    @staticmethod
     def cov_diag_weight(module, in_data, out_grads):
         N = out_grads.size(0)
         return out_grads.view(N, -1).sum(dim=1).square().sum()

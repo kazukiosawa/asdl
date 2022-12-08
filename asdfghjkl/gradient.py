@@ -1,7 +1,7 @@
 import torch.distributed as dist
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from .core import extend
-from .operations import OP_ACCUMULATE_GRADS, OP_BATCH_GRADS
+from .operations import OP_ACCUMULATE_GRADS, OP_BATCH_GRADS, OP_BATCH_GRADS_AUG
 
 __all__ = ['data_loader_gradient', 'batch_gradient']
 
@@ -61,8 +61,8 @@ def batch_gradient(model, loss_fn, inputs, targets, **backward_kwargs):
     return f
 
 
-def batch_aug_gradient(model, loss_fn, inputs, targets, **backward_kwargs):
-    with extend(model, OP_BATCH_GRADS):
+def batch_aug_gradient(model, loss_fn, inputs, targets, kron_jac, **backward_kwargs):
+    with extend(model, OP_BATCH_GRADS_AUG if kron_jac else OP_BATCH_GRADS):
         model.zero_grad()
         f = model(inputs)
         loss = loss_fn(f, targets)
