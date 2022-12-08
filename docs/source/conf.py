@@ -1,5 +1,8 @@
 # Configuration file for the Sphinx documentation builder.
 
+import sys,os
+sys.path.insert(0, os.path.abspath('../../'))
+
 import asdl
 
 # -- Project information
@@ -8,8 +11,8 @@ project = 'ASDL'
 copyright = '2022, Kazuki Osawa'
 author = 'Kazuki Osawa'
 
-#release = asdl.__version__
-#version = asdl.__version__
+release = asdl.__version__
+version = asdl.__version__
 
 # -- General configuration
 
