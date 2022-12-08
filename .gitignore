@@ -137,4 +137,3 @@ dmypy.json
 tags
 wandb
 .data
-examples/arxiv_results
