@@ -8,8 +8,8 @@ project = 'ASDL'
 copyright = '2022, Kazuki Osawa'
 author = 'Kazuki Osawa'
 
-release = asdl.__version__
-version = asdl.__version__
+#release = asdl.__version__
+#version = asdl.__version__
 
 # -- General configuration
 
