@@ -44,8 +44,8 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
             raise TypeError(f'{DDP} is not supported.')
         del DDP
         super().__init__(model, config)
-        if isinstance(config.fisher_shape, str):
-            config.fisher_shape = [config.fisher_shape]
+        if isinstance(fisher_shape, str):
+            fisher_shape = [fisher_shape]
         if not self.do_accumulate:
             if config.curvature_upd_ratio is not None:
                 raise ValueError('curvature_upd_ratio cannot be specified when no curvature accumulation is performed.')
@@ -54,7 +54,7 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         self.modules_for_curvature = []
         self.shape_for = {}
         for name, module, shapes in module_wise_assignments(self.module_dict,
-                                                            *config.fisher_shape,
+                                                            *fisher_shape,
                                                             named=True):
             if len(shapes) != 1:
                 raise ValueError(f'Each module has to be assigned one Fisher shape. '
@@ -529,29 +529,26 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
 
 class FullNaturalGradientMaker(NaturalGradientMaker):
     def __init__(self, model, config: PreconditioningConfig, *args, **kwargs):
-        config.fisher_shape = SHAPE_FULL
-        super().__init__(model, config, *args, **kwargs)
+        super().__init__(model, config, *args, **kwargs, fisher_shape=SHAPE_FULL)
 
 
 class LayerWiseNaturalGradientMaker(NaturalGradientMaker):
     def __init__(self, model, config: PreconditioningConfig, *args, **kwargs):
-        config.fisher_shape = SHAPE_LAYER_WISE
-        super().__init__(model, config, *args, **kwargs)
+        super().__init__(model, config, *args, **kwargs, fisher_shape=SHAPE_LAYER_WISE)
 
 
 class KfacGradientMaker(NaturalGradientMaker):
     def __init__(self, model, config: PreconditioningConfig, *args, swift=False, **kwargs):
-        config.fisher_shape = [SHAPE_SWIFT_KRON if swift else SHAPE_KRON,
-                               (nn.BatchNorm1d, SHAPE_UNIT_WISE),
-                               (nn.BatchNorm2d, SHAPE_UNIT_WISE),
-                               (nn.LayerNorm, SHAPE_UNIT_WISE)]
-        super().__init__(model, config, *args, **kwargs)
+        fisher_shape = [SHAPE_SWIFT_KRON if swift else SHAPE_KRON,
+                        (nn.BatchNorm1d, SHAPE_UNIT_WISE),
+                        (nn.BatchNorm2d, SHAPE_UNIT_WISE),
+                        (nn.LayerNorm, SHAPE_UNIT_WISE)]
+        super().__init__(model, config, *args, **kwargs, fisher_shape=fisher_shape)
 
 
 class EkfacGradientMaker(NaturalGradientMaker):
     def __init__(self, model, config: PreconditioningConfig, *args, **kwargs):
-        config.fisher_shape = [SHAPE_KFE]
-        super().__init__(model, config, *args, **kwargs)
+        super().__init__(model, config, *args, **kwargs, fisher_shape=SHAPE_KFE)
         if self.fisher_type != FISHER_EMP:
             raise ValueError(f'{EkfacGradientMaker} supports only {FISHER_EMP}.')
 
@@ -566,20 +563,17 @@ class EkfacGradientMaker(NaturalGradientMaker):
 
 class UnitWiseNaturalGradientMaker(NaturalGradientMaker):
     def __init__(self, model, config: PreconditioningConfig, *args, **kwargs):
-        config.fisher_shape = SHAPE_UNIT_WISE
-        super().__init__(model, config, *args, **kwargs)
+        super().__init__(model, config, *args, **kwargs, fisher_shape=SHAPE_UNIT_WISE)
 
 
 class DiagNaturalGradientMaker(NaturalGradientMaker):
     def __init__(self, model, config: PreconditioningConfig, *args, **kwargs):
-        config.fisher_shape = SHAPE_DIAG
-        super().__init__(model, config, *args, **kwargs)
+        super().__init__(model, config, *args, **kwargs, fisher_shape=SHAPE_DIAG)
 
 
 class EmpNaturalGradientMaker(NaturalGradientMaker):
     def __init__(self, model, config: PreconditioningConfig, *args, **kwargs):
-        config.fisher_type = FISHER_EMP
-        super().__init__(model, config, *args, **kwargs)
+        super().__init__(model, config, *args, **kwargs, fisher_type=FISHER_EMP)
 
 
 def _bias_requires_grad(module):
