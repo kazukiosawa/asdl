@@ -141,7 +141,7 @@ class KronBfgsGradientMaker(PreconditionedGradientMaker):
             s = cxt.spatial_mean_out_data(module) - getattr(module, self.mean_outputs_attr)
             y = cxt.spatial_mean_out_grads(module) - getattr(module, self.mean_outgrads_attr)
             if bfgs.kron.B_inv is None:
-                bfgs.kron.B_inv = torch.eye(s.shape[0], device=s.device)
+                bfgs.kron.B_inv = torch.eye(s.shape[-1], device=s.device)
             H = bfgs.kron.B_inv
             if isinstance(module, nn.Conv2d):
                 s = s.mean(dim=0)
