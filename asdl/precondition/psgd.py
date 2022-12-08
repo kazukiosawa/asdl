@@ -26,11 +26,12 @@ class PsgdGradientMaker(PreconditionedGradientMaker):
     _supported_classes = (nn.Linear, nn.Conv2d)
 
     def __init__(self, model: nn.Module, config: PreconditioningConfig,
-                 precond_lr: float = 0.01, init_scale: float = 1.):
+                 precond_lr: float = 0.01, init_scale: float = 1., use_functorch=False):
         super().__init__(model, config)
         self.precond_lr = precond_lr
         self.init_scale = init_scale
         self._init_cholesky_factors()
+        self.use_functorch = use_functorch
 
     def _init_cholesky_factors(self):
         num_params = sum([p.numel() for p in self.module_dict.parameters()])
@@ -41,8 +42,17 @@ class PsgdGradientMaker(PreconditionedGradientMaker):
         return not self.do_update_preconditioner(step)
 
     def update_preconditioner(self, retain_graph=False):
-        vs = tuple([torch.randn_like(p) for p in self.module_dict.parameters()])
-        Hvs = self.loss_hvp(tangents=vs)
+        if self.use_functorch:
+            vs = tuple([torch.randn_like(p) for p in self.module_dict.parameters()])
+            Hvs = self.loss_hvp(tangents=vs)
+        else:
+            self.forward()
+            params = list(self.module_dict.parameters())
+            grads = torch.autograd.grad(self._loss, params, create_graph=True)
+            for p, g in zip(params, grads):
+                p.grad = g
+            vs = [torch.randn_like(p) for p in params]
+            Hvs = list(torch.autograd.grad(grads, params, vs, retain_graph=retain_graph))
         self._update_preconditioner(list(vs), list(Hvs))
 
     @torch.no_grad()
