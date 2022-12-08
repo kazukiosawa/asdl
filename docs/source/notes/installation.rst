@@ -1,5 +1,8 @@
+Installation
+============
+
 Quick Start
-===========
+-----------
 
 ``pip install asdl``
 

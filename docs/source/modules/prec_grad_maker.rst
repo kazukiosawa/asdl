@@ -1,4 +1,4 @@
-PreconditionedGradientMaker
+asdl.precondition
 ===========================
 
 .. autoclass:: asdl.precondition.prec_grad_maker.PreconditionedGradientMaker

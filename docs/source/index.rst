@@ -8,9 +8,14 @@ ASDL offers:
 
 
 .. toctree::
-   :caption: User Guide
-   :maxdepth: 2
+   :caption: Notes
+   :maxdepth: 1
 
-   quickstart
-   grad_maker
-   prec_grad_maker
+   notes/installation
+
+.. toctree::
+   :caption: Package Reference
+   :maxdepth: 1
+
+   modules/grad_maker
+   modules/prec_grad_maker
