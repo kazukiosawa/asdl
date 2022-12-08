@@ -86,6 +86,7 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
             fisher_shapes=fisher_shape,
             loss_type=loss_type,
             n_mc_samples=n_mc_samples,
+            ignore_modules=config.ignore_modules,
             var=var,
             seed=seed,
         )
