@@ -52,13 +52,14 @@ if __name__ == '__main__':
     epochs = 2
 
     model = nn.Sequential()
-    model.append(nn.Linear(in_dim, hid_dim))
+    model.append(nn.Conv2d(in_dim, hid_dim, 3))
     model.append(nn.ReLU())
-    model.append(nn.Linear(hid_dim, hid_dim))
+    model.append(nn.Flatten())
+    model.append(nn.Linear(hid_dim * 9, hid_dim))
     model.append(nn.ReLU())
     model.append(nn.Linear(hid_dim, out_dim))
 
-    xs = torch.randn(data_size, in_dim)
+    xs = torch.randn(data_size, in_dim, 5, 5)
     ts = torch.tensor([0] * data_size)
     train_set = torch.utils.data.TensorDataset(xs, ts)
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size)
