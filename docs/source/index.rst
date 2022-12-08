@@ -27,3 +27,5 @@ ASDL offers:
    modules/hessian
    modules/kernel
    modules/gradient
+   modules/core
+   modules/utils
