@@ -12,4 +12,5 @@ ASDL offers:
    :maxdepth: 2
 
    setup/quickstart
-   precondition
+   grad_maker
+   prec_grad_maker
