@@ -1,15 +1,19 @@
 asdl.precondition
 ===========================
 
-.. autoclass:: asdl.precondition.prec_grad_maker.PreconditionedGradientMaker
-   :members:
 
 .. autoclass:: asdl.precondition.prec_grad_maker.PreconditioningConfig
    :members:
 
+PreconditionedGradientMaker
+---------------------------
+
+.. _precondition:
+
 .. autoclass:: asdl.precondition.natural_gradient.NaturalGradientMaker
    :members:
 
+.. _kfac:
 .. autoclass:: asdl.precondition.natural_gradient.KfacGradientMaker
    :members:
 
