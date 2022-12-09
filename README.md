@@ -7,8 +7,7 @@ calculate **Second-Order Matrices**
 and apply **Gradient Preconditioning** for deep neural networks.
 
 ## Gradient Preconditioning by ASDL
-
-![image](https://user-images.githubusercontent.com/7961228/206647457-7a46d101-941f-4de4-9610-10b72011f01c.png)
+![image](https://user-images.githubusercontent.com/7961228/206696993-65712b6c-d2c9-412d-b3d9-42d6a8654629.png)
 
 Example: training with gradient preconditioning by [K-FAC](https://arxiv.org/abs/1503.05671) algorithm
 ```diff
