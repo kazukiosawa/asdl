@@ -23,6 +23,9 @@ PreconditionedGradientMaker
 .. autoclass:: asdl.precondition.psgd.PsgdGradientMaker
    :members:
 
+.. autoclass:: asdl.precondition.psgd.KronPsgdGradientMaker
+   :members:
+
 .. autoclass:: asdl.precondition.seng.SengGradientMaker
    :members:
 
