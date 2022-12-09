@@ -50,8 +50,6 @@ def main():
         start = time.time()
         train(epoch)
         total_train_time += time.time() - start
-
-        trainloss_all(epoch)
         val(epoch)
         test(epoch)
 
@@ -87,11 +85,6 @@ def test(epoch):
         wandb.log(log)
     print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%)\n'.format(
         test_loss, correct, len(test_loader.dataset), test_accuracy))
-    
-    if test_accuracy<10:
-        print('low test accuracy', file=sys.stderr)
-        sys.exit(0)
-
     if test_accuracy>max_test_acc:
         max_test_acc=test_accuracy
     if test_loss<min_test_loss:
@@ -127,33 +120,6 @@ def val(epoch):
     if test_loss<min_validation_loss:
         min_validation_loss=test_loss
 
-    if test_accuracy<10:
-        print('low val accuracy', file=sys.stderr)
-        sys.exit(0)
-
-def trainloss_all(epoch):
-    model.eval()
-    train_loss = 0
-    correct = 0
-    with torch.no_grad():
-        for data, target in train_loader:
-            data, target = data.to(device), target.to(device)
-            output = model(data)
-            train_loss += F.cross_entropy(output, target, reduction='sum').item()
-            pred = output.argmax(dim=1, keepdim=True)
-            correct += pred.eq(target.view_as(pred)).sum().item()
-
-    train_loss /= len(train_loader.dataset)
-    train_accuracy = 100. * correct / len(train_loader.dataset)
-    if args.wandb:
-        log = {'epoch': epoch,
-               'iteration': (epoch) * num_steps_per_epoch,
-               'train_loss_all': train_loss,
-               'train_accuracy_all': train_accuracy}
-        wandb.log(log)
-    print('\nTrain all set: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%)\n'.format(
-        train_loss, correct, len(val_loader.dataset), train_accuracy))
-
 def train(epoch):
     for batch_idx, (x, t) in enumerate(train_loader):
         torch.cuda.manual_seed(int(torch.rand(1) * 100))
@@ -161,10 +127,8 @@ def train(epoch):
         model.train()
         x, t = x.to(device), t.to(device)
         optimizer.zero_grad(set_to_none=True)
-        loss_func=torch.nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
-
         dummy_y = grad_maker.setup_model_call(model, x)
-        grad_maker.setup_loss_call(loss_func, dummy_y, t)
+        grad_maker.setup_loss_call(F.cross_entropy, dummy_y, t, label_smoothing=args.label_smoothing)
         y, loss = grad_maker.forward_and_backward()
         if args.gradient_clipping:
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.clipping_norm)
