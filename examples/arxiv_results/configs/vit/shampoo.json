@@ -1,0 +1,20 @@
+{
+    "dataset": "CIFAR10",
+    "model":"vit_tiny_patch16_224",
+    "data_augmentation":true,
+    "auto_augment":true,
+    "cutout":true,
+    "n_holes":1,
+    "length":16,
+    "epochs": 20,
+    "batch_size": 128,
+    "train_size":45056,
+    "weight_decay":1e-4,
+    "clipping_norm":10,
+    "optim":"shampoo",
+    "lr":0.003,
+    "momentum":0.9,
+    "damping":1e-12,
+    "curvature_update_interval":10,
+    "ema_decay":-1
+}
