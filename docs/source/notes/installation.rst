@@ -8,7 +8,7 @@ ASDL is tested with Python 3.7 and is compatible with PyTorch 1.13.
 
 Quick Start
 -----------
-To train your model with :ref:`gradient preconditioning <grad_precond>`
+To train your model with *gradient preconditioning*
 by `K-FAC <https://arxiv.org/abs/1503.05671>`_ algorithm,
 you can replace a standard gradient calculation
 (i.e., a forward pass followed by a backward pass)
