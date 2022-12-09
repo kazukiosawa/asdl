@@ -134,7 +134,7 @@ class GradientMaker:
 
     def setup_logits_repr(self, dummy_logits: DummyObject):
         if not isinstance(dummy_logits, DummyObject):
-            raise TypeError(f'dummy_loss has to be an {DummyObject}, not {type(dummy_loss)}.')
+            raise TypeError(f'dummy_loss has to be an {DummyObject}, not {type(dummy_logits)}.')
         self._dummy_logits = dummy_logits
 
     @property
