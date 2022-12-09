@@ -9,7 +9,7 @@ and apply **Gradient Preconditioning** for deep neural networks.
 [ASDL poster](./ASDL_HOOML2022_poster.pdf) @ [HOOML2022 workshop](https://order-up-ml.github.io/) at NeurIPS 2022
 
 ## Gradient Preconditioning by ASDL
-![image](https://user-images.githubusercontent.com/7961228/206696993-65712b6c-d2c9-412d-b3d9-42d6a8654629.png)
+<img src="https://user-images.githubusercontent.com/7961228/206696993-65712b6c-d2c9-412d-b3d9-42d6a8654629.png" width="400">
 
 Example: training with gradient preconditioning by [K-FAC](https://arxiv.org/abs/1503.05671) algorithm
 ```diff
