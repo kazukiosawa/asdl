@@ -10,9 +10,10 @@ and apply **Gradient Preconditioning** for deep neural networks.
 
 ![image](https://user-images.githubusercontent.com/7961228/206647457-7a46d101-941f-4de4-9610-10b72011f01c.png)
 
+Example: training with gradient preconditioning by [K-FAC](https://arxiv.org/abs/1503.05671) algorithm
 ```diff
 import torch
-from asdl.precondition import PreconditioningConfig, KfacGradientMaker
++from asdl.precondition import PreconditioningConfig, KfacGradientMaker
 
 # Initialize model
 model = Net()
@@ -20,9 +21,8 @@ model = Net()
 # Initialize optimizer (SGD is recommended)
 optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
 
-# Initialize KfacGradientMaker
-config = PreconditioningConfig(data_size=batch_size, damping=0.01)
-gm = KfacGradientMaker(model, config)
++config = PreconditioningConfig(data_size=batch_size, damping=0.01)
++gm = KfacGradientMaker(model, config)
 
 # Training loop
 for x, t in data_loader:
