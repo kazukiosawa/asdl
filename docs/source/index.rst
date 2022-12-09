@@ -6,6 +6,10 @@ to easily apply **gradient preconditioning**
 using **second-order information** for deep neural networks.
 
 
+.. image:: ./_figures/precond_eq.png
+  :align: center
+  :width: 400px
+
 .. toctree::
    :caption: Notes
    :maxdepth: 1
