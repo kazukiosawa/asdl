@@ -6,7 +6,7 @@ ASDL is an extension library of PyTorch to easily
 calculate **Second-Order Matrices**
 and apply **Gradient Preconditioning** for deep neural networks.
 
-## Gradient Preconditioning in Deep Learning
+## Gradient Preconditioning by ASDL
 
 ![image](https://user-images.githubusercontent.com/7961228/206647457-7a46d101-941f-4de4-9610-10b72011f01c.png)
 
