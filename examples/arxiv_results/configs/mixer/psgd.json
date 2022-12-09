@@ -1,0 +1,18 @@
+{
+    "dataset": "CIFAR10",
+    "model":"mixer_b16_224",
+    "data_augmentation":true,
+    "auto_augment":true,
+    "cutout":true,
+    "n_holes":1,
+    "length":16,
+    "epochs": 20,
+    "batch_size": 32,
+    "train_size":45056,
+    "weight_decay":1e-4,
+    "clipping_norm":10,
+    "optim":"psgd",
+    "lr":0.003,
+    "momentum":0.9,
+    "curvature_update_interval":10
+}
