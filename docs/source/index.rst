@@ -16,7 +16,7 @@ For example, to train your model with gradient preconditioning
 by `K-FAC <https://arxiv.org/abs/1503.05671>`_ algorithm,
 you can replace a `<Standard>` gradient calculation procedure
 (i.e., a forward pass followed by a backward pass)
-with one by `<ASDL>` with :ref:`KfacGradientMaker <kfac>` like the following:
+with one by `<ASDL>` with :ref:`KfacGradientMaker <kfac_maker>` like the following:
 
 .. code-block:: python
 
@@ -50,7 +50,7 @@ with one by `<ASDL>` with :ref:`KfacGradientMaker <kfac>` like the following:
 
 You can apply a different gradient preconditioning algorithm by
 replacing :obj:`gm` with another :obj:`XXXGradientMaker(model, config)`
-(*XXX*: algorithm name, e.g., :ref:`ShampooGradientMaker <shampoo>`
+(*XXX*: algorithm name, e.g., :ref:`ShampooGradientMaker <shampoo_maker>`
 for `Shampoo <https://arxiv.org/abs/1802.09568>`_ algorithm)
 **with the same interface**.
 This enables a *flexible switching/comparison* of a range of gradient preconditioning algorithms.

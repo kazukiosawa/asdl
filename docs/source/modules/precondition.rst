@@ -39,10 +39,11 @@ And every PreconditionedGradientMaker works with *the unified interface* (:ref:`
     gm.setup_loss_call(F.mse_loss, dummy_y, t)
     y, loss = gm.forward_and_backward()
 
+.. _natural_gradient_maker:
 .. autoclass:: NaturalGradientMaker
    :members:
 
-.. _kfac:
+.. _kfac_maker:
 .. autoclass:: KfacGradientMaker
    :members:
 
@@ -58,6 +59,6 @@ And every PreconditionedGradientMaker works with *the unified interface* (:ref:`
 .. autoclass:: SengGradientMaker
    :members:
 
-.. _shampoo:
+.. _shampoo_maker:
 .. autoclass:: ShampooGradientMaker
    :members:
