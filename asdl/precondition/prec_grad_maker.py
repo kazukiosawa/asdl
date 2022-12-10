@@ -21,12 +21,49 @@ _invalid_value = -1
 
 @dataclass
 class PreconditioningConfig:
+    """ A configuration for gradient preconditioning.
+
+    Args:
+        num_total_steps (int, optional): Total number of training steps.
+        preconditioner_upd_interval (int, optional)): The number of training steps (interval)
+            between preconditioner updates. (default: 1)
+        preconditioner_warmup_steps (int, optional)): The number of training steps (warmup steps)
+            until the preconditioner update interval starts to be applied. (default: 0)
+        preconditioner_upd_ratio (float, optional)): The ratio of the total number of preconditioner
+            updates to the total number of training steps (:obj:`num_total_steps`). (default: 1.)
+        preconditioner_warmup_ratio (float, optional)): The ratio of the number of warmup steps
+            (:obj:`preconditioner_warmup_steps`) to the total number of training steps
+            (:obj:`num_total_steps`). (default: 0.)
+        preconditioner_interval_type (str, optional)): The name of preconditioner update interval
+            schedule: `"constant"`, `"step"`, `"linear"`. (default: `"constant"`)
+        curvature_upd_interval (int, optional)): The number of training steps (interval)
+            between curvature updates. (default: 1)
+        curvature_warmup_steps (int, optional)): The number of training steps (warmup steps)
+            until the curvature update interval starts to be applied. (default: 0)
+        curvature_upd_ratio (float, optional)): The ratio of the total number of curvature updates
+            to the total number of training steps (:obj:`num_total_steps`). (default: 1.)
+        curvature_warmup_ratio (float, optional)): The ratio of the number of warmup steps
+            (:obj:`curvature_warmup_steps`) to the total number of training steps
+            (:obj:`num_total_steps`). (default: 0.)
+        curvature_interval_type (str, optional)): The name of curvature update interval
+            schedule: `"constant"`, `"step"`, `"linear"`. (default: `"constant"`)
+        data_size (int, optional): The size of data to be used for averaging curvature information.
+            (default: -1)
+        damping (float, optional): The damping value. An identity matrix multiplied by the damping
+            value will be added to the curvature matrix before taking its inverse. (default: 1.e-7)
+        ema_decay (float, optional): The exponential moving average (ema) decay rate for the curvature
+            information: :obj:`curv_ema = curv_ema * (1 - ema_decay) + curv_new * ema_decay`.
+            (default: -1)
+        ignore_modules (List[Any], optional): A list of Modules, Module classes
+            (e.g., :obj:`torch.nn.Linear`), or (a part of) Module names (e.g., `"conv1"`, `"block2."`)
+            to ignore for gradient preconditioning.
+    """
     num_total_steps: int = None
     preconditioner_upd_interval: int = _default_interval
     preconditioner_warmup_steps: int = 0
     preconditioner_upd_ratio: float = 1.
     preconditioner_warmup_ratio: float = 0.
-    preconditioner_interval_type = INTERVAL_CONSTANT
+    preconditioner_interval_type: str = INTERVAL_CONSTANT
     curvature_upd_interval: int = None
     curvature_warmup_steps: int = 0
     curvature_upd_ratio: float = None
