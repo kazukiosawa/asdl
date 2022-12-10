@@ -10,8 +10,8 @@ using **second-order information** for deep neural networks.
   :align: center
   :width: 400px
 
-Quick Start (An example with K-FAC)
------------------------------------
+Quick Start
+-----------
 
 To train your model with *gradient preconditioning*
 by `K-FAC <https://arxiv.org/abs/1503.05671>`_ algorithm,
@@ -21,7 +21,6 @@ with one by :ref:`KfacGradientMaker <kfac>` like the following:
 
 .. code-block:: python
 
-    import torch
     from asdl.precondition import PreconditioningConfig, KfacGradientMaker
 
     # Initialize model
@@ -36,6 +35,8 @@ with one by :ref:`KfacGradientMaker <kfac>` like the following:
 
     # Training loop
     for x, t in data_loader:
+        optimizer.zero_grad()
+
         # <Standard>
         # y = model(x)
         # loss = loss_fn(y, t)
@@ -46,8 +47,11 @@ with one by :ref:`KfacGradientMaker <kfac>` like the following:
         gm.setup_loss_call(loss_fn, dummy_y, t)
         y, loss = gm.forward_and_backward()
 
+        optimizer.step()
 
-See :ref:`asdl.precondition <precondition>` for the list of the available :obj:`XXXGradientMaker` classes.
+
+See :ref:`asdl.precondition <precondition>` for a list of the supported *Gradient Preconditioning methods*
+(:obj:`XXXGradientMaker` classes) in ASDL.
 
 .. note::
     For training without gradient preconditioning,
