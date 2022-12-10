@@ -24,11 +24,29 @@ __all__ = [
 
 
 class NaturalGradientMaker(PreconditionedGradientMaker):
-    """
-    GradientMaker for calculating the `Natural Gradient <https://ieeexplore.ieee.org/document/6790500>`_.
+    """GradientMaker for calculating the `Natural Gradient <https://ieeexplore.ieee.org/document/6790500>`_.
 
     Args:
-        model (torch.nn.Module)
+        model (Module): Target module to calculate gradient
+        config (PreconditioningConfig): Configuration for gradient preconditioning
+        fisher_type (str, optional): The type of Fisher information matrix estimation:
+            *"fisher_exact"* (an exact calculation), *"fisher_mc"* (an estimate by MC samples),
+            or *"fisher_emp"* (empirical Fisher). (default: *"fisher_mc"*)
+        fisher_shape (Union[str, List[Any]], optional): The shape of Fisher information matrix to be used for
+            gradient preconditioning: *"full"*, *"layer_wise"* (layer-wise block-diagonal),
+            *"kron"* (`K-FAC <https://arxiv.org/abs/1503.05671>`_), *"unit_wise"* (unit-wise block-diagonal),
+            or *"diag"* (diagonal). (default: *"full"*)
+        loss_type (str, optional): The type of loss on which the Fisher calculation is based:
+            *"cross_entropy"* or *"mse"*. This does not have any effect when :obj:`fisher_type = "fisher_emp"`.
+            (default: *"cross_entropy"*)
+        scale (float, optional): The scale of Fisher information matrix. (default: 1.)
+        n_mc_samples (int, optional): The number of MC samples used when :obj:`fisher_type = "fisher_mc"`.
+            (default: 1)
+        var (float, optional): The variance of the Gaussian distribution used when
+            :obj:`fisher_type = "fisher_mc"` and :obj:`loss_type = "mse"`. (default: 1.)
+        seed (int, optional): The random seed set every time Fisher matrix is calculated.
+            This is useful to make the sampling deterministic when :obj:`fisher_type = "fisher_mc"`
+            (default: None)
     """
     _supported_classes = (nn.Linear, nn.Conv2d, nn.BatchNorm1d, nn.BatchNorm2d,
                           nn.LayerNorm, nn.Embedding)
@@ -38,7 +56,7 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
                  loss_type: str = LOSS_CROSS_ENTROPY, scale: float = 1, grad_scale: float = 1,
                  sync_group: dist.ProcessGroup = None, sync_group_ranks: List[int] = None,
                  module_partitions: List[List[nn.Module]] = None,
-                 n_mc_samples: int = 1, var: float = 1, seed: int = None):
+                 n_mc_samples: int = 1, var: float = 1., seed: int = None):
         from torch.nn.parallel import DistributedDataParallel as DDP
         if isinstance(model, DDP):
             raise TypeError(f'{DDP} is not supported.')
@@ -539,12 +557,47 @@ class LayerWiseNaturalGradientMaker(NaturalGradientMaker):
 
 
 class KfacGradientMaker(NaturalGradientMaker):
-    def __init__(self, model, config: PreconditioningConfig, *args, swift=False, **kwargs):
+    """GradientMaker for calculating the preconditioned gradient by `K-FAC <https://arxiv.org/abs/1503.05671>`_.
+    A wrapper class of :ref:`NaturalGradientMaker <natural_gradient_maker>`.
+
+    Args:
+        model (Module): Target module to calculate gradient
+        config (PreconditioningConfig): Configuration for gradient preconditioning
+        fisher_type (str, optional): The type of Fisher information matrix estimation:
+            *"fisher_exact"* (an exact calculation), *"fisher_mc"* (an estimate by MC samples),
+            or *"fisher_emp"* (empirical Fisher). (default: *"fisher_mc"*)
+        loss_type (str, optional): The type of loss on which the Fisher calculation is based:
+            *"cross_entropy"* or *"mse"*. This does not have any effect when :obj:`fisher_type = "fisher_emp"`.
+            (default: *"cross_entropy"*)
+        scale (float, optional): The scale of Fisher information matrix. (default: 1.)
+        n_mc_samples (int, optional): The number of MC samples used when :obj:`fisher_type = "fisher_mc"`.
+            (default: 1)
+        var (float, optional): The variance of the Gaussian distribution used when
+            :obj:`fisher_type = "fisher_mc"` and :obj:`loss_type = "mse"`. (default: 1.)
+        seed (int, optional): The random seed set every time Fisher matrix is calculated.
+            This is useful to make the sampling deterministic when :obj:`fisher_type = "fisher_mc"`
+            (default: None)
+        swift (bool, optional): If True, KfacGradientMaker calculates preconditioned gradients by
+            `SKFAC <https://ieeexplore.ieee.org/document/9578481>`_ algorithm. (default: False)
+    """
+    def __init__(self, model, config: PreconditioningConfig,
+                 fisher_type: str = FISHER_MC, loss_type: str = LOSS_CROSS_ENTROPY,
+                 scale: float = 1, grad_scale: float = 1,
+                 n_mc_samples: int = 1, var: float = 1., seed: int = None, swift=False):
         fisher_shape = [SHAPE_SWIFT_KRON if swift else SHAPE_KRON,
                         (nn.BatchNorm1d, SHAPE_UNIT_WISE),
                         (nn.BatchNorm2d, SHAPE_UNIT_WISE),
                         (nn.LayerNorm, SHAPE_UNIT_WISE)]
-        super().__init__(model, config, *args, **kwargs, fisher_shape=fisher_shape)
+        super().__init__(model, config,
+                         fisher_type=fisher_type,
+                         fisher_shape=fisher_shape,
+                         loss_type=loss_type,
+                         scale=scale,
+                         grad_scale=grad_scale,
+                         n_mc_samples=n_mc_samples,
+                         var=var,
+                         seed=seed
+                         )
 
 
 class EkfacGradientMaker(NaturalGradientMaker):
