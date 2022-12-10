@@ -14,9 +14,9 @@ ASDL provides various implementations
 and **a unified interface** (*GradientMaker*) for gradient preconditioning for deep neural networks.
 For example, to train your model with gradient preconditioning
 by `K-FAC <https://arxiv.org/abs/1503.05671>`_ algorithm,
-you can replace a <Standard> gradient calculation procedure
+you can replace a `<Standard>` gradient calculation procedure
 (i.e., a forward pass followed by a backward pass)
-with one by <ASDL> with :ref:`KfacGradientMaker <kfac>` like the following:
+with one by `<ASDL>` with :ref:`KfacGradientMaker <kfac>` like the following:
 
 .. code-block:: python
 
@@ -38,12 +38,12 @@ with one by <ASDL> with :ref:`KfacGradientMaker <kfac>` like the following:
 
         # <Standard>
         # y = model(x)
-        # loss = loss_fn(y, t)
+        # loss = F.mse_loss(y, t)
         # loss.backward()
 
         # <ASDL> (gradient preconditioning by K-FAC)
         dummy_y = gm.setup_model_call(model, x)
-        gm.setup_loss_call(loss_fn, dummy_y, t)
+        gm.setup_loss_call(F.mse_loss, dummy_y, t)
         y, loss = gm.forward_and_backward()
 
         optimizer.step()
@@ -61,10 +61,10 @@ See :ref:`asdl.precondition <precondition>` for a list of the supported gradient
 .. note::
     For training without gradient preconditioning,
     you can use :obj:`gm = asdl.GradientMaker(model)` with *the same interface*
-    (i.e., :obj:`<ASDL>` is equivalent to :obj:`<Standard>`).
+    (i.e., no need to switch the script from `<ASDL>` to `<Standard>`).
 
 See :ref:`Unified Interface for Gradient Preconditioning <interface>`
-for detailed instructions on how to use :obj:`XXXGradientMaker` in different situations.
+for detailed instructions on how to use `XXXGradientMakers` in different situations.
 
 Installation
 ------------
