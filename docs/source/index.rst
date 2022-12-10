@@ -55,7 +55,7 @@ for `Shampoo <https://arxiv.org/abs/1802.09568>`_ algorithm)
 **with the same interface**.
 This enables a *flexible switching/comparison* of a range of gradient preconditioning algorithms.
 
-See :ref:`asdl.precondition <precondition>` for a list of the supported gradient preconditioning algorithms
+See :ref:`PreconditionedGradientMakers <prec_grad_maker>` for a list of the supported gradient preconditioning algorithms
 (`XXXGradientMakers`) in ASDL.
 
 .. note::

@@ -1,34 +1,63 @@
 asdl.precondition
 ===========================
 
+.. currentmodule:: asdl.precondition
 
-.. autoclass:: asdl.precondition.prec_grad_maker.PreconditioningConfig
+.. _prec_config:
+.. autoclass:: PreconditioningConfig
    :members:
 
-PreconditionedGradientMaker
----------------------------
+.. _prec_grad_maker:
 
-.. _precondition:
+PreconditionedGradientMakers
+----------------------------
 
-.. autoclass:: asdl.precondition.natural_gradient.NaturalGradientMaker
+.. autosummary::
+
+    NaturalGradientMaker
+    KfacGradientMaker
+    KronBfgsGradientMaker
+    PsgdGradientMaker
+    KronPsgdGradientMaker
+    SengGradientMaker
+    ShampooGradientMaker
+
+Every PreconditionedGradientMaker has to be initialized
+with :ref:`PreconditioningConfig <prec_config>`, which defines the behavior of gradient preconditioning:
+
+.. code-block:: python
+
+    config = PreconditioningConfig(damping=0.01, data_size=batch_size)
+    gm = XXXGradientMaker(model, config, *args, **kwargs)  # XXX: algorithm name
+
+And every PreconditionedGradientMaker works with *the unified interface* (:ref:`GradientMaker <grad_maker>`):
+
+.. code-block:: python
+
+    # preconditioned gradient calculation
+    dummy_y = gm.setup_model_call(model, x)
+    gm.setup_loss_call(F.mse_loss, dummy_y, t)
+    y, loss = gm.forward_and_backward()
+
+.. autoclass:: NaturalGradientMaker
    :members:
 
 .. _kfac:
-.. autoclass:: asdl.precondition.natural_gradient.KfacGradientMaker
+.. autoclass:: KfacGradientMaker
    :members:
 
-.. autoclass:: asdl.precondition.kbfgs.KronBfgsGradientMaker
+.. autoclass:: KronBfgsGradientMaker
    :members:
 
-.. autoclass:: asdl.precondition.psgd.PsgdGradientMaker
+.. autoclass:: PsgdGradientMaker
    :members:
 
-.. autoclass:: asdl.precondition.psgd.KronPsgdGradientMaker
+.. autoclass:: KronPsgdGradientMaker
    :members:
 
-.. autoclass:: asdl.precondition.seng.SengGradientMaker
+.. autoclass:: SengGradientMaker
    :members:
 
 .. _shampoo:
-.. autoclass:: asdl.precondition.shampoo.ShampooGradientMaker
+.. autoclass:: ShampooGradientMaker
    :members:
