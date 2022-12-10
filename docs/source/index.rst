@@ -10,14 +10,13 @@ using **second-order information** for deep neural networks.
   :align: center
   :width: 400px
 
-Quick Start
------------
-
-To train your model with *gradient preconditioning*
+ASDL provides various implementations
+and **a unified interface** (*GradientMaker*) for gradient preconditioning for deep neural networks.
+For example, to train your model with gradient preconditioning
 by `K-FAC <https://arxiv.org/abs/1503.05671>`_ algorithm,
-you can replace a standard gradient calculation
+you can replace a <Standard> gradient calculation procedure
 (i.e., a forward pass followed by a backward pass)
-with one by :ref:`KfacGradientMaker <kfac>` like the following:
+with one by <ASDL> with :ref:`KfacGradientMaker <kfac>` like the following:
 
 .. code-block:: python
 
@@ -49,9 +48,15 @@ with one by :ref:`KfacGradientMaker <kfac>` like the following:
 
         optimizer.step()
 
+You can apply a different gradient preconditioning algorithm by
+replacing :obj:`gm` with another :obj:`XXXGradientMaker(model, config)`
+(*XXX*: algorithm name, e.g., :ref:`ShampooGradientMaker <shampoo>`
+for `Shampoo <https://arxiv.org/abs/1802.09568>`_ algorithm)
+**with the same interface**.
+This enables a *flexible switching/comparison* of a range of gradient preconditioning algorithms.
 
-See :ref:`asdl.precondition <precondition>` for a list of the supported *Gradient Preconditioning methods*
-(:obj:`XXXGradientMaker` classes) in ASDL.
+See :ref:`asdl.precondition <precondition>` for a list of the supported gradient preconditioning algorithms
+(`XXXGradientMakers`) in ASDL.
 
 .. note::
     For training without gradient preconditioning,

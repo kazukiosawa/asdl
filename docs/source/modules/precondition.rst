@@ -29,5 +29,6 @@ PreconditionedGradientMaker
 .. autoclass:: asdl.precondition.seng.SengGradientMaker
    :members:
 
+.. _shampoo:
 .. autoclass:: asdl.precondition.shampoo.ShampooGradientMaker
    :members:
