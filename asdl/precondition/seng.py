@@ -30,16 +30,26 @@ _supported_modules = (nn.Linear, nn.Conv2d)
 
 
 class SengGradientMaker(PreconditionedGradientMaker):
+    r"""GradientMaker for calculating the preconditioned gradient by
+    `SENG <https://link.springer.com/article/10.1007/s10915-022-01911-x>`_.
+
+    Args:
+        model (Module): Target module to calculate gradient
+        config (PreconditioningConfig): Configuration for gradient preconditioning
+        sketching_size (int, optional): The sketching size (number of input/output neurons/channels)
+            applied to batched activations/errors. (default: 256)
+        truncated_rank (int, optional): (Only for *torch.nn.Conv2d*.) The rank of
+            the truncated SVD on batched errors (along spatial dimensions). (default: 16)
+    """
     _loss_reduction = 'sum'
     _supported_classes = (nn.Linear, nn.Conv2d)
 
     def __init__(self, model: nn.Module, config: PreconditioningConfig,
-                 subsample_size: int = None, sketching_size: int = 256, truncated_rank: int = 16):
+                 sketching_size: int = 256, truncated_rank: int = 16):
         super().__init__(model, config)
         if config.data_size == _invalid_data_size:
             raise ValueError('data_size is not set.')
         self._curvature_info: Dict[nn.Module, SketchedEmpFisherInfo] = {}
-        self.subsample_size = subsample_size
         self.sketching_size = sketching_size
         self.truncated_rank = truncated_rank
 
