@@ -1,13 +1,21 @@
 asdl.grad_maker
 ===========================
 
+.. currentmodule:: asdl.grad_maker
+
+.. autosummary::
+
+    GradientMaker
+    DummyObject
+    VmapInfo
+
 .. _grad_maker:
-.. autoclass:: asdl.grad_maker.GradientMaker
+.. autoclass:: GradientMaker
    :members:
 
-.. autoclass:: asdl.grad_maker.DummyObject
+.. autoclass:: DummyObject
    :members:
 
-.. autoclass:: asdl.grad_maker.VmapInfo
+.. autoclass:: VmapInfo
    :members:
 
