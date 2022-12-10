@@ -14,30 +14,19 @@ __all__ = ['ShampooGradientMaker']
 _invalid = -1
 
 
-"""
-GradientMaker for Shampoo (https://arxiv.org/abs/1802.09568).
-
-This implementation is based on
-https://github.com/google-research/google-research/tree/master/scalable_shampoo/pytorch,
-simplified and modified to be compatible with PreconditionedGradientMaker.
-
-The role of Shampoo"GradientMaker" is to "make param.grad", so optimization is
-performed by a torch.optim.Optimizer (e.g., torch.optim.SGD).
-"""
-
-
-#    # Block size for large layers (default: invalid).
-#    # Block size = 1 ==> AdaGrad (Don't do this, extremely inefficient!)
-#    # Block size should be as large as feasible under memory/time constraints.
-#    block_size: int = _invalid
-#    # Automatic shape interpretation (for eg: [4, 3, 1024, 512] would result in
-#    # 12 x [1024, 512] L and R statistics. Disabled by default which results in
-#    # Shampoo constructing statistics [4, 4], [3, 3], [1024, 1024], [512, 512].
-#    best_effort_shape_interpretation: bool = False
-
-
 class ShampooGradientMaker(PreconditionedGradientMaker):
-    def __init__(self, model, config: PreconditioningConfig):
+    """GradientMaker for calculating the preconditioned gradient by `Shampoo <https://arxiv.org/abs/1802.09568>`_.
+
+    This implementation is based on
+    https://github.com/google-research/google-research/tree/master/scalable_shampoo/pytorch,
+    simplified and modified to be compatible with the GradientMaker interface.
+
+    Args:
+        model (Module): target module to calculate gradient
+        config (PreconditioningConfig): configuration for gradient preconditioning
+    """
+
+    def __init__(self, model: torch.nn.Module, config: PreconditioningConfig):
         super().__init__(model, config)
         self.preconditioners: List[Preconditioner] = [
             Preconditioner(p, config) for p in self.module_dict.parameters() if p.ndim > 1]
