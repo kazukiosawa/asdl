@@ -25,7 +25,7 @@ __all__ = [
 
 class NaturalGradientMaker(PreconditionedGradientMaker):
     """
-    GradientMaker for calculating the `Natural Gradient <https://ieeexplore.ieee.org/document/6790500>`
+    GradientMaker for calculating the `Natural Gradient <https://ieeexplore.ieee.org/document/6790500>`_.
 
     Args:
         model (torch.nn.Module)

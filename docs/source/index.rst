@@ -36,12 +36,12 @@ with one by `<ASDL>` with :ref:`KfacGradientMaker <kfac>` like the following:
     for x, t in data_loader:
         optimizer.zero_grad()
 
-        # <Standard>
+        # <Standard> (gradient calculation)
         # y = model(x)
         # loss = F.mse_loss(y, t)
         # loss.backward()
 
-        # <ASDL> (gradient preconditioning by K-FAC)
+        # <ASDL> ('preconditioned' gradient calculation)
         dummy_y = gm.setup_model_call(model, x)
         gm.setup_loss_call(F.mse_loss, dummy_y, t)
         y, loss = gm.forward_and_backward()
