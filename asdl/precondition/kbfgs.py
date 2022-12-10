@@ -16,6 +16,15 @@ __all__ = ['KronBfgsGradientMaker']
 
 
 class KronBfgsGradientMaker(PreconditionedGradientMaker):
+    r"""GradientMaker for calculating the preconditioned gradient by `K-BFGS <https://arxiv.org/abs/2006.08877>`_.
+
+    Args:
+        model (Module): Target module to calculate gradient
+        config (PreconditioningConfig): Configuration for gradient preconditioning
+        minibatch_hessian_action (bool): If True, the inverse of the 'A' Kronecker factor is calculated by
+            "minibatched Hessian-action BFGS" described in https://arxiv.org/abs/2102.06737. (default: False)
+        mu1 (float): :math:`\mu_1` rate in Algorithm 1. (default: 0.2)
+    """
     _supported_classes = (nn.Linear, nn.Conv2d)
 
     def __init__(self, model: nn.Module, config: PreconditioningConfig,
