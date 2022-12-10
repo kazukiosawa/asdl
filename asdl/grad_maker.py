@@ -1,4 +1,4 @@
-from typing import Any, Tuple, Dict, Union
+from typing import Any, Tuple, Dict, Union, Callable
 from collections import OrderedDict
 from dataclasses import dataclass
 
@@ -44,6 +44,25 @@ class Call:
 
 
 class DummyObject:
+    """A container of a sequence of operations
+    (:obj:`__getitem__`, :obj:`__getattr__`, or :obj:`__call__`).
+
+    When an operation is applied to a DummyObject,
+    a new DummyObject is returned with the history of the operations and their arguments.
+
+    Example:
+        >>> dummy_obj = DummyObject()
+        >>> # operations = []
+        >>>
+        >>> dummy_obj = dummy_obj[0]
+        >>> # operations = [(__getitem__, 0)]
+        >>>
+        >>> dummy_obj = dummy_obj.attr_name
+        >>> # operations = [(__getitem__, 0), (__getattr__, attr_name)]
+        >>>
+        >>> dummy_obj = dummy_obj(arg1, arg2, key1=value1, key2=value2)
+        >>> # operations = [(__getitem__, 0), (__getattr__, attr_name), (__call__, arg1, arg2, key1=value1, key2=value2)]
+    """
     def __init__(self, operators=None):
         if operators is None:
             operators = []
@@ -59,6 +78,26 @@ class DummyObject:
         return DummyObject(self._operators + [Call(args, kwargs)])
 
     def eval(self, base_value):
+        """Applies the history of operations to :obj:`base_value`.
+
+        Args:
+            base_value (Any): A base value to be applied the history of operations.
+
+        Returns:
+            The evaluated result.
+
+        Example:
+            >>> module = torch.nn.Linear(5, 3)
+            >>>
+            >>> # direct evaluation
+            >>> print(module.weight[0].numel())
+            >>> # 5
+            >>>
+            >>> # delayed evaluation via DummyObject
+            >>> dummy_numel = DummyObject().weight[0].numel()
+            >>> print(dummy_numel.eval(module))
+            >>> # 5
+        """
         rst = base_value
 
         def mapping(value):
@@ -82,6 +121,10 @@ class DummyObject:
 
 @dataclass
 class VmapInfo:
+    """A container of batch dimension information for :obj:`functorch.vmap`.
+
+    Every argument in `*args` and `**kwargs` has to be :obj:`int` for :obj:`None`.
+    """
     def __init__(self, *args, **kwargs):
         if any(v is not None and not isinstance(v, int) for v in args):
             raise TypeError('Every argument in args has to be int or None.')
@@ -92,6 +135,11 @@ class VmapInfo:
 
 
 class GradientMaker:
+    """The base class of all XXXGradientMaker classes.
+
+    Args:
+        model (Module): target module to calculate gradient
+    """
     _loss_reduction = None
 
     def __init__(self, model: nn.Module):
@@ -110,42 +158,101 @@ class GradientMaker:
         self._dummy_loss: DummyObject = None
         self._dummy_logits = DummyObject([GetFirstItem()])
 
-    def setup_model_call(self, model_fn, *args, **kwargs):
+    def setup_model_call(self, model_fn: Callable, *args, **kwargs) -> DummyObject:
+        """Setups a function to be called in :obj:`call_model()`.
+        `*args` and `**kwargs` will be passed when `model_fn` is called.
+
+        Args:
+            model_fn (Callable): e.g., a Module.
+
+        Returns:
+            A DummyObject, which can be manipulated and passed to :obj:`setup_loss_call()` or :obj:`setup_loss_repr()`.
+
+        Example:
+            >>> model = YourModule()
+            >>> for x, t in data_loader:
+            >>>     # if YourModule takes only inputs
+            >>>     grad_maker.setup_model_call(model, x)
+            >>>
+            >>>     # if YourModule takes both inputs and targets
+            >>>     grad_maker.setup_model_call(model, x, target=t)
+        """
         self._model_fn = model_fn
         self._model_args = args
         self._model_kwargs = kwargs
         return DummyObject()
 
     def setup_model_vmap_info(self, *args, **kwargs):
+        """Setups VmapInfo for :obj:`model_fn`."""
         self._model_vmap_info = VmapInfo(*args, **kwargs)
 
-    def setup_loss_call(self, loss_fn, *args, **kwargs):
+    def setup_loss_call(self, loss_fn: Callable, *args, **kwargs):
+        """Setups a function to be called in :obj:`call_loss()`.
+        `*args` and `**kwargs` will be passed when `loss_fn` is called.
+        An alternative of this method is :obj:`setup_loss_repr()`.
+
+        Args:
+            loss_fn (Callable): e.g., :obj:`torch.nn.functional.cross_entropy`
+
+        Example:
+            >>> dummy_y = grad_maker.setup_model_call(model, x)
+            >>> grad_maker.setup_loss_call(F.cross_entropy, dummy_y, t, label_smoothing=0.1, ignore_index=-1)
+        """
         self._loss_fn = loss_fn
         self._loss_fn_args = args
         self._loss_fn_kwargs = kwargs
 
     def setup_loss_vmap_info(self, *args, **kwargs):
+        """Setups a VmapInfo for :obj:`loss_fn`."""
         self._loss_vmap_info = VmapInfo(*args, **kwargs)
 
     def setup_loss_repr(self, dummy_loss: DummyObject):
+        """Setups a representation (DummyObject) to be evaluated
+        in :obj:`call_loss()`.
+        An alternative of this method is :obj:`setup_loss_call()`.
+
+        Args:
+            dummy_loss (DummyObject): e.g., output of :obj:`setup_model_call()` or its manipulation.
+
+        Example:
+            >>> dummy_y = grad_maker.setup_model_call(model, x)
+            >>> grad_maker.setup_loss_repr(dummy_y[1].sum())
+        """
         if not isinstance(dummy_loss, DummyObject):
             raise TypeError(f'dummy_loss has to be an {DummyObject}, not {type(dummy_loss)}.')
         self._dummy_loss = dummy_loss
 
     def setup_logits_repr(self, dummy_logits: DummyObject):
+        """Setups a representation (DummyObject) to be evaluated
+        in :obj:`call_model()` as *logits*.
+
+        Args:
+            dummy_logits (DummyObject): e.g., output of :obj:`setup_model_call()` or its manipulation.
+
+        Example:
+            >>> dummy_y = grad_maker.setup_model_call(model, x)
+            >>> grad_maker.setup_logits_repr(dummy_y[0])
+        """
         if not isinstance(dummy_logits, DummyObject):
             raise TypeError(f'dummy_loss has to be an {DummyObject}, not {type(dummy_logits)}.')
         self._dummy_logits = dummy_logits
 
     @property
     def model_output(self):
+        """Contains the output of :obj:`call_model()`"""
         return self._model_output
 
     @property
     def loss(self):
+        """Contains the output of :obj:`call_loss()`"""
         return self._loss
 
     def call_model(self) -> Any:
+        """Calls the function with the arguments registered by :obj:`setup_model_call()`
+
+        Returns:
+            The evaluation of the model function.
+        """
         if self._model_fn is None:
             raise ValueError('model_fn is not set. Call setup_model_call() before calling forward_and_backward().')
         self._model_output = self._model_fn(*self._model_args, **self._model_kwargs)
@@ -153,6 +260,12 @@ class GradientMaker:
         return self._model_output
 
     def call_loss(self) -> Tensor:
+        """Calls the function with the arguments registered by :obj:`setup_loss_call()`
+        or evaluates the representation registered by :obj:`setup_loss_repr()`.
+
+        Returns:
+            The evaluation of the loss function or representation.
+        """
         if self._loss_fn is None:
             if self._dummy_loss is None:
                 raise ValueError('Neither loss_fn nor loss_repr is not set. '
@@ -169,14 +282,47 @@ class GradientMaker:
     def backward(self):
         self._loss.backward()
 
-    def forward_and_backward(self):
-        # Performs a forward pass (model and loss evaluations) and a backward pass (gradient calculation).
-        # A child class should override this function.
+    def forward_and_backward(self) -> Tuple[Any, Tensor]:
+        """Performs a forward pass (:obj:`call_model()` and :obj:`call_loss()`)
+        and a backward pass (:obj:`loss.backward()`).
+
+        A child class should override this method.
+
+        Returns:
+            - Output of the model function (Any)
+            - Output of the loss function or loss evaluation (torch.Tensor)
+
+        Example:
+            >>> for x, t in data_loader:
+            >>>     # Standard gradient calculation
+            >>>     y = model(x)
+            >>>     loss = F.mse_loss(y, t)
+            >>>     loss.backward()
+            >>>
+            >>>     # Gradient calculation by GradientMaker
+            >>>     dummy_y = grad_maker.setup_model_call(model, x)
+            >>>     grad_maker.setup_loss_call(F.mse_loss, dummy_y, t)
+            >>>     y, loss = grad_maker.forward_and_backward()
+        """
         self.forward()
         self.backward()
         return self._model_output, self._loss
 
     def delegate_forward_and_backward(self, other, *args, **kwargs):
+        """Delegates :obj:`forward_and_backward()` to another GradientMaker.
+        `*args` and `**kwargs` will be passed to the call of :obj:`other.forward_and_backward()`.
+
+        The results (:obj:`model_output` and :obj:`loss`) will also be stored to :obj:`self` object
+        as if it calls :obj:`self.forward_and_backward()`.
+
+        Args:
+            other (GradientMaker): Another GradientMaker to perform :obj:`forward_and_backward()`.
+
+        Example:
+            >>> grad_maker1 = GradientMaker(model)
+            >>> grad_maker2 = GradientMaker(model)
+            >>> grad_maker1.delegate_forward_and_backward(grad_maker2)
+        """
         other.setup_model_call(self._model_fn, *self._model_args, **self._model_kwargs)
         if self._loss_fn is None:
             other.setup_loss_repr(self._dummy_loss)
