@@ -23,6 +23,28 @@ def parameters_to_vector(parameters: Iterable[Tensor]) -> Tensor:
 
 
 class PsgdGradientMaker(PreconditionedGradientMaker):
+    r"""GradientMaker for calculating the preconditioned gradient by `PSGD <https://arxiv.org/abs/1512.04202>`_
+    with a full preconditioning matrix.
+
+    .. note::
+
+        PsgdGradientMaker constructs a :math:`P\times P` triangular matrix
+        (:math:`P`: number of trainable parameters of the `model`),
+        which is the Cholesky factor of the preconditioning matrix.
+        Therefore, it easily causes an out-of-memory error and is not recommend to use
+        unless `model` is a very small network.
+        :ref:`KronPsgdGradientMaker <kron_psgd_maker>` is recommended for most practical cases.
+
+    Args:
+        model (Module): Target module to calculate gradient
+        config (PreconditioningConfig): Configuration for gradient preconditioning
+        precond_lr (float, optional): The learning rate for updating the Cholesky factor of
+            the preconditioning matrix. (default: 0.01)
+        init_scale (float, optional): The Cholesky factor of the preconditioning matrix will
+            be initialized by an identity matrix multiplied by this value. (default: 1.)
+        use_functorch (bool, optional): If True, the Hessian-vector product will be calculated
+            by using `functorch <https://pytorch.org/functorch/stable/>`_. (default: False)
+    """
     _supported_classes = (nn.Linear, nn.Conv2d)
 
     def __init__(self, model: nn.Module, config: PreconditioningConfig,
@@ -96,6 +118,19 @@ class PsgdGradientMaker(PreconditionedGradientMaker):
 
 
 class KronPsgdGradientMaker(PsgdGradientMaker):
+    r"""GradientMaker for calculating the preconditioned gradient by `PSGD <https://arxiv.org/abs/1512.04202>`_
+    with a layer-wise block-diagonal Kronecker-factored preconditioning matrix.
+
+    Args:
+        model (Module): Target module to calculate gradient
+        config (PreconditioningConfig): Configuration for gradient preconditioning
+        precond_lr (float, optional): The learning rate for updating the Cholesky factor of
+            the preconditioning matrix. (default: 0.01)
+        init_scale (float, optional): The Cholesky factor of the preconditioning matrix will
+            be initialized by an identity matrix multiplied by this value. (default: 1.)
+        use_functorch (bool, optional): If True, the Hessian-vector product will be calculated
+            by using `functorch <https://pytorch.org/functorch/stable/>`_. (default: False)
+    """
     def _init_cholesky_factors(self):
         init_scale = self.init_scale
         self.cholesky_factors = {}

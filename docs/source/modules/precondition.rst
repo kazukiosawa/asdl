@@ -53,6 +53,7 @@ And every PreconditionedGradientMaker works with *the unified interface* (:ref:`
 .. autoclass:: PsgdGradientMaker
    :members:
 
+.. _kron_psgd_maker:
 .. autoclass:: KronPsgdGradientMaker
    :members:
 
