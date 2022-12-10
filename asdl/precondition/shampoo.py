@@ -22,8 +22,8 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
     simplified and modified to be compatible with the GradientMaker interface.
 
     Args:
-        model (Module): target module to calculate gradient
-        config (PreconditioningConfig): configuration for gradient preconditioning
+        model (Module): Target module to calculate gradient
+        config (PreconditioningConfig): Configuration for gradient preconditioning
     """
 
     def __init__(self, model: torch.nn.Module, config: PreconditioningConfig):
