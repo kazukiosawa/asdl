@@ -13,6 +13,7 @@ asdl.grad_maker
 .. autoclass:: GradientMaker
    :members:
 
+.. _dummy_obj:
 .. autoclass:: DummyObject
    :members:
 
