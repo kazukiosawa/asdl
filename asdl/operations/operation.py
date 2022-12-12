@@ -297,7 +297,7 @@ class Operation:
                                        OP_COV_KFE, 'scale')
             elif op_name in [OP_COV_UNIT_WISE, OP_COV_UNIT_WISE_INV]:
                 if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm)):
-                    if original_requires_grad(module, 'weight') or original_requires_grad(module, 'bias'):
+                    if not (original_requires_grad(module, 'weight') and original_requires_grad(module, 'bias')):
                         raise ValueError(f'Both weight and bias have to require grad for {OP_COV_UNIT_WISE} (module: {module}).')
                 elif original_requires_grad(module, 'bias'):
                     in_data = self.extend_in_data(in_data)
