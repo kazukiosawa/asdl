@@ -3,7 +3,7 @@ ASDL Documentation
 
 **ASDL** (*Automatic Second-order Differentiation Library*) is an extension library of `PyTorch <https://pytorch.org/>`_
 to easily perform **gradient preconditioning**
-using **second-order information** for deep neural networks.
+using **second-order information** (e.g., Hessian, Fisher information) for deep neural networks.
 
 
 .. image:: ./_figures/precond_eq.png
