@@ -4,7 +4,9 @@ NOTE: this branch `dev-grad-maker` is under development and will be merged to `m
 
 ASDL is an extension library of PyTorch to easily perform **gradient preconditioning** using **second-order information** (e.g., Hessian, Fisher information) for deep neural networks.
 
-<img src="https://user-images.githubusercontent.com/7961228/207084513-d696f459-1b6e-48cb-b597-00ec6c4bffe2.png" width="400">
+<p align="center">
+  <img src="https://user-images.githubusercontent.com/7961228/207084513-d696f459-1b6e-48cb-b597-00ec6c4bffe2.png" width="400">
+</p>
 
 ASDL provides various implementations and **a unified interface** (GradientMaker) for gradient preconditioning for deep neural networks. For example, to train your model with gradient preconditioning by [K-FAC](https://arxiv.org/abs/1503.05671) algorithm, you can replace a `<Standard>` gradient calculation procedure (i.e., a forward pass followed by a backward pass) with one by `<ASDL>` with KfacGradientMaker like the following:
 
