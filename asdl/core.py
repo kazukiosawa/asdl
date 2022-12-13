@@ -36,6 +36,16 @@ def extend(model,
             op_class = get_op_class(module)
             if op_class is None:
                 continue
+
+            # extract supported operation names
+            _supported_op_names = []
+            for op_name in _op_names:
+                if op_name in op_class.supported_operations:
+                    _supported_op_names.append(op_name)
+                else:
+                    warnings.warn(f'{op_name} operation is not supported for {module}. Skip.')
+            _op_names = _supported_op_names
+
             cxt.register_operation(module, op_class(module, _op_names, model_for_kernel=model))
             has_fwd_op = any(op_name in FWD_OPS for op_name in _op_names)
             has_bwd_op = any(op_name in BWD_OPS for op_name in _op_names)
@@ -226,29 +236,18 @@ def module_wise_assignments(model, *assign_rules, ignore_modules=None, map_rule=
             # no assignment for a module that do not have params that require grad
             continue
 
-        op_class = get_op_class(module)
-
-        def extract_asgmts(ops):
-            asgmts = []
-            for op in ops:
-                if op in op_class.supported_operations:
-                    asgmts.append(op)
-                else:
-                    warnings.warn(f'{op} operation is not supported for {module}. Skip.')
-            return asgmts
-
         if module in specified_asgmts:
-            yield *module_info, extract_asgmts(specified_asgmts[module])
+            yield *module_info, specified_asgmts[module]
         elif any(isinstance(key, str) and key in name for key in specified_asgmts):
             key = next(key for key in specified_asgmts if isinstance(
                 key, str) and key in name)
-            yield *module_info, extract_asgmts(specified_asgmts[key])
+            yield *module_info, specified_asgmts[key]
         elif module.__class__ in specified_asgmts:
-            yield *module_info, extract_asgmts(specified_asgmts[module.__class__])
+            yield *module_info, specified_asgmts[module.__class__]
         else:
             if len(common_asgmts) == 0:
                 continue
-            yield *module_info, extract_asgmts(common_asgmts)
+            yield *module_info, common_asgmts.copy()
 
 
 def modules_to_assign(model, value, *assign_rules, ignore_modules=None, named=False):
