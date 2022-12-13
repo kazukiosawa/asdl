@@ -1,7 +1,7 @@
 import torch
 from torch import nn
-from .operation import Operation,OP_COV_KRON,OP_GRAM_HADAMARD
-from .operation import BASIC_OPS,OP_COV_DIAG, OP_COV_DIAG_INV,OP_GRAM_DIRECT,OP_BATCH_GRADS
+from .operation import Operation, OP_COV_KRON, OP_GRAM_HADAMARD
+from .operation import BASIC_OPS, OP_COV_DIAG, OP_COV_DIAG_INV, OP_GRAM_DIRECT, OP_BATCH_GRADS
 
 
 class LayerNorm(Operation):
@@ -15,7 +15,9 @@ class LayerNorm(Operation):
 
     normalized_shape: f[0] x f[1] x ... x f[-1]
     """
-    _supported_operations = set(BASIC_OPS+[OP_COV_DIAG, OP_COV_DIAG_INV,OP_GRAM_DIRECT,OP_BATCH_GRADS])
+    _supported_operations = set(
+        BASIC_OPS+[OP_COV_DIAG, OP_COV_DIAG_INV, OP_GRAM_DIRECT, OP_BATCH_GRADS])
+
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):
         # restore normalized input
@@ -42,7 +44,7 @@ class LayerNorm(Operation):
         module: nn.Module, in_data: torch.Tensor, out_grads: torch.Tensor
     ):
         return in_data.mul(out_grads)  # n x normalized_shape
-    
+
     @staticmethod
     def batch_grads_bias(module, out_grads):
         return out_grads
@@ -59,11 +61,11 @@ class LayerNorm(Operation):
     def cov_diag_weight(module, in_data, out_grads):
         grads = in_data.mul(out_grads)
         return grads.mul(grads).sum(dim=0)  # normalized_shape
-    
+
     @staticmethod
     def cov_diag_bias(module, out_grads):
         return out_grads.mul(out_grads).sum(dim=0)  # normalized_shape
-    
+
     @staticmethod
     def cov_unit_wise(module, in_data, out_grads):
         n_features = in_data.flatten(start_dim=1).shape[1]  # (f[0] x f[1] x ... x f[-1])

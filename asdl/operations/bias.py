@@ -2,15 +2,17 @@ import torch
 from torch import nn
 
 from .operation import Operation
-from .operation import BASIC_OPS,OP_COV_KRON,OP_COV_SWIFT_KRON,OP_COV_DIAG, OP_COV_DIAG_INV,OP_GRAM_DIRECT,OP_BATCH_GRADS
+from .operation import BASIC_OPS, OP_COV_KRON, OP_COV_SWIFT_KRON, OP_COV_DIAG, OP_COV_DIAG_INV, OP_GRAM_DIRECT, OP_BATCH_GRADS
 
 
 class Bias(nn.Module):
-    _supported_operations = set(BASIC_OPS + [OP_COV_KRON,OP_COV_SWIFT_KRON,OP_COV_DIAG, OP_COV_DIAG_INV,OP_GRAM_DIRECT,OP_BATCH_GRADS])
+    _supported_operations = set(
+        BASIC_OPS + [OP_COV_KRON, OP_COV_SWIFT_KRON, OP_COV_DIAG, OP_COV_DIAG_INV, OP_GRAM_DIRECT, OP_BATCH_GRADS])
+
     def __init__(self):
         super(Bias, self).__init__()
         self.weight = nn.Parameter(torch.zeros(1))
-        
+
     def reset_parameters(self):
         nn.init.constant_(self.weight, 0)
 
@@ -26,7 +28,9 @@ class BiasExt(Operation):
     in_data: n x f_in
     out_grads: n x f_out
     """
-    _supported_operations = set(BASIC_OPS + [OP_COV_KRON,OP_COV_SWIFT_KRON,OP_COV_DIAG, OP_COV_DIAG_INV,OP_GRAM_DIRECT,OP_BATCH_GRADS])
+    _supported_operations = set(
+        BASIC_OPS + [OP_COV_KRON, OP_COV_SWIFT_KRON, OP_COV_DIAG, OP_COV_DIAG_INV, OP_GRAM_DIRECT, OP_BATCH_GRADS])
+
     @staticmethod
     def batch_grads_weight(module, in_data, out_grads):
         N = out_grads.size(0)

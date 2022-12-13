@@ -3,7 +3,7 @@ from torch import nn
 
 from ..utils import im2col_2d
 from .operation import Operation
-from .operation import ALL_OPS,OP_RFIM_RELU,OP_RFIM_SOFTMAX
+from .operation import ALL_OPS, OP_RFIM_RELU, OP_RFIM_SOFTMAX
 
 
 class Conv2d(Operation):
@@ -19,7 +19,8 @@ class Conv2d(Operation):
     kernel_size = (k_h)(k_w)
     out_size = output feature map size
     """
-    _supported_operations = set(ALL_OPS) - set([OP_RFIM_RELU,OP_RFIM_SOFTMAX])
+    _supported_operations = set(ALL_OPS) - set([OP_RFIM_RELU, OP_RFIM_SOFTMAX])
+
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):
         # n x c x h_in x w_in -> n x c(kh)(kw) x (h_out)(w_out)
@@ -67,7 +68,8 @@ class Conv2d(Operation):
             rst = torch.matmul(grad_grad, in_in.T)  # c_out x (c_in)(kernel_size)
             return rst.view_as(module.weight)  # c_out x c_in x k_h x k_w
         else:
-            bg = Conv2d.batch_grads_weight(module, in_data, out_grads)  # n x c_out x c_in x k_h x k_w
+            # n x c_out x c_in x k_h x k_w
+            bg = Conv2d.batch_grads_weight(module, in_data, out_grads)
             return torch.square(bg).sum(dim=0)  # c_out x c_in x k_h x k_w
 
     @staticmethod
@@ -91,7 +93,8 @@ class Conv2d(Operation):
         if n < cin_ks:
             return in_data.sum(dim=-1)  # n x (c_in)(kernel_size)
         else:
-            return cls.cov_kron_A(module, in_data)  # (c_in)(kernel_size) x (c_in)(kernel_size)
+            # (c_in)(kernel_size) x (c_in)(kernel_size)
+            return cls.cov_kron_A(module, in_data)
 
     @staticmethod
     def cov_kron_B(module, out_grads):
@@ -134,9 +137,11 @@ class Conv2d(Operation):
     @classmethod
     def cov_kfe_scale(cls, module, in_data, out_grads, Ua, Ub, bias=True):
         n, cin_ks, out_size = in_data.shape
-        in_data = in_data.permute(0, 2, 1).contiguous().view(n * out_size, -1)  # n(out_size) x (c_in)(kernel_size)
+        in_data = in_data.permute(0, 2, 1).contiguous().view(
+            n * out_size, -1)  # n(out_size) x (c_in)(kernel_size)
         _, c_out, _ = out_grads.shape
-        out_grads = out_grads.permute(0, 2, 1).contiguous().view(n * out_size, -1)  # n(out_size) x c_out
+        out_grads = out_grads.permute(0, 2, 1).contiguous().view(
+            n * out_size, -1)  # n(out_size) x c_out
         in_data_kfe = in_data.mm(Ua)
         out_grads_kfe = out_grads.mm(Ub)
         scale_w = torch.mm(out_grads_kfe.T ** 2, in_data_kfe ** 2) / n
@@ -209,7 +214,8 @@ class Conv2d(Operation):
     def random_sketch_and_gram(self, module, in_data, out_grads):
         rank = self._truncated_rank
         if rank is not None and rank < in_data.shape[2]:
-            u, s, vt = torch.linalg.svd(out_grads, full_matrices=False)  # n x c_out x out_size
+            u, s, vt = torch.linalg.svd(
+                out_grads, full_matrices=False)  # n x c_out x out_size
             v = vt.transpose(1, 2)
             u = u[:, :, :rank]  # n x c_out x r
             v = v[:, :, :rank]  # n x out_size x r

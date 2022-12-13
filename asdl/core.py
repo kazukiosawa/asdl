@@ -228,14 +228,17 @@ def module_wise_assignments(model, *assign_rules, ignore_modules=None, map_rule=
 
         op_class = get_op_class(module)
         if module in specified_asgmts:
-            warning_operation(specified_asgmts[module], module, op_class, named)
+            warning_operation(
+                specified_asgmts[module], module, op_class, named)
             yield *module_info, specified_asgmts[module]
         elif any(isinstance(key, str) and key in name for key in specified_asgmts):
-            key = next(key for key in specified_asgmts if isinstance(key, str) and key in name)
+            key = next(key for key in specified_asgmts if isinstance(
+                key, str) and key in name)
             warning_operation(specified_asgmts[key], module, op_class, named)
             yield *module_info, specified_asgmts[key]
         elif module.__class__ in specified_asgmts:
-            warning_operation(specified_asgmts[module.__class__], module, op_class, named)
+            warning_operation(
+                specified_asgmts[module.__class__], module, op_class, named)
             yield *module_info, specified_asgmts[module.__class__]
         else:
             if len(common_asgmts) == 0:

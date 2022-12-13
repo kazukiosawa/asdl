@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from .operation import Operation
 from .operation import ALL_OPS
 
+
 class Linear(Operation):
     """
     module.weight: f_out x f_in
@@ -187,4 +188,3 @@ class Linear(Operation):
         indata_s = torch.mv(in_data, s)  # n
         As = torch.mv(in_data.T, indata_s)  # f_in
         return s, As
-
