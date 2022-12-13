@@ -246,11 +246,13 @@ def module_wise_assignments(model, *assign_rules, ignore_modules=None, map_rule=
             warning_operation(common_asgmts, module, op_class, named)
             yield *module_info, common_asgmts.copy()
 
+
 def warning_operation(operation, module, op_class, named = False):
     if named:
         return
     elif not set(operation)  <= op_class._supported_operations:
         warnings.warn(f'This model contains {module}, but ASDL library does not support {module} with {operation}.')
+
 
 def modules_to_assign(model, value, *assign_rules, ignore_modules=None, named=False):
     for assign_info in module_wise_assignments(model, *assign_rules, ignore_modules=ignore_modules, named=named):
