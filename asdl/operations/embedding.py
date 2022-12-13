@@ -1,10 +1,12 @@
 import torch
 from torch import nn
-
 from .operation import Operation
+from .operation import BASIC_OPS, OP_COV_KRON, OP_BATCH_GRADS, SHAPE_DIAG, OP_COV_DIAG, OP_COV_DIAG_INV
 
 
 class Embedding(Operation):
+    _supported_operations = set(
+        BASIC_OPS+[OP_COV_KRON, OP_BATCH_GRADS, SHAPE_DIAG, OP_COV_DIAG, OP_COV_DIAG_INV])
 
     @staticmethod
     def batch_grads_weight(
@@ -18,7 +20,8 @@ class Embedding(Operation):
             grads: n x num_embeddings x embedding_dim
         """
         in_data = in_data.flatten()  # n x * -> n
-        out_grads = out_grads.flatten(end_dim=-2)  # n x * x embedding_dim -> n x embedding_dim
+        # n x * x embedding_dim -> n x embedding_dim
+        out_grads = out_grads.flatten(end_dim=-2)
 
         size = in_data.shape + (module.num_embeddings, module.embedding_dim)
         grads = torch.zeros(size, device=module.weight.device)
@@ -39,7 +42,8 @@ class Embedding(Operation):
         counts = torch.stack(
             [torch.bincount(in_data[i].int(), minlength=module.num_embeddings) for i in range(in_data.shape[0])])
         counts = counts.float().to(module.weight.device)
-        return torch.matmul(counts.T, counts)  # num_embeddings x num_embeddings
+        # num_embeddings x num_embeddings
+        return torch.matmul(counts.T, counts)
 
     @staticmethod
     def cov_kron_B(module, out_grads):
@@ -62,7 +66,8 @@ class Embedding(Operation):
             cov: num_embeddings x embedding_dim
         """
         in_data = in_data.flatten()  # n x * -> n
-        out_grads = out_grads.flatten(end_dim=-2)  # n x * x embedding_dim -> n x embedding_dim
+        # n x * x embedding_dim -> n x embedding_dim
+        out_grads = out_grads.flatten(end_dim=-2)
 
         out_out = out_grads.mul(out_grads)  # n x embedding_dim
         cov = torch.zeros_like(module.weight)

@@ -107,9 +107,6 @@ class PreconditionedGradientMaker(GradientMaker):
     def _is_supported(self, module_name: str, module: nn.Module) -> bool:
         if len(list(module.children())) > 0:
             return False
-        if self._supported_classes is not None:
-            if not isinstance(module, self._supported_classes):
-                return False
         if all(not p.requires_grad for p in module.parameters()):
             return False
         ignore_modules = self.config.ignore_modules
@@ -123,6 +120,10 @@ class PreconditionedGradientMaker(GradientMaker):
                         return False
                 elif ignore_module is module:
                     return False
+        if self._supported_classes is not None:
+            if not isinstance(module, self._supported_classes):
+                warnings.warn(f'This model contains {module}, but ASDL library does not support {module}.')
+                return False
         return True
 
     def state_dict(self) -> dict:

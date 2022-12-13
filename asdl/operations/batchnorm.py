@@ -1,10 +1,12 @@
 import torch
 from torch import nn
-
-from .operation import Operation, OP_COV_KRON, OP_COV_UNIT_WISE, OP_GRAM_HADAMARD, OP_GRAM_DIRECT  # NOQA
+from .operation import Operation, OP_COV_KRON, OP_GRAM_HADAMARD
+from .operation import BASIC_OPS, OP_COV_DIAG, OP_COV_DIAG_INV, OP_GRAM_DIRECT, OP_BATCH_GRADS
 
 
 class _BatchNormNd(Operation):
+    _supported_operations = set(
+        BASIC_OPS + [OP_COV_DIAG, OP_COV_DIAG_INV, OP_GRAM_DIRECT, OP_BATCH_GRADS])
 
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):
@@ -48,7 +50,8 @@ class _BatchNormNd(Operation):
         cov_ww = (grads_w ** 2).sum(0)  # f
         cov_bb = (grads_b ** 2).sum(0)  # f
         cov_wb = (grads_w * grads_b).sum(0)  # f
-        blocks = torch.vstack([cov_ww, cov_wb, cov_wb, cov_bb]).reshape(2, 2, n_features).transpose(0, 2)
+        blocks = torch.vstack([cov_ww, cov_wb, cov_wb, cov_bb]).reshape(
+            2, 2, n_features).transpose(0, 2)
         return blocks  # f x 2 x 2
 
     @staticmethod
@@ -85,6 +88,7 @@ class BatchNorm1d(_BatchNormNd):
     in_data: n x f
     out_grads: n x f
     """
+
     def _reduce(self, tensor):
         return tensor
 
@@ -98,5 +102,6 @@ class BatchNorm2d(_BatchNormNd):
     in_data: n x c x h x w
     out_grads: n x c x h x w
     """
+
     def _reduce(self, tensor):
         return tensor.sum(dim=(2, 3))

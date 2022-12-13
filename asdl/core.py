@@ -1,4 +1,5 @@
 from contextlib import contextmanager, nullcontext
+import warnings
 
 import torch.cuda
 import torch.nn as nn
@@ -225,18 +226,31 @@ def module_wise_assignments(model, *assign_rules, ignore_modules=None, map_rule=
             # no assignment for a module that do not have params that require grad
             continue
 
+        op_class = get_op_class(module)
         if module in specified_asgmts:
+            warning_operation(
+                specified_asgmts[module], module, op_class, named)
             yield *module_info, specified_asgmts[module]
         elif any(isinstance(key, str) and key in name for key in specified_asgmts):
-            key = next(key for key in specified_asgmts if isinstance(key, str) and key in name)
+            key = next(key for key in specified_asgmts if isinstance(
+                key, str) and key in name)
+            warning_operation(specified_asgmts[key], module, op_class, named)
             yield *module_info, specified_asgmts[key]
         elif module.__class__ in specified_asgmts:
+            warning_operation(
+                specified_asgmts[module.__class__], module, op_class, named)
             yield *module_info, specified_asgmts[module.__class__]
         else:
             if len(common_asgmts) == 0:
                 continue
+            warning_operation(common_asgmts, module, op_class, named)
             yield *module_info, common_asgmts.copy()
 
+def warning_operation(operation, module, op_class, named = False):
+    if named:
+        return
+    elif not set(operation)  <= op_class._supported_operations:
+        warnings.warn(f'This model contains {module}, but ASDL library does not support {module} with {operation}.')
 
 def modules_to_assign(model, value, *assign_rules, ignore_modules=None, named=False):
     for assign_info in module_wise_assignments(model, *assign_rules, ignore_modules=ignore_modules, named=named):
