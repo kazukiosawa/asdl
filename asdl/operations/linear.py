@@ -3,7 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from .operation import Operation
-
+from .operation import ALL_OPS
 
 class Linear(Operation):
     """
@@ -14,6 +14,8 @@ class Linear(Operation):
     in_data: n x f_in
     out_grads: n x f_out
     """
+    _supported_operations = set(ALL_OPS)
+
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):
         if in_data.ndim > 2:

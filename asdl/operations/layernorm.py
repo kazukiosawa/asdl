@@ -1,7 +1,7 @@
 import torch
 from torch import nn
-
-from .operation import Operation, OP_COV_KRON, OP_GRAM_HADAMARD
+from .operation import Operation,OP_COV_KRON,OP_GRAM_HADAMARD
+from .operation import OP_COV_UNIT_WISE, OP_COV_UNIT_WISE_INV,OP_COV_DIAG, OP_COV_DIAG_INV,OP_GRAM_DIRECT,OP_BATCH_GRADS
 
 
 class LayerNorm(Operation):
@@ -15,7 +15,11 @@ class LayerNorm(Operation):
 
     normalized_shape: f[0] x f[1] x ... x f[-1]
     """
-
+    _supported_operations = set([
+                            #OP_COV_UNIT_WISE, OP_COV_UNIT_WISE_INV,
+                            OP_COV_DIAG, OP_COV_DIAG_INV,
+                            OP_GRAM_DIRECT,OP_BATCH_GRADS
+                            ])
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):
         # restore normalized input
