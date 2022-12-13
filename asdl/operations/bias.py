@@ -6,7 +6,7 @@ from .operation import BASIC_OPS,OP_COV_KRON,OP_COV_SWIFT_KRON,OP_COV_DIAG, OP_C
 
 
 class Bias(nn.Module):
-    _supported_operations = []
+    _supported_operations = set(BASIC_OPS + [OP_COV_KRON,OP_COV_SWIFT_KRON,OP_COV_DIAG, OP_COV_DIAG_INV,OP_GRAM_DIRECT,OP_BATCH_GRADS])
     def __init__(self):
         super(Bias, self).__init__()
         self.weight = nn.Parameter(torch.zeros(1))
