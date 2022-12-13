@@ -1,5 +1,4 @@
 from contextlib import contextmanager, nullcontext
-import warnings
 
 import torch.cuda
 import torch.nn as nn
@@ -226,26 +225,17 @@ def module_wise_assignments(model, *assign_rules, ignore_modules=None, map_rule=
             # no assignment for a module that do not have params that require grad
             continue
 
-        op_class = get_op_class(module)
         if module in specified_asgmts:
-            if not (named or set(specified_asgmts[module])  <= op_class._supported_operations):
-                warnings.warn(f'This model contains {module}, but ASDL library does not support {module} with {specified_asgmts[module.__class__]}.')
             yield *module_info, specified_asgmts[module]
         elif any(isinstance(key, str) and key in name for key in specified_asgmts):
             key = next(key for key in specified_asgmts if isinstance(key, str) and key in name)
-            if not (named or set(specified_asgmts[key])  <= op_class._supported_operations):
-                warnings.warn(f'This model contains {module}, but ASDL library does not support {module} with {specified_asgmts[module.__class__]}.')
             yield *module_info, specified_asgmts[key]
         elif module.__class__ in specified_asgmts:
-            if not (named or set(specified_asgmts[module.__class__])  <= op_class._supported_operations):
-                warnings.warn(f'This model contains {module}, but ASDL library does not support {module} with {specified_asgmts[module.__class__]}.')
             yield *module_info, specified_asgmts[module.__class__]
         else:
             if len(common_asgmts) == 0:
                 continue
-            if not (named or set(common_asgmts)  <= op_class._supported_operations):
-                warnings.warn(f'This model contains {module}, but ASDL library does not support {module} with {common_asgmts.copy()}.')
-            yield *module_info, common_asgmts
+            yield *module_info, common_asgmts.copy()
 
 
 def modules_to_assign(model, value, *assign_rules, ignore_modules=None, named=False):

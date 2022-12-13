@@ -3,7 +3,6 @@ from torch import nn
 
 from ..utils import im2col_2d
 from .operation import Operation
-from .operation import ALL_OPS,OP_RFIM_RELU,OP_RFIM_SOFTMAX
 
 
 class Conv2d(Operation):
@@ -19,7 +18,6 @@ class Conv2d(Operation):
     kernel_size = (k_h)(k_w)
     out_size = output feature map size
     """
-    _supported_operations = set(ALL_OPS) - set([OP_RFIM_RELU,OP_RFIM_SOFTMAX])
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):
         # n x c x h_in x w_in -> n x c(kh)(kw) x (h_out)(w_out)
@@ -146,12 +144,6 @@ class Conv2d(Operation):
         return scale_w,
 
     @staticmethod
-    def cov_unit_wise(module, in_data, out_grads):
-        m = torch.bmm(out_grads, in_data.transpose(1, 2))  # n x c_out x cin_ks
-        m = m.permute(1, 2, 0)  # c_out x cin_ks x n
-        return torch.matmul(m, m.transpose(1, 2))  # c_out x cin_ks x cin_ks
-
-    @staticmethod
     def gram_A(module, in_data1, in_data2=None):
         # n x (c_in)(kernel_size)(out_size)
         m1 = in_data1.flatten(start_dim=1)
@@ -169,6 +161,12 @@ class Conv2d(Operation):
             return torch.matmul(m1, m1.T).div(out_size)  # n x n
         m2 = out_grads2.flatten(start_dim=1)
         return torch.matmul(m1, m2.T).div(out_size)  # n x n
+
+    @staticmethod
+    def cov_unit_wise(module, in_data, out_grads):
+        m = torch.bmm(out_grads, in_data.transpose(1, 2))  # n x c_out x cin_ks
+        m = m.permute(1, 2, 0)  # c_out x cin_ks x n
+        return torch.matmul(m, m.transpose(1, 2))  # c_out x cin_ks x cin_ks
 
     @staticmethod
     def in_data_mean(module, in_data):

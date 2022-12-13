@@ -351,9 +351,9 @@ if __name__=='__main__':
     model = model.cuda()
 
     if args.optim == OPTIM_ADAMW:
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay,eps=args.damping)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     else:
-        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr,momentum=args.momentum, weight_decay=args.weight_decay,nesterov = args.nesterov)
+        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr,momentum=args.momentum, weight_decay=args.weight_decay)
 
     config = asdl.PreconditioningConfig(data_size=args.batch_size,
                                     damping=args.damping,
