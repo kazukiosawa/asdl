@@ -1,11 +1,11 @@
 import torch
 from torch import nn
 from .operation import Operation
-from .operation import OP_COV_KRON,OP_COV_SWIFT_KRON,OP_BATCH_GRADS,SHAPE_DIAG,OP_RFIM_RELU,OP_RFIM_SOFTMAX,OP_MEAN_INPUTS,OP_MEAN_OUTPUTS,OP_SPATIAL_MEAN_OUTPUTS,OP_OUT_SPATIAL_SIZE,OP_BFGS_KRON_S_AS,OP_COV_UNIT_WISE, OP_COV_UNIT_WISE_INV,OP_COV_DIAG, OP_COV_DIAG_INV,OP_GRAM_HADAMARD,OP_GRAM_DIRECT,OP_MEAN_OUTGRADS,OP_SPATIAL_MEAN_OUTGRADS,OP_SKETCHED_GRAM
+from .operation import BASIC_OPS,OP_COV_KRON,OP_BATCH_GRADS,SHAPE_DIAG,OP_COV_DIAG, OP_COV_DIAG_INV
 
 
 class Embedding(Operation):
-    _supported_operations = set([OP_COV_KRON,OP_BATCH_GRADS,SHAPE_DIAG,OP_COV_DIAG, OP_COV_DIAG_INV])
+    _supported_operations = set(BASIC_OPS+[OP_COV_KRON,OP_BATCH_GRADS,SHAPE_DIAG,OP_COV_DIAG, OP_COV_DIAG_INV])
     @staticmethod
     def batch_grads_weight(
         module: nn.Embedding, in_data: torch.Tensor, out_grads: torch.Tensor
