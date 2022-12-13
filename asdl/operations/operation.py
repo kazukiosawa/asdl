@@ -78,9 +78,10 @@ BWD_OPS = [OP_SAVE_OUTGRADS,
           + BWD_OPS_WITH_INPUTS
 
 BASIC_OPS = [OP_FULL_COV,OP_FULL_CVP,
-            OP_SAVE_INPUTS,OP_SAVE_OUTPUTS,
-            OP_SAVE_OUTGRADS,OP_COV, OP_COV_INV,
-            OP_CVP,OP_GRAM_DIRECT]
+             OP_SAVE_INPUTS,OP_SAVE_OUTPUTS,
+             OP_SAVE_OUTGRADS,OP_COV, OP_COV_INV,
+             OP_CVP,OP_GRAM_DIRECT]
+
 
 class Operation:
     def __init__(self, module, op_names, model_for_kernel=None):
