@@ -5,7 +5,7 @@ from .operation import BASIC_OPS, OP_COV_DIAG, OP_COV_DIAG_INV, OP_GRAM_DIRECT, 
 
 
 class _BatchNormNd(Operation):
-    _supported_operations = set(
+    supported_operations = set(
         BASIC_OPS + [OP_COV_DIAG, OP_COV_DIAG_INV, OP_GRAM_DIRECT, OP_BATCH_GRADS])
 
     @staticmethod

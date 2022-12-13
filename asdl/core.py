@@ -250,7 +250,7 @@ def module_wise_assignments(model, *assign_rules, ignore_modules=None, map_rule=
 def warning_operation(operation, module, op_class, named = False):
     if named:
         return
-    elif not set(operation)  <= op_class._supported_operations:
+    elif not set(operation) <= op_class.supported_operations:
         warnings.warn(f'This model contains {module}, but ASDL library does not support {module} with {operation}.')
 
 

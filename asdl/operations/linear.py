@@ -15,7 +15,7 @@ class Linear(Operation):
     in_data: n x f_in
     out_grads: n x f_out
     """
-    _supported_operations = set(ALL_OPS)
+    supported_operations = set(ALL_OPS)
 
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):

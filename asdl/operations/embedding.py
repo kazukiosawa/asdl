@@ -5,7 +5,7 @@ from .operation import BASIC_OPS, OP_COV_KRON, OP_BATCH_GRADS, SHAPE_DIAG, OP_CO
 
 
 class Embedding(Operation):
-    _supported_operations = set(
+    supported_operations = set(
         BASIC_OPS+[OP_COV_KRON, OP_BATCH_GRADS, SHAPE_DIAG, OP_COV_DIAG, OP_COV_DIAG_INV])
 
     @staticmethod

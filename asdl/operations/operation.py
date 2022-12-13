@@ -84,6 +84,8 @@ BASIC_OPS = [OP_FULL_COV, OP_FULL_CVP,
 
 
 class Operation:
+    supported_operations = set(ALL_OPS)
+
     def __init__(self, module, op_names, model_for_kernel=None):
         if hasattr(module, 'weight'):
             requires_grad = module.weight.requires_grad

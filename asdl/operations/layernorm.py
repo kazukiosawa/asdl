@@ -15,7 +15,7 @@ class LayerNorm(Operation):
 
     normalized_shape: f[0] x f[1] x ... x f[-1]
     """
-    _supported_operations = set(
+    supported_operations = set(
         BASIC_OPS+[OP_COV_DIAG, OP_COV_DIAG_INV, OP_GRAM_DIRECT, OP_BATCH_GRADS])
 
     @staticmethod

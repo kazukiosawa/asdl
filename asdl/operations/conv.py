@@ -19,7 +19,7 @@ class Conv2d(Operation):
     kernel_size = (k_h)(k_w)
     out_size = output feature map size
     """
-    _supported_operations = set(ALL_OPS) - set([OP_RFIM_RELU, OP_RFIM_SOFTMAX])
+    supported_operations = set(ALL_OPS) - {OP_RFIM_RELU, OP_RFIM_SOFTMAX}
 
     @staticmethod
     def preprocess_in_data(module, in_data, out_data):
