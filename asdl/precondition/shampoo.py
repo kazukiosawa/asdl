@@ -197,9 +197,6 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
         
         return split_loc
         
-
-    def do_forward_and_backward(self, step=None):
-        return True
     
     def do_forward_and_backward(self, step=None):
         return True
