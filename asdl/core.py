@@ -121,12 +121,6 @@ def save_outgrads(model: nn.Module, targets=None, ignore_modules=None) -> Operat
     return extend(model, *assign_rules, ignore_modules=ignore_modules)
 
 
-def supported_modules(model):
-    for module in model.modules():
-        if isinstance(module, _supported_module_classes):
-            yield module
-
-
 def named_supported_modules(model):
     for name, module in model.named_modules():
         if isinstance(module, _supported_module_classes):
