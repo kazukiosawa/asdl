@@ -8,6 +8,10 @@ import torch.nn.parameter
 from torch.nn.parameter import Parameter
 from .prec_grad_maker import PreconditionedGradientMaker, PreconditioningConfig
 
+from torch.nn.utils import parameters_to_vector, vector_to_parameters
+import torch.distributed as dist
+from torch.cuda import nvtx
+
 
 __all__ = ['ShampooGradientMaker']
 
@@ -24,17 +28,185 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
     Args:
         model (Module): Target module to calculate gradient
         config (PreconditioningConfig): Configuration for gradient preconditioning
+        block_size (int): defines the even smaller partition if not _invalid (see class BlockPartitioner)
     """
 
-    def __init__(self, model: torch.nn.Module, config: PreconditioningConfig):
+    def __init__(self, model: torch.nn.Module, config: PreconditioningConfig, 
+                 block_size: int = _invalid, sync_group: dist.ProcessGroup = None,):
         super().__init__(model, config)
-        self.preconditioners: List[Preconditioner] = [
-            Preconditioner(p, config) for p in self.module_dict.parameters() if p.ndim > 1]
+        self.sync_group = sync_group
+        self.block_size = block_size
+        if dist.is_initialized(): #if initialized, we do automatically distr model parallelism (atm only support layer-wise distributed (future maybe dim-wise of each layer parallelized))
+            self.world_rank = dist.get_rank()
+            self.world_size = dist.get_world_size()
+            self.splits, self.partitioned_modules = self.get_distr_prec_partition()
+        else:
+            self.world_rank = 0
+            self.world_size = 1
+            self.splits, self.partitioned_modules = self.get_distr_prec_partition()
 
+        assert self.world_size >= len(self.splits) + 1, "world_size and number of splits do not match! splits = " + str(self.splits) 
+
+        self.preconditioners = []
+        layer = 0
+        for p in model.parameters():
+            if p.ndim > 1 and p.requires_grad:
+                if self.world_rank == self.partitioned_modules[layer]:
+                    self.preconditioners.append(Preconditioner(p, config))
+                layer += 1
+
+    def get_distr_prec_partition(self):
+        """
+        Distributes the workload by computational cost of each layer for total number of GPUs
+
+        TODO: multiple GPUs for one layer
+
+        e.g.
+        1 GPU for ResNet18:
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+        3 GPUs for ResNet18:
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2]
+
+        8 GPUs for ResNet18:
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 3, 4, 5, 6, 7]
+
+        21 or more GPUs for ResNet18:
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+        2 GPUs for 3 layers MLP (if first layer is bigger than 2nd and 3rd):
+        [0,1,1]
+        """
+
+        total_comp_cost = 0
+        comp_cost_layers = []
+        shapes_list = []
+        for p in self.model.parameters():
+            if p.ndim > 1 and p.requires_grad:
+                _transformed_shape = _merge_small_dims(p.shape, self.block_size)
+                _partitioner = BlockPartitioner(_transformed_shape, self.block_size)
+                shapes = _partitioner.kronecker_factor_shapes()
+
+                shapes_list.append(_transformed_shape)
+                comp_cost = self.computational_cost(shapes)
+                total_comp_cost += comp_cost
+                comp_cost_layers.append(comp_cost)
+
+        num_layers = len(comp_cost_layers)
+
+        partitions = [0]*num_layers
+        if self.world_size == 1:
+            return [], partitions
+        elif num_layers > self.world_size:
+            split_list = np.array([0])
+
+            for rank in range(self.world_size-1):
+                if rank == 0:
+                    split_list = np.append(split_list, self.next_split(comp_cost_layers))
+                else:
+                    sub_sums = []
+                    for i in range(1, len(split_list)):
+                        
+                        local_comp_cost = np.sum(comp_cost_layers[split_list[i-1]:split_list[i]])
+                        sub_sums.append(local_comp_cost)
+                        
+                        if i == len(split_list) - 1:
+                            local_comp_cost = np.sum(comp_cost_layers[split_list[i]:])
+                            sub_sums.append(local_comp_cost)
+
+                    while(True):
+                        i = np.argmax(sub_sums)
+                        if i == len(sub_sums) - 1:
+                            sub_comp_cost_layers = comp_cost_layers[split_list[i]:]
+                            shift = split_list[i]
+                        else:
+                            sub_comp_cost_layers = comp_cost_layers[split_list[i]:split_list[i+1]]
+                            shift = split_list[i]
+
+                        if len(sub_comp_cost_layers) > 1:
+                            break
+                        else:
+                            sub_sums[i] = -1
+
+
+                    split_list = np.append(split_list, self.next_split(sub_comp_cost_layers) + shift)
+                    split_list = np.sort(split_list)
+
+            sub_sums = []
+            for i in range(1, len(split_list)):
+                
+                local_comp_cost = np.sum(comp_cost_layers[split_list[i-1]:split_list[i]])
+                sub_sums.append(local_comp_cost)
+                
+                if i == len(split_list) - 1:
+                    local_comp_cost = np.sum(comp_cost_layers[split_list[i]:])
+                    sub_sums.append(local_comp_cost)
+
+            #if self.world_rank == 0:
+            #    print(sub_sums, "\n")
+
+            next_split = split_list[1]
+            rank = 0
+            for i in range(len(partitions)):
+                if i == next_split:
+                    rank += 1
+                    if rank != self.world_size - 1:
+                        next_split = split_list[rank+1]
+                
+                partitions[i] = rank
+            return split_list[1:], partitions
+        else: #atm, we do not support multiple gpus for one layer
+            rank = 0
+            for i in range(num_layers):
+                partitions[i] = i
+                
+            return partitions[1:], partitions
+
+
+    def computational_cost(self, shapes):
+        """
+        input: shape: [[x, x],[y, y],...] (Blockpartitioner.kronecker_factor_shape)
+
+        output: returns the compuational cost of this Blockpartitioned layers
+        """
+        tmp_cost = 0
+        for shape in shapes:
+            assert len(shape) == 2
+            assert shape[0] == shape[1]
+
+            tmp_cost += shape[0]**0.4 # ATM simple O(n^3) assumption (maybe even less 0.4)
+
+        return tmp_cost
+
+    def next_split(self, subset_partitions):
+        """
+        deciding where the next split is happening
+        
+        input: subset_partitions: [] is a subset of comp_cost_layers
+
+        output: index where to split (int)
+        """
+        assert len(subset_partitions) > 1
+
+        x = np.array(subset_partitions)
+        y = np.sum(subset_partitions)/2
+
+        split_loc = len(x[np.cumsum(x) < y])
+
+        split_loc += 1
+        
+        return split_loc
+        
+    
     def do_forward_and_backward(self, step=None):
         return True
 
     def update_curvature(self):
+        # TODO: Not needed if ASDL combined with PyTorch's DDP
+        if self.world_size > 1:
+            with nvtx.range('reduce_scatter_grads'):
+                self.reduce_scatter_grads()
+        
         for preconditioner in self.preconditioners:
             preconditioner.update_statistics()
 
@@ -45,6 +217,84 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
     def precondition(self):
         for preconditioner in self.preconditioners:
             preconditioner.precondition()
+
+        if self.world_size > 1:
+            with nvtx.range('all_gather_grads'):
+                self.all_gather_grads()
+
+    def reduce_scatter_grads(self):
+        grads = [p.grad for p in self.model.parameters() if p.ndim > 1 and p.requires_grad] #this could be all done ones at __init__
+
+        grads_list = []
+        tensor_list = []
+        for i in range(len(self.splits)):
+            if i == 0:
+                grads_split = grads[:self.splits[i]]
+                grads_list.append(grads_split)
+                tensor_list.append(parameters_to_vector(grads_split))
+            elif len(self.splits) > 1:
+                grads_split = grads[self.splits[i-1]:self.splits[i]]
+                grads_list.append(grads_split)
+                tensor_list.append(parameters_to_vector(grads_split))
+            
+            if i == len(self.splits) - 1:
+                grads_split = grads[self.splits[i]:]
+                grads_list.append(grads_split)
+                tensor_list.append(parameters_to_vector(grads_split))
+
+        assert len(self.splits)+1 == len(tensor_list) <= self.world_size, str(self.splits) + ', ' + len(tensor_list) + ', '  + str(self.world_size)
+            
+        group = self.sync_group
+
+        #print("before scatter: ", grads, "\n")
+
+        handler_list = []
+        for i in range(len(tensor_list)):
+            handler = dist.reduce(tensor_list[i], i, op=dist.ReduceOp.AVG, group=group, async_op=True)
+            handler_list.append(handler)
+
+        for handler in handler_list:
+            handler.wait()
+        
+        if self.world_rank < len(tensor_list):  # this check is needed if there are more GPUs than layers
+            vector_to_parameters(tensor_list[self.world_rank], grads_list[self.world_rank])
+
+        #print("after scatter: ", grads, "\n")
+
+    def all_gather_grads(self):
+        grads = [p.grad for p in self.model.parameters() if p.ndim > 1 and p.requires_grad] #this could be all done ones at __init__
+
+        grads_list = []
+        tensor_list = []
+        for i in range(len(self.splits)):
+            if i == 0:
+                grads_split = grads[:self.splits[i]]
+                grads_list.append(grads_split)
+                tensor_list.append(parameters_to_vector(grads_split))
+            elif len(self.splits) > 1:
+                grads_split = grads[self.splits[i-1]:self.splits[i]]
+                grads_list.append(grads_split)
+                tensor_list.append(parameters_to_vector(grads_split))
+            
+            if i == len(self.splits) - 1:
+                grads_split = grads[self.splits[i]:]
+                grads_list.append(grads_split)
+                tensor_list.append(parameters_to_vector(grads_split))
+
+        assert len(self.splits)+1 == len(tensor_list) <= self.world_size, str(self.splits) + ', ' + len(tensor_list) + ', '  + str(self.world_size)
+
+        group = self.sync_group
+
+        handler_list = []
+        for i in range(len(tensor_list)):
+            handler = dist.broadcast(tensor_list[i], i, group=group, async_op=True)
+            handler_list.append(handler)
+
+        for handler in handler_list:
+            handler.wait()
+
+        for i in range(len(tensor_list)): # all GPUs unpack the new gotten grads
+            vector_to_parameters(tensor_list[i], grads_list[i])
 
 
 class Preconditioner:
