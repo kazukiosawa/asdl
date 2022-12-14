@@ -268,6 +268,7 @@ class Operation:
                 A = self.cov_kron_A(module, in_data).mul_(cov_scale)
                 del in_data
                 B = self.cov_kron_B(module, out_grads).mul_(cov_scale)
+
                 damping_A, damping_B = self.cov_kron_damping(A, B)
                 A_inv = cholesky_inv(A, damping_A)
                 del A
@@ -280,9 +281,10 @@ class Operation:
                 self.accumulate_result(B, OP_COV_KRON, 'B')  # not OP_COV_SWIFT_KRON
             elif op_name == OP_COV_SWIFT_KRON_INV:
                 A = self.cov_swift_kron_A(module, in_data)
+                del in_data
                 B = self.cov_swift_kron_B(module, out_grads)
                 damping_A, damping_B = self.cov_kron_damping(A, B)
-                del in_data
+
                 if A.shape[0] == A.shape[1]:
                     A_inv = cholesky_inv(A.mul_(cov_scale), damping_A)
                 else:
