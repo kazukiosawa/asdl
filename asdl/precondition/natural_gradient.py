@@ -17,7 +17,8 @@ from .prec_grad_maker import PreconditionedGradientMaker, PreconditioningConfig
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 _invalid_ema_decay = -1
 _invalid_data_size = -1
-_module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_SWIFT_KRON, SHAPE_KFE, SHAPE_UNIT_WISE, SHAPE_DIAG]
+_module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_SWIFT_KRON, SHAPE_KFE, SHAPE_DIAG]
+#_module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_SWIFT_KRON, SHAPE_KFE, SHAPE_UNIT_WISE, SHAPE_DIAG]
 
 __all__ = [
     'NaturalGradientMaker', 'FullNaturalGradientMaker', 'LayerWiseNaturalGradientMaker',
@@ -85,6 +86,22 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
             self.shape_for[name] = shapes[0]
         self._named_modules_for = {}
 
+        fisher_config = FisherConfig(
+            fisher_type=fisher_type,
+            fisher_shapes=fisher_shape,
+            loss_type=loss_type,
+            n_mc_samples=n_mc_samples,
+            ignore_modules=config.ignore_modules,
+            var=var,
+            seed=seed,
+        )
+        self.fisher_maker = get_fisher_maker(model, fisher_config)
+        self.fisher_type = fisher_type
+        self.fisher_shape = fisher_shape
+        self.scale = scale
+        self.grad_scale = grad_scale
+        self.module_partitions = module_partitions
+
         if module_partitions is not None:
             if not dist.is_initialized():
                 raise EnvironmentError('torch.distributed has to be initialized when module_partitions is set.')
@@ -110,20 +127,6 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
             self.world_size = 1
             self.partitions = self.get_distr_prec_partition()
 
-        fisher_config = FisherConfig(
-            fisher_type=fisher_type,
-            fisher_shapes=fisher_shape,
-            loss_type=loss_type,
-            n_mc_samples=n_mc_samples,
-            ignore_modules=config.ignore_modules,
-            var=var,
-            seed=seed,
-        )
-        self.fisher_maker = get_fisher_maker(model, fisher_config)
-        self.fisher_type = fisher_type
-        self.fisher_shape = fisher_shape
-        self.scale = scale
-        self.grad_scale = grad_scale
 
         if sync_group is not None:
             if sync_group_ranks is None:
@@ -138,6 +141,7 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         self.grad_sync_handles = []
         self.grads = []
         self.packed_grads = []
+
 
     def get_fisher_from_model(self):
         """
@@ -410,6 +414,9 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
                                            damping=self.config.damping
                                            )
 
+        if self.do_accumulate and self.world_size > 1:         
+            self.reduce_scatter_curvature()
+
     def update_preconditioner(self, damping=None, module_name=None, kron=None, zero_curvature=False, partition_aware=False):
         if not self.do_accumulate:
             return
@@ -442,7 +449,7 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
                         for A_or_B in kron:
                             event += f'_{A_or_B}'
 
-                    with nvtx.range(event + self.nvtx_tag(name)):
+                    with nvtx.range(event + "_" + name):
                         if self.is_module_for_inv_and_precondition(module):
                             if shape in [SHAPE_KRON, SHAPE_SWIFT_KRON]:
                                 matrix.update_inv(damping, calc_A_inv='A' in kron, calc_B_inv='B' in kron)
@@ -636,6 +643,7 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
             vector_to_parameters(vector, tensor_list)
 
         assert rank < self.world_size
+
     def reduce_curvature(self, module_name, kron=None, diag=None, with_grad=False):
         module_partitions = self.module_partitions
         if module_partitions is None:
@@ -808,12 +816,12 @@ class NaturalGradientMaker(PreconditionedGradientMaker):
         module_list = nn.ModuleList([m for m in self.model.modules()])
         self._all_reduce_grad(module_list, async_op=async_op, op=dist.ReduceOp.AVG)
 
-    def _all_reduce_grad(self, module: nn.Module, async_op=False):
+    def _all_reduce_grad(self, module: nn.Module, async_op=False, op=dist.ReduceOp.SUM):
         grads = [p.grad for p in module.parameters() if p.grad is not None]
         if len(grads) == 0:
             return
         packed_tensor = parameters_to_vector(grads)
-        handle = dist.all_reduce(packed_tensor, group=self.sync_group, async_op=async_op)
+        handle = dist.all_reduce(packed_tensor, op=op, group=self.sync_group, async_op=async_op)
         if async_op:
             self.grad_sync_handles.append(handle)
             self.grads.append(grads)
