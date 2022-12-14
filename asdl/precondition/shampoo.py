@@ -28,10 +28,14 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
     Args:
         model (Module): Target module to calculate gradient
         config (PreconditioningConfig): Configuration for gradient preconditioning
+        block_size (int): defines the even smaller partition if not _invalid (see class BlockPartitioner)
     """
 
-    def __init__(self, model: torch.nn.Module, config: PreconditioningConfig):
+    def __init__(self, model: torch.nn.Module, config: PreconditioningConfig, 
+                 block_size: int = _invalid, sync_group: dist.ProcessGroup = None,):
         super().__init__(model, config)
+        self.sync_group = sync_group
+        self.block_size = block_size
         if dist.is_initialized(): #if initialized, we do automatically distr model parallelism (atm only support layer-wise distributed (future maybe dim-wise of each layer parallelized))
             self.world_rank = dist.get_rank()
             self.world_size = dist.get_world_size()
@@ -79,8 +83,8 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
         shapes_list = []
         for p in self.model.parameters():
             if p.ndim > 1 and p.requires_grad:
-                _transformed_shape = _merge_small_dims(p.shape, self.config.block_size)
-                _partitioner = BlockPartitioner(_transformed_shape, self.config.block_size)
+                _transformed_shape = _merge_small_dims(p.shape, self.block_size)
+                _partitioner = BlockPartitioner(_transformed_shape, self.block_size)
                 shapes = _partitioner.kronecker_factor_shapes()
 
                 shapes_list.append(_transformed_shape)
@@ -243,7 +247,7 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
 
         assert len(self.splits)+1 == len(tensor_list) <= self.world_size, str(self.splits) + ', ' + len(tensor_list) + ', '  + str(self.world_size)
             
-        group = self.config.sync_group
+        group = self.sync_group
 
         #print("before scatter: ", grads, "\n")
 
@@ -282,7 +286,7 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
 
         assert len(self.splits)+1 == len(tensor_list) <= self.world_size, str(self.splits) + ', ' + len(tensor_list) + ', '  + str(self.world_size)
 
-        group = self.config.sync_group
+        group = self.sync_group
 
         handler_list = []
         for i in range(len(tensor_list)):
