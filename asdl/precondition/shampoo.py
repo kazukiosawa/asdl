@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Tuple, List
 import itertools
 
@@ -7,53 +6,32 @@ import numpy as np
 import torch
 import torch.nn.parameter
 from torch.nn.parameter import Parameter
-from .prec_grad_maker import PreconditionedGradientMaker, PreconditionedGradientConfig
+from .prec_grad_maker import PreconditionedGradientMaker, PreconditioningConfig
 
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
-
+import torch.distributed as dist
 from torch.cuda import nvtx
 
-import torch.distributed as dist
 
-
-__all__ = ['ShampooGradientMaker', 'ShampooGradientConfig']
+__all__ = ['ShampooGradientMaker']
 
 _invalid = -1
 
 
-"""
-GradientMaker for Shampoo (https://arxiv.org/abs/1802.09568).
-
-This implementation is based on
-https://github.com/google-research/google-research/tree/master/scalable_shampoo/pytorch,
-simplified and modified to be compatible with PreconditionedGradientMaker.
-
-The role of Shampoo"GradientMaker" is to "make param.grad", so optimization is
-performed by a torch.optim.Optimizer (e.g., torch.optim.SGD).
-"""
-
-
-@dataclass
-class ShampooGradientConfig(PreconditionedGradientConfig):
-    damping: float = 1e-12
-    init_scale: float = 1e-12
-    inverse_exponent: int = _invalid # fixed exponent for preconditioner (default: invalid)
-    ema_decay: float = _invalid
-    # Block size for large layers (default: invalid).
-    # Block size = 1 ==> AdaGrad (Don't do this, extremely inefficient!)
-    # Block size should be as large as feasible under memory/time constraints.
-    block_size: int = _invalid
-    # Automatic shape interpretation (for eg: [4, 3, 1024, 512] would result in
-    # 12 x [1024, 512] L and R statistics. Disabled by default which results in
-    # Shampoo constructing statistics [4, 4], [3, 3], [1024, 1024], [512, 512].
-    best_effort_shape_interpretation: bool = False
-    sync_group: dist.ProcessGroup = None
-
-
 class ShampooGradientMaker(PreconditionedGradientMaker):
-    def __init__(self, model, config: ShampooGradientConfig):
-        super().__init__(model, config)
+    """GradientMaker for calculating the preconditioned gradient by `Shampoo <https://arxiv.org/abs/1802.09568>`_.
 
+    This implementation is based on
+    https://github.com/google-research/google-research/tree/master/scalable_shampoo/pytorch,
+    simplified and modified to be compatible with the GradientMaker interface.
+
+    Args:
+        model (Module): Target module to calculate gradient
+        config (PreconditioningConfig): Configuration for gradient preconditioning
+    """
+
+    def __init__(self, model: torch.nn.Module, config: PreconditioningConfig):
+        super().__init__(model, config)
         if dist.is_initialized(): #if initialized, we do automatically distr model parallelism (atm only support layer-wise distributed (future maybe dim-wise of each layer parallelized))
             self.world_rank = dist.get_rank()
             self.world_size = dist.get_world_size()
@@ -65,8 +43,6 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
 
         assert self.world_size >= len(self.splits) + 1, "world_size and number of splits do not match! splits = " + str(self.splits) 
 
-
-
         self.preconditioners = []
         layer = 0
         for p in model.parameters():
@@ -75,16 +51,11 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
                     self.preconditioners.append(Preconditioner(p, config))
                 layer += 1
 
-        if self.world_rank == 0:
-            print(self.splits, "\n", self.partitioned_modules, flush=True)
-        #print("rank: ", self.world_rank, " has:\n", [prec._transformed_shape for prec in self.preconditioners])
-
-
     def get_distr_prec_partition(self):
         """
         Distributes the workload by computational cost of each layer for total number of GPUs
 
-        TODO: multiple GPUs for on layer
+        TODO: multiple GPUs for one layer
 
         e.g.
         1 GPU for ResNet18:
@@ -116,11 +87,6 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
                 comp_cost = self.computational_cost(shapes)
                 total_comp_cost += comp_cost
                 comp_cost_layers.append(comp_cost)
-
-        if self.world_rank == 0:
-            print("shapes: ", shapes_list, "\n")
-            #print("total_comp_cost: ", total_comp_cost)
-            print("comp_cost_layers: ", comp_cost_layers)
 
         num_layers = len(comp_cost_layers)
 
@@ -192,33 +158,6 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
                 
             return partitions[1:], partitions
 
-        """
-        # Layerwise partitioning (old version)
-        num_layers = len(layers)
-
-        partitions = [0]*num_layers
-        if self.world_size == 0:
-            return [], partitions
-        elif num_layers > self.world_size:
-            split_size = num_layers//self.world_size + 1
-            split_counter = split_size
-            split_list = [split_counter]
-            rank = 0
-            for i in range(num_layers):
-                if i >= split_counter and rank != self.world_size - 1:
-                    split_counter += split_size
-                    rank += 1
-                    split_list.append(split_counter)
-                
-                partitions[i] = rank
-            return split_list[:-1], partitions
-        else: #atm, we do not support multiple gpus for one layer
-            rank = 0
-            for i in range(num_layers):
-                partitions[i] = i
-                
-            return partitions[1:], partitions
-        """
 
     def computational_cost(self, shapes):
         """
@@ -250,7 +189,6 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
 
         split_loc = len(x[np.cumsum(x) < y])
 
-        #if split_loc == 0:  # for resnet and densenet, this is really good
         split_loc += 1
         
         return split_loc
@@ -258,14 +196,16 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
 
     def do_forward_and_backward(self, step=None):
         return True
-
+    
+    def do_forward_and_backward(self, step=None):
+        return True
 
     def update_curvature(self):
         # TODO: Not needed if ASDL combined with PyTorch's DDP
         if self.world_size > 1:
             with nvtx.range('reduce_scatter_grads'):
                 self.reduce_scatter_grads()
-
+        
         for preconditioner in self.preconditioners:
             preconditioner.update_statistics()
 
@@ -352,33 +292,33 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
         for handler in handler_list:
             handler.wait()
 
-        #print("before gather: ", grads)
-
         for i in range(len(tensor_list)): # all GPUs unpack the new gotten grads
             vector_to_parameters(tensor_list[i], grads_list[i])
 
-        #print("after gather: ", grads)
-
 
 class Preconditioner:
-    def __init__(self, param: Parameter, config: ShampooGradientConfig):
+    def __init__(self, param: Parameter, config: PreconditioningConfig,
+                 block_size: int = _invalid, inverse_exponent: int = _invalid,
+                 best_effort_shape_interpretation: bool = False, init_scale: float = 1e-12):
         self.config = config
         self.param = param
         self._transformed_shape = param.shape
-        if config.best_effort_shape_interpretation:
-            self._transformed_shape = _merge_small_dims(param.shape, config.block_size) #if block_size invalid: do nothing
+        if best_effort_shape_interpretation:
+            self._transformed_shape = _merge_small_dims(param.shape, block_size)
 
-        self._partitioner = BlockPartitioner(self._transformed_shape, config.block_size)
+        self._partitioner = BlockPartitioner(self._transformed_shape, block_size)
         shapes = self._partitioner.kronecker_factor_shapes()
         ndim = len(self._transformed_shape)
         device = param.device
-        assert ndim > 1
+        if ndim <= 1:
+            raise ValueError(f'len(self._transformed_shape) has to be > 1. Got {ndim}.')
         self.statistics = [
-            config.init_scale * torch.eye(s[0], device=device) for s in shapes
+            init_scale * torch.eye(s[0], device=device) for s in shapes
         ]
         self.preconditioners = [
             torch.eye(s[0], device=device) for s in shapes
         ]
+        self.inverse_exponent = inverse_exponent
 
     def update_statistics(self):
         """
@@ -399,7 +339,7 @@ class Preconditioner:
 
     def update_preconditioners(self):
         """Compute L^{-1/exp} for each stats matrix L."""
-        exp = self.config.inverse_exponent
+        exp = self.inverse_exponent
         if exp == _invalid:
             exp = 2 * len(self._transformed_shape)
         damping = self.config.damping
@@ -494,7 +434,8 @@ class BlockPartitioner:
     def partition(self, tensor):
         """Partition tensor into blocks."""
 
-        assert tensor.shape == self._shape
+        if tensor.shape != self._shape:
+            raise ValueError(f'tensor shape ({tensor.shape}) does not match self._shape ({self._shape}).')
         tensors = [tensor]
         for (i, sizes) in self._split_sizes:
             tensors_local = []
@@ -515,7 +456,8 @@ class BlockPartitioner:
                     torch.cat(partitions[ind:ind + n], axis=i))
                 ind += n
             partitions = partial_merged_tensors
-        assert len(partitions) == 1
+        if len(partitions) > 1:
+            raise ValueError(f'len(partitions) has to be 1. Got {len(partitions)}.')
         return partitions[0]
 
 
