@@ -17,8 +17,7 @@ from .prec_grad_maker import PreconditionedGradientMaker, PreconditioningConfig
 _normalizations = (nn.BatchNorm1d, nn.BatchNorm2d)
 _invalid_ema_decay = -1
 _invalid_data_size = -1
-_module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_SWIFT_KRON, SHAPE_KFE, SHAPE_DIAG]
-#_module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_SWIFT_KRON, SHAPE_KFE, SHAPE_UNIT_WISE, SHAPE_DIAG]
+_module_level_shapes = [SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_SWIFT_KRON, SHAPE_KFE, SHAPE_UNIT_WISE, SHAPE_DIAG]
 
 __all__ = [
     'NaturalGradientMaker', 'FullNaturalGradientMaker', 'LayerWiseNaturalGradientMaker',
