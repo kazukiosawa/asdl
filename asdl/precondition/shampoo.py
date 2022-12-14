@@ -142,8 +142,8 @@ class ShampooGradientMaker(PreconditionedGradientMaker):
                     local_comp_cost = np.sum(comp_cost_layers[split_list[i]:])
                     sub_sums.append(local_comp_cost)
 
-            if self.world_rank == 0:
-                print(sub_sums, "\n")
+            #if self.world_rank == 0:
+            #    print(sub_sums, "\n")
 
             next_split = split_list[1]
             rank = 0
