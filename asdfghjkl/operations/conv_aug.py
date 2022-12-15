@@ -91,3 +91,11 @@ class Conv2dAugExt(Operation):
         out_size = out_grads.shape[-1]
         m = out_grads.mean(dim=1).transpose(0, 1).flatten(start_dim=1)  # c_out x n(out_size)
         return torch.matmul(m, m.T).div(out_size)  # c_out x c_out
+
+
+class Conv1dAug(nn.Conv1d):
+    
+    def forward(self, input):
+        k_aug = input.shape[1]
+        input = super().forward(input.flatten(start_dim=0, end_dim=1))
+        return input.reshape(-1, k_aug, *input.shape[1:])
