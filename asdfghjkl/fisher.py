@@ -306,13 +306,12 @@ def _fisher_for_cross_entropy(
         assert type(backward_kwargs) is dict
         backward_kwargs['retain_graph'] = True
 
-    with disable_param_grad(model):
-        if inputs.requires_grad:
+    # NOTE: this assumes we either want to diff wrt params OR inputs not both
+    if inputs.requires_grad:
+        with disable_param_grad(model):
             logits = model(inputs)
-        else:
-            # artificial grad-through if necessary (when param grads disabled)
-            zero = torch.zeros(1, device=inputs.device, requires_grad=True)
-            logits = model(inputs + zero)
+    else:
+        logits = model(inputs)
         
     if logits.ndim > 2:
         # reduce augmented dimension
@@ -345,9 +344,6 @@ def _fisher_for_cross_entropy(
     if COV in fisher_types:
         assert targets is not None, 'targets must be specified for computing covariance.'
         _covariance(loss_and_backward, model, targets, compute_param_grad)
-    
-    if not inputs.requires_grad:
-        del zero
 
 
 def _module_batch_grads(model):
