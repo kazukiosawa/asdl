@@ -74,7 +74,7 @@ class Operation:
             if OP_COV_KRON in self._op_names:
                 A = self.cov_kron_A(module, in_data)
                 self._kron_A = A
-                op_results[OP_COV_KRON] = {'A': A.clone()}
+                op_results[OP_COV_KRON] = {'A': A}
 
             if OP_GRAM_HADAMARD in self._op_names:
                 n_data = in_data.shape[0]
@@ -83,7 +83,7 @@ class Operation:
                     A = self.gram_A(module, in_data, in_data)
                 else:
                     A = self.gram_A(module, in_data[:n1], in_data[n1:])
-                op_results[OP_GRAM_HADAMARD] = {'A': A.clone()}
+                op_results[OP_GRAM_HADAMARD] = {'A': A}
 
             self.set_op_results(op_results)
 
@@ -101,7 +101,7 @@ class Operation:
                     op_results[op_name]['B'] = rst
                 else:
                     assert self._kron_A is not None
-                    op_results[op_name] = {'A': self._kron_A.clone(), 'B': rst}
+                    op_results[op_name] = {'A': self._kron_A, 'B': rst}
 
             elif op_name == OP_COV_UNIT_WISE:
                 assert original_requires_grad(module, 'weight')

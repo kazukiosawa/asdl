@@ -66,9 +66,10 @@ class Conv2dAugExt(Operation):
 
     @staticmethod
     def cov_diag_weight(module, in_data, out_grads):
+        # efficient reduction for augmentation (sum and mean of in and out)
         grads = torch.matmul(
-            out_grads, in_data.transpose(-1, -2)
-        ).sum(dim=1)  # n x k_aug x c_out x (c_in)(kernel_size)
+            out_grads.sum(dim=1), in_data.mean(dim=1).transpose(-1, -2)
+        ) # n x k_aug x c_out x (c_in)(kernel_size)
         rst = grads.mul(grads).sum(dim=0)  # c_out x (c_in)(kernel_size)
         return rst.view_as(module.weight)  # c_out x c_in x k_h x k_w
 
