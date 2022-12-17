@@ -4,10 +4,10 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from asdfghjkl import FISHER_EXACT, FISHER_MC, COV
-from asdfghjkl import SHAPE_FULL, SHAPE_BLOCK_DIAG
+from asdfghjkl import FISHER_EXACT, FISHER_MC, FISHER_EMP
+from asdfghjkl import SHAPE_FULL, SHAPE_LAYER_WISE
 from asdfghjkl import fisher_free_for_cross_entropy
-from asdfghjkl import NaturalGradient, LayerWiseNaturalGradient
+from asdfghjkl import FullNaturalGradient, LayerWiseNaturalGradient
 
 
 def _relative_error(v1: torch.tensor, v2: torch.tensor):
@@ -24,7 +24,7 @@ def net(n_dim, n_classes):
     model = nn.Sequential(
         nn.Linear(n_dim, n_dim),
         nn.ReLU(),
-        nn.Linear(n_dim, n_dim),
+        nn.Linear(n_dim, n_dim, bias=False),
         nn.ReLU(),
         nn.Linear(n_dim, n_classes),
     )
@@ -37,11 +37,11 @@ def convnet(n_dim, n_channels, n_classes, kernel_size=2):
         nn.Conv2d(n_channels, n_channels, kernel_size, kernel_size),
         nn.MaxPool2d(kernel_size),
         nn.ReLU(),
-        nn.Conv2d(n_channels, n_channels, kernel_size, kernel_size),
+        nn.Conv2d(n_channels, n_channels, kernel_size, kernel_size, bias=False),
         nn.MaxPool2d(kernel_size),
         nn.ReLU(),
         nn.Flatten(),
-        nn.Linear(n_features, n_classes),
+        nn.Linear(n_features, n_classes, bias=False),
     )
     return model
 
@@ -61,21 +61,27 @@ class TestCG(unittest.TestCase):
 
     def test_linear(self):
         """
-        Compare kernels for LinearNet.
+        Compare natural gradients for LinearNet.
         """
         n_dim = 32
         inputs = torch.randn(self.n_data, n_dim)
         model = net(n_dim, self.n_classes)
+        for i, p in enumerate(model.parameters()):
+            if i % 3 == 0:
+                p.requires_grad_(False)
         self._test_fisher_free(model, inputs)
 
     def test_conv(self):
         """
-        Compare kernels for ConvNet.
+        Compare natural gradients for ConvNet.
         """
         n_dim = 16
         n_channels = 3
         inputs = torch.randn(self.n_data, n_channels, n_dim, n_dim)
         model = convnet(n_dim, n_channels, self.n_classes, kernel_size=2)
+        for i, p in enumerate(model.parameters()):
+            if i % 3 == 0:
+                p.requires_grad_(False)
         self._test_fisher_free(model, inputs)
 
     def _test_fisher_free(self, model, inputs):
@@ -84,61 +90,51 @@ class TestCG(unittest.TestCase):
         targets = torch.randint(self.n_classes, (self.n_data,), device=self.device)
         damping = self.damping
 
-        def _get_ng_by_precondition(ng_fn, fisher_type):
-            precond = ng_fn(model, fisher_type=fisher_type, damping=damping)
-            precond.update_curvature(inputs, targets)
-
+        def _get_ng_by_direct_method(ng_fn, fisher_type, random_seed):
             model.zero_grad()
-            loss = F.cross_entropy(model(inputs), targets)
-            loss.backward()
-
-            precond.update_inv()
-            precond.precondition()
+            ng = ng_fn(model, fisher_type=fisher_type, damping=damping)
+            ng.refresh_curvature(inputs, targets, calc_emp_loss_grad=True, seed=random_seed)
+            ng.update_inv()
+            ng.precondition()
 
             grads = []
             for p in model.parameters():
                 if p.requires_grad:
-                    grads.append(p.grad.flatten())
+                    grads.append(p.grad.clone().flatten())
             return torch.cat(grads)
 
-        def _get_ng_by_fisher_free(fisher_type, fisher_shape, random_seed):
+        def _get_ng_by_conjugate_gradient_method(fisher_type, fisher_shape, random_seed):
             model.zero_grad()
             loss = F.cross_entropy(model(inputs), targets)
             loss.backward()
-
-            grad = [p.grad for p in model.parameters() if p.requires_grad]
-
-            ng = fisher_free_for_cross_entropy(model,
-                                               grad,
-                                               fisher_type=fisher_type,
-                                               fisher_shape=fisher_shape,
-                                               inputs=inputs,
-                                               targets=targets,
-                                               damping=damping,
-                                               max_iters=None,
-                                               random_seed=random_seed,
-                                               tol=1e-8)
-            return torch.cat([_ng.flatten() for _ng in ng])
+            ngrads = fisher_free_for_cross_entropy(model,
+                                                   fisher_type=fisher_type,
+                                                   fisher_shape=fisher_shape,
+                                                   inputs=inputs,
+                                                   targets=targets,
+                                                   damping=damping,
+                                                   max_iters=None,
+                                                   random_seed=random_seed,
+                                                   tol=1e-8)
+            return ngrads.get_flatten_vector()
 
         def _test(ng_fn, fisher_type):
             seed = int(torch.rand(1) * 100)  # for MC sampling
-
             torch.manual_seed(seed)
-            ng = _get_ng_by_precondition(ng_fn, fisher_type)
 
-            if ng_fn == NaturalGradient:
+            if ng_fn == FullNaturalGradient:
                 fisher_shape = SHAPE_FULL
             elif ng_fn == LayerWiseNaturalGradient:
-                fisher_shape = SHAPE_BLOCK_DIAG
+                fisher_shape = SHAPE_LAYER_WISE
             else:
                 return
 
-            ng2 = _get_ng_by_fisher_free(fisher_type, fisher_shape, seed)
-
+            ng = _get_ng_by_direct_method(ng_fn, fisher_type, seed)
+            ng2 = _get_ng_by_conjugate_gradient_method(fisher_type, fisher_shape, seed)
             self._assert_almost_equal(ng, ng2)
 
-        for ng_class in [NaturalGradient, LayerWiseNaturalGradient]:
-            for ftype in [FISHER_EXACT, FISHER_MC, COV]:
+        for ng_class in [FullNaturalGradient, LayerWiseNaturalGradient]:
+            for ftype in [FISHER_EXACT, FISHER_MC, FISHER_EMP]:
                 _test(ng_class, ftype)
 
     def _assert_almost_equal(self, v1, v2):

@@ -1,7 +1,8 @@
 import torch
 from torch import nn
 
-from .operation import Operation
+from .conv import Conv2d
+from ..utils import im2col_2d_aug, arr2col_1d_aug
 
 
 class Conv2dAug(nn.Conv2d):
@@ -20,7 +21,8 @@ class Conv1dAug(nn.Conv1d):
         return input.reshape(-1, k_aug, *input.shape[1:])
 
 
-class Conv2dAugExt(Operation):
+# TODO: add improvements vom .conv to diag and other operations, check kfac
+class Conv2dAugExt(Conv2d):
     """
     module.weight: c_out x c_in x k_h x k_w
     module.bias: c_out x 1
@@ -32,6 +34,21 @@ class Conv2dAugExt(Operation):
     kernel_size = (k_h)(k_w)
     out_size = output feature map size
     """
+    @staticmethod
+    def preprocess_in_data(module, in_data, out_data):
+        if isinstance(module, nn.Conv2d):
+            return im2col_2d_aug(in_data, module)
+        elif isinstance(module, nn.Conv1d):
+            return arr2col_1d_aug(in_data, module)
+        raise ValueError('Invalid operation for module', module)
+
+    @staticmethod
+    def preprocess_out_grads(module, out_grads):
+        # n x c x h_out x w_out -> n x c x (h_out)(w_out)
+        if isinstance(module, Conv2dAug):
+            return out_grads.flatten(start_dim=3)
+        return out_grads
+
     @staticmethod
     def batch_grads_weight(
         module: nn.Module, in_data: torch.Tensor, out_grads: torch.Tensor

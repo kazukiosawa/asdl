@@ -27,7 +27,7 @@ class ScaleExt(Operation):
     @staticmethod
     def batch_grads_weight(module, in_data, out_grads):
         N = out_grads.size(0)
-        return (out_grads * in_data).view(N, -1).sum(dim=1)
+        return (out_grads * in_data).view(N, -1).sum(dim=1).unsqueeze(-1)
 
     @staticmethod
     def batch_grads_aug_weight(module, in_data, out_grads):

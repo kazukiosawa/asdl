@@ -130,3 +130,10 @@ dmypy.json
 
 # PyCharm
 .idea/
+
+# VIM
+*.swp
+
+tags
+wandb
+.data

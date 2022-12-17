@@ -2,6 +2,7 @@ import os
 import copy
 
 import torch
+import torch.nn as nn
 import torch.distributed as dist
 
 from .symmatrix import SymMatrix
@@ -9,27 +10,29 @@ from .symmatrix import SymMatrix
 HESSIAN = 'hessian'  # Hessian
 FISHER_EXACT = 'fisher_exact'  # exact Fisher
 FISHER_MC = 'fisher_mc'  # Fisher estimation by Monte-Carlo sampling
-COV = 'cov'  # no-centered covariance a.k.a. empirical Fisher
+FISHER_EMP = 'fisher_emp'  # no-centered covariance a.k.a. empirical Fisher
 
 SHAPE_FULL = 'full'  # full
-SHAPE_BLOCK_DIAG = 'block_diag'  # layer-wise block-diagonal
+SHAPE_LAYER_WISE = 'layer_wise'  # layer-wise block-diagonal
 SHAPE_KRON = 'kron'  # Kronecker-factored
+SHAPE_UNIT_WISE = 'unit_wise'  # unit-wise block-diagonal
 SHAPE_DIAG = 'diag'  # diagonal
 
 __all__ = [
     'MatrixManager',
     'FISHER_EXACT',
     'FISHER_MC',
-    'COV',
+    'FISHER_EMP',
     'HESSIAN',
     'SHAPE_FULL',
-    'SHAPE_BLOCK_DIAG',
+    'SHAPE_LAYER_WISE',
     'SHAPE_KRON',
-    'SHAPE_DIAG'
+    'SHAPE_UNIT_WISE',
+    'SHAPE_DIAG',
 ]
 
-_supported_types = [HESSIAN, FISHER_EXACT, FISHER_MC, COV]
-_supported_shapes = [SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG]
+_supported_types = [HESSIAN, FISHER_EXACT, FISHER_MC, FISHER_EMP]
+_supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_DIAG]
 
 _normalizations = (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d)
 
@@ -39,12 +42,12 @@ def _requires_matrix(module: torch.nn.Module):
         return False
     if module.weight.requires_grad:
         return True
-    return hasattr(module, 'bias') and module.bias.requires_grad
+    return hasattr(module, 'bias') and module.bias is not None and module.bias.requires_grad
 
 
 class MatrixManager:
     def __init__(self, model, matrix_types, scale=1., smoothing_weight=None):
-        self._model = model
+        self._model: nn.Module = model
         self._device = next(model.parameters()).device
         if isinstance(matrix_types, str):
             matrix_types = [matrix_types]
@@ -73,7 +76,7 @@ class MatrixManager:
         assert stats_name in self._stats_names, f'stats {stats_name} does not exist.'
 
     def accumulate_matrices(
-        self, stats_name, scale=None, smoothing_weight=None
+        self, stats_name=None, scale=None, smoothing_weight=None
     ):
         """
         Accumulate the latest fisher values to acc_fisher.
@@ -174,9 +177,9 @@ class MatrixManager:
                     continue
                 if not _requires_matrix(module):
                     continue
-                matrix = SymMatrix(device=self._device)
-                if SHAPE_BLOCK_DIAG in matrix_shapes:
-                    _load_path(SHAPE_BLOCK_DIAG, 'path', 'tril', mname)
+                matrix = SymMatrix()
+                if SHAPE_LAYER_WISE in matrix_shapes:
+                    _load_path(SHAPE_LAYER_WISE, 'path', 'tril', mname)
                 if SHAPE_KRON in matrix_shapes:
                     if isinstance(module, _normalizations):
                         _load_path(
@@ -190,7 +193,7 @@ class MatrixManager:
 
             # full matrix
             if SHAPE_FULL in matrix_shapes:
-                matrix = SymMatrix(device=self._device)
+                matrix = SymMatrix()
                 _load_path(SHAPE_FULL, 'path', 'tril')
                 setattr(self._model, mat_type, matrix)
 
@@ -303,7 +306,7 @@ class MatrixManager:
                 continue
             matrix = getattr(module, stats_attr, None)
             assert matrix is not None, f'{matrix_type} for {mname} does not exist.'
-            if matrix_shape == SHAPE_BLOCK_DIAG:
+            if matrix_shape == SHAPE_LAYER_WISE:
                 assert matrix.has_data, f'{matrix_type}.{matrix_shape} for {mname} does not exist.'
                 rst = reduce_fn(rst, getattr(matrix, metrics_fn)())
             elif matrix_shape == SHAPE_KRON:

@@ -8,10 +8,11 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader, Subset, TensorDataset
 import torch.distributed as dist
 
-from .core import extend
+from .core import extend, save_inputs_outgrads
 from .operations import *
-from .precondition import Precondition
 from .utils import flatten_after_batch
+from .precondition import NaturalGradient
+from .utils import skip_param_grad
 
 
 __all__ = [
@@ -27,7 +28,10 @@ __all__ = [
     'parallel_efficient_natural_gradient_cross_entropy',
     'kernel_vector_product',
     'kernel_free_cross_entropy',
-    'kernel_eigenvalues'
+    'kernel_eigenvalues',
+    'empirical_natural_gradient',
+    'empirical_natural_gradient2',
+    'empirical_natural_gradient_by_context'
 ]
 
 
@@ -312,7 +316,7 @@ def empirical_direct_ntk(model, x1, x2=None):
         return torch.einsum('ncp,mdp->nmcd', j1, j2)  # n1 x n2 x c x c
 
 
-def empirical_implicit_ntk(model, x1, x2=None, precond: Precondition = None):
+def empirical_implicit_ntk(model, x1, x2=None, precond: NaturalGradient = None):
     n1 = x1.shape[0]
     y1 = model(x1)
     n_classes = y1.shape[-1]
@@ -344,7 +348,7 @@ def empirical_implicit_ntk(model, x1, x2=None, precond: Precondition = None):
     return ntk  # n1 x n2 x c x c
 
 
-def get_preconditioned_kernel_fn(kernel_fn, precond: Precondition):
+def get_preconditioned_kernel_fn(kernel_fn, precond: NaturalGradient):
     return partial(kernel_fn, precond=precond)
 
 
@@ -410,17 +414,18 @@ def natural_gradient_cross_entropy(model, inputs, targets, kernel, damping=1e-5)
     hessian = logits_hessian_cross_entropy(outputs)  # n x c x c
 
     is_class_wise = kernel.ndim == 3  # n x n x c
-    mat = outputs.new_zeros(n * c, n * c)  # nc x nc
-    for i in range(n):
-        for j in range(n):
-            if is_class_wise:
-                # dense x diagonal
-                diag_repeated = kernel[i, j].repeat(c, 1)  # c x c
-                block = torch.mul(hessian[i], diag_repeated)
-            else:
+    if is_class_wise:
+        mat = torch.mul(
+            kernel.repeat(1, 1, c).reshape(n, n, c, c),
+            hessian.repeat(n, 1, 1).reshape(n, n, c, c).transpose(0, 1))
+        mat = mat.transpose(1, 2).reshape(n * c, n * c)
+    else:
+        mat = outputs.new_zeros(n * c, n * c)  # nc x nc
+        for i in range(n):
+            for j in range(n):
                 # dense x dense
                 block = torch.matmul(hessian[i], kernel[i, j])
-            mat[i * c: (i+1) * c, j * c: (j+1) * c] = block
+                mat[i * c: (i+1) * c, j * c: (j+1) * c] = block
     mat.div_(n)
     mat = _add_value_to_diagonal(mat, damping)
     inv = torch.inverse(mat)
@@ -432,6 +437,8 @@ def natural_gradient_cross_entropy(model, inputs, targets, kernel, damping=1e-5)
 
     # compute natural-gradient by auto-differentiation
     torch.autograd.backward(outputs, grad_tensors=v)
+
+    return loss
 
 
 def efficient_natural_gradient_cross_entropy(model, inputs, targets, class_kernels, damping=1e-5):
@@ -527,6 +534,61 @@ def parallel_efficient_natural_gradient_cross_entropy(model, inputs, targets, lo
         p.grad.copy_(grad)
         pointer += numel
     assert pointer == packed_tensor.numel()
+
+
+def empirical_natural_gradient(model, inputs, targets, loss_fn=F.cross_entropy, damping=1e-5, data_average=True):
+    """
+    Calculate natural gradient with full empirical Fisher by using the Woodbury matrix identity
+    """
+    n = inputs.shape[0]
+
+    with extend(model, OP_GRAM_HADAMARD):
+        _zero_kernel(model, n, n)
+        outputs = model(inputs)
+        batch_loss = loss_fn(outputs, targets, reduction='none')
+        params = [p for p in model.parameters() if p.requires_grad]
+        torch.autograd.grad(batch_loss.sum(), params, retain_graph=True)
+    UtU = model.kernel  # n x n
+    Utg = UtU.sum(dim=1)  # n
+    if data_average:
+        UtU.div_(n)
+    b = _cholesky_solve(UtU, Utg, damping)
+    ones = torch.ones_like(b)
+    if data_average:
+        b /= n ** 2
+        ones /= n
+    batch_loss.backward(gradient=(ones - b) / damping)
+    if data_average:
+        return batch_loss.mean()
+    else:
+        return batch_loss.sum()
+
+
+def empirical_natural_gradient2(model, inputs, targets, loss_fn=F.cross_entropy, damping=1e-5, data_average=True):
+    """
+    Calculate natural gradient with full empirical Fisher by using the Woodbury matrix identity
+    """
+    n = inputs.shape[0]
+
+    with save_inputs_outgrads(model) as cxt:
+        outputs = model(inputs)
+        loss = loss_fn(outputs, targets, reduction='mean' if data_average else 'sum')
+        with skip_param_grad(model):
+            loss.backward()
+        empirical_natural_gradient_by_context(cxt, damping)
+    if data_average:
+        return loss / n
+    else:
+        return loss
+
+
+def empirical_natural_gradient_by_context(cxt: OperationContext, damping=1e-5):
+    UtU = cxt.calc_kernel()  # n x n
+    Utg = UtU.sum(dim=1)  # n
+    b = _cholesky_solve(UtU, Utg, damping)  # n
+    ones = torch.ones_like(b)  # n
+    scale = (ones - b) / damping  # n
+    cxt.calc_grads(scale)
 
 
 def kernel_free_cross_entropy(model,
@@ -726,7 +788,7 @@ def _cholesky_solve(A, b, eps=1e-8):
     A = _add_value_to_diagonal(A, eps)
     if A.ndim > b.ndim:
         b = b.unsqueeze(dim=-1)
-    u = torch.cholesky(A)
+    u = torch.linalg.cholesky(A)
     return torch.cholesky_solve(b, u).squeeze(dim=-1)
 
 

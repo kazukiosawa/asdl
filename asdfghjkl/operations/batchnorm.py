@@ -5,20 +5,30 @@ from .operation import Operation, OP_COV_KRON, OP_COV_UNIT_WISE, OP_GRAM_HADAMAR
 
 
 class _BatchNormNd(Operation):
-    def __init__(self, module, model, op_names, save_attr='op_results'):
+    def __init__(self, module, op_names, model_for_kernel=None):
         if OP_COV_KRON in op_names:
-            op_names = op_names.copy()
             # kron operation is not supported. unit_wise will be used instead.
             op_names.remove(OP_COV_KRON)
             op_names.append(OP_COV_UNIT_WISE)
 
         if OP_GRAM_HADAMARD in op_names:
-            op_names = op_names.copy()
             # gram hadamard operation is not supported. gram direct will be used instead.
             op_names.remove(OP_GRAM_HADAMARD)
             op_names.append(OP_GRAM_DIRECT)
 
-        super().__init__(module, model, op_names, save_attr)
+        super().__init__(module, op_names, model_for_kernel)
+
+    @staticmethod
+    def preprocess_in_data(module, in_data, out_data):
+        f = module.num_features
+        if isinstance(module, nn.BatchNorm1d):
+            shape = (1, f)
+        elif isinstance(module, nn.BatchNorm2d):
+            shape = (1, f, 1, 1)
+        else:
+            shape = (1, f, 1, 1, 1)
+        # restore normalized input
+        return (out_data - module.bias.view(shape)).div(module.weight.view(shape))
 
     @staticmethod
     def _reduce(tensor: torch.Tensor):
@@ -50,11 +60,7 @@ class _BatchNormNd(Operation):
         cov_ww = (grads_w ** 2).sum(0)  # f
         cov_bb = (grads_b ** 2).sum(0)  # f
         cov_wb = (grads_w * grads_b).sum(0)  # f
-        blocks = torch.zeros(n_features, 2, 2).to(in_data.device)
-        for i in range(n_features):
-            blocks[i][0][0] = cov_ww[i]
-            blocks[i][1][1] = cov_bb[i]
-            blocks[i][0][1] = blocks[i][1][0] = cov_wb[i]
+        blocks = torch.vstack([cov_ww, cov_wb, cov_wb, cov_bb]).reshape(2, 2, n_features).transpose(0, 2)
         return blocks  # f x 2 x 2
 
     @staticmethod

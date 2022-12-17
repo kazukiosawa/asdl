@@ -1,189 +1,525 @@
-from contextlib import contextmanager
-import torch
-import torch.nn.functional as F
-from .core import extend
-from .utils import disable_param_grad
-from .gradient import data_loader_gradient
-from .operations import *
-from .symmatrix import SymMatrix, Kron, Diag, UnitWise
-from .matrices import *
-from .mvp import power_method, conjugate_gradient_method
+from functools import partial
+from typing import List, Union
+import numpy as np
 
-_SHAPE_TO_OP = {
-    SHAPE_FULL: OP_BATCH_GRADS,  # full
-    SHAPE_BLOCK_DIAG: OP_BATCH_GRADS,  # block-diagonal
-    SHAPE_KRON: OP_COV_KRON,  # Kronecker-factored
-    SHAPE_DIAG: OP_COV_DIAG,  # diagonal
-}
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.cuda import Stream
+import torch.distributed as dist
+
+from .core import no_centered_cov
+from .utils import skip_param_grad
+from .matrices import *
+from .vector import ParamVector, reduce_vectors
+from .mvp import power_method, stochastic_lanczos_quadrature, conjugate_gradient_method, quadratic_form
 
 _COV_FULL = 'cov_full'
 _CVP_FULL = 'cvp_full'
-_COV_BLOCK_DIAG = 'cov_block_diag'
-_CVP_BLOCK_DIAG = 'cvp_block_diag'
+
+LOSS_CROSS_ENTROPY = 'cross_entropy'
+LOSS_MSE = 'mse'
 
 __all__ = [
+    'calculate_fisher',
     'fisher_for_cross_entropy',
+    'fisher_for_mse',
     'fvp_for_cross_entropy',
-    'zero_fisher',
-    'zero_fvp',
-    'fisher_for_cross_entropy_eigenvalues',
-    'fisher_free_for_cross_entropy'
+    'fvp_for_mse',
+    'fisher_eig',
+    'fisher_eig_for_cross_entropy',
+    'fisher_eig_for_mse',
+    'fisher_esd',
+    'fisher_esd_for_cross_entropy',
+    'fisher_esd_for_mse',
+    'fisher_free',
+    'fisher_free_for_cross_entropy',
+    'fisher_free_for_mse',
+    'fisher_quadratic_form',
+    'fisher_quadratic_form_for_cross_entropy',
+    'fisher_quadratic_form_for_mse',
+    'LOSS_CROSS_ENTROPY',
+    'LOSS_MSE',
+    'FisherManager',
+    'get_fisher_class',
 ]
 
-_supported_types = [FISHER_EXACT, FISHER_MC, COV]
-_supported_types_for_eig = _supported_types
-_supported_shapes = [SHAPE_FULL, SHAPE_BLOCK_DIAG, SHAPE_KRON, SHAPE_DIAG]
-_supported_shapes_for_eig = [SHAPE_FULL, SHAPE_BLOCK_DIAG]
+_supported_types = [FISHER_EXACT, FISHER_MC, FISHER_EMP]
+_supported_shapes = [SHAPE_FULL, SHAPE_LAYER_WISE, SHAPE_KRON, SHAPE_UNIT_WISE, SHAPE_DIAG]
+_supported_shapes_for_fvp = [SHAPE_FULL, SHAPE_LAYER_WISE]
 
 
-def fisher_for_cross_entropy(
-    model,
-    fisher_types,
-    fisher_shapes,
-    inputs=None,
-    targets=None,
-    data_loader=None,
-    stats_name=None,
-    compute_param_grad=False,
-    n_mc_samples=1,
-    is_distributed=False,
-    all_reduce=False,
-    is_master=True,
-    matrix_manager=None,
-    **backward_kwargs
-):
-    if isinstance(fisher_types, str):
-        fisher_types = [fisher_types]
-    if isinstance(fisher_shapes, str):
-        fisher_shapes = [fisher_shapes]
-    # remove duplicates
-    fisher_types = set(fisher_types)
-    fisher_shapes = set(fisher_shapes)
-    for ftype in fisher_types:
-        assert ftype in _supported_types, \
-            f'Invalid fisher_type: {ftype}. ' \
-            f'fisher_type must be in {_supported_types}.'
-    for fshape in fisher_shapes:
-        assert fshape in _supported_shapes, \
-            f'Invalid fisher_shape: {fshape}. ' \
-            f'fisher_shape must be in {_supported_shapes}.'
+class FisherManager(MatrixManager):
+    def __init__(self, model, fisher_type):
+        super().__init__(model, fisher_type)
+        self.fisher_type = fisher_type
 
-    zero_fisher(model, fisher_types)
+    @property
+    def is_fisher_emp(self):
+        return self.fisher_type == FISHER_EMP
 
-    # setup operations for mammoth_utils.autograd.extend
-    op_names = [_SHAPE_TO_OP[shape] for shape in fisher_shapes]
-    if compute_param_grad:
-        assert COV in fisher_types, \
-            f'"{COV}" must be in fisher_types when compute_param_grad is True.'
+    @property
+    def loss_fn(self):
+        raise NotImplementedError
+
+    @property
+    def fisher_attr(self):
+        return self.fisher_type
+
+    @property
+    def fvp_attr(self):
+        return f'{self.fisher_type}_fvp'
+
+    def zero_fisher(self, fvp=False):
+        attr = self.fvp_attr if fvp else self.fisher_attr
+        for module in self._model.modules():
+            if hasattr(module, attr):
+                delattr(module, attr)
+
+    def calculate_fisher(self,
+                         fisher_shapes,
+                         inputs: torch.Tensor = None,
+                         targets: torch.Tensor = None,
+                         data_loader: torch.utils.data.DataLoader = None,
+                         fvp=False,
+                         vec: ParamVector = None,
+                         data_average=True,
+                         accumulate=False,
+                         calc_emp_loss_grad=False,
+                         ignore_modules=None,
+                         seed=None,
+                         scale=1.,
+                         logit_idx=0,
+                         stream: Stream = None):
+        model = self._model
+        device = self._device
+        if isinstance(fisher_shapes, str):
+            fisher_shapes = [fisher_shapes]
+
+        if not accumulate:
+            # set Fisher/FVP zero
+            self.zero_fisher(fvp=fvp)
+
+        total_loss = 0
+        calc_emp_loss_grad_with_fisher = calc_emp_loss_grad and self.is_fisher_emp
+        calc_emp_loss_grad_after_fisher = calc_emp_loss_grad and not self.is_fisher_emp
+
+        def fisher_for_one_batch(x, t=None):
+            x = x.to(device)
+            if t is not None:
+                t = t.to(device)
+            if seed:
+                torch.random.manual_seed(seed)
+
+            with no_centered_cov(model, fisher_shapes, ignore_modules=ignore_modules, cvp=fvp, vectors=vec, stream=stream) as cxt:
+                def closure(loss_expr, retain_graph=False):
+                    cxt.clear_batch_grads()
+                    loss = loss_expr()
+                    with skip_param_grad(model, disable=calc_emp_loss_grad_with_fisher):
+                        loss.backward(retain_graph=retain_graph or calc_emp_loss_grad_after_fisher)
+                    if fvp:
+                        cxt.calc_full_cvp(model)
+                    else:
+                        cxt.calc_full_cov(model)
+                    if not calc_emp_loss_grad_after_fisher:
+                        nonlocal total_loss
+                        total_loss += float(loss)
+
+                y = model(x)
+                if isinstance(y, (list, tuple)):
+                    y = y[logit_idx]
+                self._fisher_core(closure, y, t)
+                self.accumulate(cxt, scale, fvp=fvp)
+
+            if calc_emp_loss_grad_after_fisher:
+                assert t is not None
+                emp_loss = self.loss_fn(y, t)
+                emp_loss.backward()
+                nonlocal total_loss
+                total_loss += float(emp_loss)
+
+            return y
+
+        outputs = None
         if data_loader is not None:
-            op_names.append(OP_ACCUMULATE_GRADS)  # accumulate gradient
+            # calculate fisher/fvp for the data_loader
+            data_size = len(data_loader.dataset)
+            if data_average:
+                scale /= data_size
+            for inputs, targets in data_loader:
+                outputs = fisher_for_one_batch(inputs, targets)
+        else:
+            # calculate fisher/fvp for a single batch
+            assert inputs is not None
+            data_size = inputs.shape[0]
+            if data_average:
+                scale /= data_size
+            outputs = fisher_for_one_batch(inputs, targets)
 
-    # setup matrix manager as needed
-    if matrix_manager is None:
-        matrix_manager = MatrixManager(model, fisher_types)
+        if calc_emp_loss_grad and data_average:
+            # divide gradients by data size
+            # (every loss function returns the sum of loss, not the average)
+            for p in model.parameters():
+                if p.grad is not None:
+                    p.grad.div_(data_size)
 
-    kwargs = dict(
-        compute_full_fisher=SHAPE_FULL in fisher_shapes,
-        compute_block_diag_fisher=SHAPE_BLOCK_DIAG in fisher_shapes,
-        compute_param_grad=compute_param_grad,
-        n_mc_samples=n_mc_samples,
-        backward_kwargs=backward_kwargs
-    )
+        if data_average:
+            total_loss /= data_size
+        return total_loss, outputs
 
-    if data_loader is not None:
-        # accumulate fisher for an epoch
-        device = next(model.parameters()).device
-        for inputs, targets in data_loader:
-            inputs, targets = inputs.to(device), targets.to(device)
-            with extend(model, op_names):
-                _fisher_for_cross_entropy(
-                    model, fisher_types, inputs, targets, **kwargs
-                )
-            if stats_name is not None:
-                matrix_manager.accumulate_matrices(stats_name)
-        if compute_param_grad:
-            data_loader_gradient(
-                model,
-                data_loader,
-                has_accumulated=True,
-                is_distributed=is_distributed,
-                all_reduce=all_reduce,
-                is_master=is_master
-            )
+    def _fisher_core(self, closure, outputs, targets):
+        raise NotImplementedError
+
+    def accumulate(self, cxt, scale=1., target_module=None, target_module_name=None, fvp=False):
+        model = self._model
+        for name, module in model.named_modules():
+            if target_module is not None and module != target_module:
+                continue
+            if target_module_name is not None and name != target_module_name:
+                continue
+            # accumulate layer-wise fisher/fvp
+            if fvp:
+                self._accumulate_fvp(module, cxt.cvp_paramvector(module, pop=True), scale)
+            else:
+                self._accumulate_fisher(module, cxt.cov_symmatrix(module, pop=True), scale)
+            if target_module is not None:
+                break
+            if target_module_name is not None:
+                target_module = module
+                break
+
+        if target_module is None or target_module == model:
+            # accumulate full fisher/fvp
+            if fvp:
+                self._accumulate_fvp(model, cxt.full_cvp_paramvector(model, pop=True), scale)
+            else:
+                self._accumulate_fisher(model, cxt.full_cov_symmatrix(model, pop=True), scale)
+
+    def _accumulate_fisher(self, module: nn.Module, new_fisher, scale=1., fvp=False):
+        if new_fisher is None:
+            return
+        if scale != 1:
+            new_fisher.mul_(scale)
+        dst_attr = self.fvp_attr if fvp else self.fisher_attr
+        dst_fisher = getattr(module, dst_attr, None)
+        if dst_fisher is None:
+            setattr(module, dst_attr, new_fisher)
+        else:
+            # this must be __iadd__ to preserve inv
+            dst_fisher += new_fisher
+
+    def _accumulate_fvp(self, module: nn.Module, new_fisher, scale=1.):
+        self._accumulate_fisher(module, new_fisher, scale, fvp=True)
+
+    def get_fisher_tensor(self, module: nn.Module, *keys) -> Union[torch.Tensor, None]:
+        fisher = getattr(module, self.fisher_attr, None)
+        if fisher is None:
+            return None
+        data = fisher
+        for key in keys:
+            data = getattr(data, key, None)
+        if data is not None:
+            assert isinstance(data, torch.Tensor)
+        return data
+
+    def reduce_scatter_fisher(self,
+                              module_partitions: List[List[torch.nn.Module]],
+                              *keys,
+                              with_grad=False,
+                              group: dist.ProcessGroup = None,
+                              async_op=False):
+        assert dist.is_initialized()
+        assert torch.cuda.is_available()
+        assert dist.get_backend(group) == dist.Backend.NCCL
+        world_size = dist.get_world_size(group)
+        assert len(module_partitions) == world_size
+        assert all(len(module_partitions[0]) == len(module_partitions[i]) for i in range(1, world_size))
+        tensor_partitions = []
+        for module_list in module_partitions:
+            tensor_list = []
+            for module in module_list:
+                tensor = self.get_fisher_tensor(module, *keys)
+                if tensor is None:
+                    continue
+                assert tensor.is_cuda
+                tensor_list.append(tensor)
+                if with_grad:
+                    for p in module.parameters():
+                        if p.requires_grad and p.grad is not None:
+                            tensor_list.append(p.grad)
+            tensor_partitions.append(tensor_list)
+        num_tensors_per_partition = len(tensor_partitions[0])
+        assert all(len(tensor_partitions[i]) == num_tensors_per_partition for i in range(1, world_size))
+        handles = []
+        for i in range(num_tensors_per_partition):
+            input_list = [tensor_list[i] for tensor_list in tensor_partitions]
+            output = input_list[dist.get_rank(group)]
+            handles.append(dist.reduce_scatter(output, input_list, group=group, async_op=async_op))
+        return handles
+
+    def reduce_fisher(self,
+                      modules,
+                      *keys,
+                      all_reduce=True,
+                      with_grad=False,
+                      dst=0,
+                      group: dist.ProcessGroup = None,
+                      async_op=False):
+        assert dist.is_initialized()
+        tensor_list = []
+        for module in modules:
+            tensor = self.get_fisher_tensor(module, *keys)
+            if tensor is None:
+                continue
+            tensor_list.append(tensor)
+            if with_grad:
+                for p in module.parameters():
+                    if p.requires_grad and p.grad is not None:
+                        tensor_list.append(p.grad)
+        handles = []
+        for tensor in tensor_list:
+            if all_reduce:
+                handles.append(dist.all_reduce(tensor, group=group, async_op=async_op))
+            else:
+                handles.append(dist.reduce(tensor, dst=dst, group=group, async_op=async_op))
+        return handles
+
+    def reduce_fvp(self, fisher_shape, is_master=True, all_reduce=False):
+        v = self.load_fvp(fisher_shape)
+        v = reduce_vectors(v, is_master, all_reduce)
+        attr = self.fvp_attr
+        if fisher_shape == SHAPE_FULL:
+            setattr(self._model, attr, v)
+        else:
+            for module in self._model.modules():
+                if hasattr(module, attr):
+                    setattr(module, attr, v.get_vectors_by_module(module))
+
+    def load_fvp(self, fisher_shape: str) -> ParamVector:
+        if fisher_shape == SHAPE_FULL:
+            v = getattr(self._model, self.fvp_attr, None)
+            if v is None:
+                return None
+            return v.copy()
+        else:
+            rst = None
+            for module in self._model.modules():
+                if module == self._model:
+                    continue
+                v = getattr(module, self.fvp_attr, None)
+                if v is not None:
+                    if rst is None:
+                        rst = v.copy()
+                    else:
+                        rst.extend(v.copy())
+            return rst
+
+
+class _FisherCrossEntropy(FisherManager):
+    @property
+    def loss_fn(self):
+        return partial(F.cross_entropy, reduction='sum')
+
+
+class FisherExactCrossEntropy(_FisherCrossEntropy):
+    def __init__(self, model):
+        super().__init__(model, FISHER_EXACT)
+
+    def _fisher_core(self, closure, outputs, unused):
+        log_probs = F.log_softmax(outputs, dim=1)
+        log_probs = log_probs.view(-1, log_probs.size(-1))
+        n, n_classes = log_probs.shape
+        with torch.no_grad():
+            probs = F.softmax(outputs, dim=1)
+            sqrt_probs = torch.sqrt(probs)
+        for i in range(n_classes):
+            targets = torch.tensor([i] * n, device=outputs.device)
+
+            def loss_expr():
+                loss = F.nll_loss(log_probs, targets, reduction='none', ignore_index=-1)
+                return loss.mul(sqrt_probs[:, i]).sum()
+            closure(loss_expr, retain_graph=i < n_classes - 1)
+
+
+class FisherMCCrossEntropy(_FisherCrossEntropy):
+    def __init__(self, model, n_mc_samples=1):
+        super().__init__(model, FISHER_MC)
+        self.n_mc_samples = n_mc_samples
+
+    def _fisher_core(self, closure, outputs, unused):
+        probs = F.softmax(outputs, dim=1)
+        log_probs = F.log_softmax(outputs, dim=1)
+        dist = torch.distributions.Categorical(probs)
+        for i in range(self.n_mc_samples):
+            with torch.no_grad():
+                targets = dist.sample()
+            closure(lambda: F.nll_loss(log_probs.view(-1, log_probs.size(-1)),
+                                       targets.view(-1), reduction='sum', ignore_index=-1) / self.n_mc_samples,
+                    retain_graph=i < self.n_mc_samples - 1)
+
+
+class FisherEmpCrossEntropy(_FisherCrossEntropy):
+    def __init__(self, model):
+        super().__init__(model, FISHER_EMP)
+
+    def _fisher_core(self, closure, outputs, targets):
+        log_probs = F.log_softmax(outputs, dim=1)
+        closure(lambda: F.nll_loss(log_probs.view(-1, log_probs.size(-1)),
+                                   targets.view(-1), reduction='sum', ignore_index=-1),
+                retain_graph=False)
+
+
+class _FisherMSE(FisherManager):
+    @property
+    def loss_fn(self):
+        return lambda x, y: 0.5 * (x - y).norm(dim=1).sum()
+
+
+class FisherExactMSE(_FisherMSE):
+    def __init__(self, model):
+        super().__init__(model, FISHER_EXACT)
+
+    def _fisher_core(self, closure, outputs, unused):
+        _, n_dims = outputs.shape
+        for i in range(n_dims):
+            closure(lambda: outputs[:, i].sum(), retain_graph=i < n_dims - 1)
+
+
+class FisherMCMSE(_FisherMSE):
+    def __init__(self, model, n_mc_samples=1, var=0.5):
+        super().__init__(model, FISHER_MC)
+        self.n_mc_samples = n_mc_samples
+        self.var = var
+
+    def _fisher_core(self, closure, outputs, unused):
+        dist = torch.distributions.normal.Normal(outputs, scale=np.sqrt(self.var))
+        for i in range(self.n_mc_samples):
+            with torch.no_grad():
+                targets = dist.sample()
+            closure(lambda: 0.5 * F.mse_loss(outputs, targets, reduction='sum') / self.n_mc_samples,
+                    retain_graph=i < self.n_mc_samples - 1)
+
+
+class FisherEmpMSE(_FisherMSE):
+    def __init__(self, model):
+        super().__init__(model, FISHER_EMP)
+
+    def _fisher_core(self, closure, outputs, targets):
+        closure(lambda: 0.5 * F.mse_loss(outputs, targets, reduction='sum'),
+                retain_graph=False)
+
+
+def get_fisher_class(fisher_type, loss_type):
+    assert fisher_type in _supported_types
+    assert loss_type in [LOSS_CROSS_ENTROPY, LOSS_MSE]
+    if loss_type == LOSS_CROSS_ENTROPY:
+        if fisher_type == FISHER_EXACT:
+            return FisherExactCrossEntropy
+        elif fisher_type == FISHER_MC:
+            return FisherMCCrossEntropy
+        else:
+            return FisherEmpCrossEntropy
     else:
-        # compute fisher for a single batch
-        assert inputs is not None
-        with extend(model, op_names):
-            _fisher_for_cross_entropy(
-                model, fisher_types, inputs, targets, **kwargs
-            )
+        if fisher_type == FISHER_EXACT:
+            return FisherExactMSE
+        elif fisher_type == FISHER_MC:
+            return FisherMCMSE
+        else:
+            return FisherEmpMSE
 
-    # reduce matrices
+
+def calculate_fisher(
+        model: nn.Module,
+        fisher_type: str,
+        fisher_shapes,
+        loss_type: str,
+        inputs: torch.Tensor = None,
+        targets: torch.Tensor = None,
+        data_loader: torch.utils.data.DataLoader = None,
+        fvp=False,
+        vec: ParamVector = None,
+        is_distributed=False,
+        all_reduce=False,
+        is_master=True,
+        accumulate=False,
+        data_average=True,
+        calc_emp_loss_grad=False,
+        return_loss=False,
+        ignore_modules=None,
+        logit_idx=0,
+        seed=None,
+        scale=1.,
+        **kwargs
+):
+    fisher_cls = get_fisher_class(fisher_type, loss_type)
+    f = fisher_cls(model, **kwargs)
+    loss, outputs = f.calculate_fisher(
+        fisher_shapes,
+        inputs=inputs,
+        targets=targets,
+        data_loader=data_loader,
+        fvp=fvp,
+        vec=vec,
+        accumulate=accumulate,
+        data_average=data_average,
+        calc_emp_loss_grad=calc_emp_loss_grad,
+        ignore_modules=ignore_modules,
+        logit_idx=logit_idx,
+        seed=seed,
+        scale=scale)
     if is_distributed:
-        matrix_manager.reduce_matrices(stats_name, is_master, all_reduce)
-
-    return matrix_manager
-
-
-def zero_fisher(module, fisher_types):
-    for child in module.children():
-        zero_fisher(child, fisher_types)
-    for ftype in fisher_types:
-        if hasattr(module, ftype):
-            delattr(module, ftype)
+        if fvp:
+            f.reduce_fvp(is_master, all_reduce)
+        else:
+            f.reduce_fisher(is_master, all_reduce)
+    if return_loss:
+        return f, loss, outputs
+    else:
+        return f
 
 
-def zero_fvp(module, fisher_types):
-    for child in module.children():
-        zero_fvp(child, fisher_types)
-    for ftype in fisher_types:
-        attr = _get_fvp_attr(ftype)
-        if hasattr(module, attr):
-            delattr(module, attr)
+fisher_for_cross_entropy = partial(calculate_fisher, loss_type=LOSS_CROSS_ENTROPY, fvp=False)
+fisher_for_mse = partial(calculate_fisher, loss_type=LOSS_MSE, fvp=False)
+fvp_for_cross_entropy = partial(calculate_fisher, loss_type=LOSS_CROSS_ENTROPY, fvp=True)
+fvp_for_mse = partial(calculate_fisher, loss_type=LOSS_MSE, fvp=True)
 
 
-def _check_fisher_type_shape(fisher_type, fisher_shape):
-    assert fisher_type in _supported_types_for_eig, \
-        f'Invalid fisher_type: {fisher_type}. ' \
-        f'fisher_type must be in {_supported_types_for_eig}.'
-    assert fisher_shape in _supported_shapes_for_eig, \
-        f'Invalid fisher_shape: {fisher_shape}. ' \
-        f'fisher_shape must be in {_supported_shapes_for_eig}.'
-
-
-def fisher_for_cross_entropy_eigenvalues(
+def fisher_eig(
         model,
-        fisher_type,
+        fisher_type: str,
         fisher_shape,
-        data_loader=None,
+        loss_type: str,
         inputs=None,
         targets=None,
-        n_mc_samples=1,
+        data_loader=None,
         top_n=1,
         max_iters=100,
         tol=1e-3,
         is_distributed=False,
-        print_progress=False
+        print_progress=False,
+        **kwargs
 ):
-    _check_fisher_type_shape(fisher_type, fisher_shape)
 
-    def fvp_fn(vec, x, y):
-        return fvp_for_cross_entropy(vec,
-                                     model,
-                                     fisher_type,
-                                     fisher_shape,
-                                     inputs=x,
-                                     targets=y,
-                                     n_mc_samples=n_mc_samples)
+    def fvp_fn(vec: ParamVector) -> ParamVector:
+        f = calculate_fisher(model,
+                             fisher_type,
+                             fisher_shape,
+                             loss_type,
+                             inputs=inputs,
+                             targets=targets,
+                             data_loader=data_loader,
+                             fvp=True,
+                             vec=vec,
+                             is_distributed=is_distributed,
+                             all_reduce=True,
+                             **kwargs)
+        return f.load_fvp(fisher_shape)
 
     # for making MC samplings at each iteration deterministic
     random_seed = torch.rand(1) * 100 if fisher_type == FISHER_MC else None
 
     eigvals, eigvecs = power_method(fvp_fn,
                                     model,
-                                    data_loader=data_loader,
-                                    inputs=inputs,
-                                    targets=targets,
                                     top_n=top_n,
                                     max_iters=max_iters,
                                     tol=tol,
@@ -195,35 +531,125 @@ def fisher_for_cross_entropy_eigenvalues(
     return eigvals, eigvecs
 
 
-def fisher_free_for_cross_entropy(
+fisher_eig_for_cross_entropy = partial(fisher_eig, loss_type=LOSS_CROSS_ENTROPY)
+fisher_eig_for_mse = partial(fisher_eig, loss_type=LOSS_MSE)
+
+
+def fisher_esd(
         model,
-        b,
-        fisher_type,
+        fisher_type: str,
         fisher_shape,
+        loss_type: str,
+        inputs=None,
+        targets=None,
+        data_loader=None,
+        n_v=1,
+        num_iter=100,
+        num_bins=10000,
+        sigma_squared=1e-5,
+        overhead=None,
+        is_distributed=False,
+        **kwargs
+):
+
+    # referenced from https://github.com/amirgholami/PyHessian/blob/master/density_plot.py
+
+    def fvp_fn(vec: ParamVector) -> ParamVector:
+        f = calculate_fisher(model,
+                             fisher_type,
+                             fisher_shape,
+                             loss_type,
+                             inputs=inputs,
+                             targets=targets,
+                             data_loader=data_loader,
+                             fvp=True,
+                             vec=vec,
+                             is_distributed=is_distributed,
+                             all_reduce=True,
+                             **kwargs)
+        return f.load_fvp(fisher_shape)
+    
+    # for making MC samplings at each iteration deterministic
+    random_seed = torch.rand(1) * 100 if fisher_type == FISHER_MC else None
+
+    eigvals, weights = stochastic_lanczos_quadrature(fvp_fn,
+                                                     model,
+                                                     n_v=n_v,
+                                                     num_iter=num_iter,
+                                                     is_distributed=is_distributed,
+                                                     random_seed=random_seed
+                                                     )
+    
+    eigvals = np.array(eigvals)
+    weights = np.array(weights)
+
+    lambda_max = np.mean(np.max(eigvals, axis=1), axis=0)
+    lambda_min = np.mean(np.min(eigvals, axis=1), axis=0)
+    
+    sigma_squared = sigma_squared * max(1, (lambda_max - lambda_min))
+    if overhead is None:
+        overhead = np.sqrt(sigma_squared)
+    
+    range_max = lambda_max + overhead
+    range_min = np.maximum(0., lambda_min - overhead)
+
+    grids = np.linspace(range_min, range_max, num=num_bins)
+
+    density_output = np.zeros((n_v, num_bins))
+
+    for i in range(n_v):
+        for j in range(num_bins):
+            x = grids[j]
+            tmp_result = np.exp(-(x - eigvals[i, :])**2 / (2.0 * sigma_squared)) / np.sqrt(2 * np.pi * sigma_squared)
+            density_output[i, j] = np.sum(tmp_result * weights[i, :])
+    density = np.mean(density_output, axis=0)
+    normalization = np.sum(density) * (grids[1] - grids[0])
+    density = density / normalization
+    return density, grids
+
+
+fisher_esd_for_cross_entropy = partial(fisher_esd, loss_type=LOSS_CROSS_ENTROPY)
+fisher_esd_for_mse = partial(fisher_esd, loss_type=LOSS_MSE)
+
+
+def fisher_free(
+        model,
+        fisher_type: str,
+        fisher_shape,
+        loss_type: str,
+        b=None,
         data_loader=None,
         inputs=None,
         targets=None,
         init_x=None,
         damping=1e-3,
-        n_mc_samples=1,
         max_iters=None,
         tol=1e-8,
         preconditioner=None,
         is_distributed=False,
         print_progress=False,
         random_seed=None,
-        save_log=False
-):
-    _check_fisher_type_shape(fisher_type, fisher_shape)
+        **kwargs
+) -> ParamVector:
 
-    def fvp_fn(vec, x, y):
-        return fvp_for_cross_entropy(vec,
-                                     model,
-                                     fisher_type,
-                                     fisher_shape,
-                                     inputs=x,
-                                     targets=y,
-                                     n_mc_samples=n_mc_samples)
+    def fvp_fn(vec: ParamVector) -> ParamVector:
+        f = calculate_fisher(model,
+                             fisher_type,
+                             fisher_shape,
+                             loss_type,
+                             inputs=inputs,
+                             targets=targets,
+                             data_loader=data_loader,
+                             fvp=True,
+                             vec=vec,
+                             is_distributed=is_distributed,
+                             all_reduce=True,
+                             **kwargs)
+        return f.load_fvp(fisher_shape)
+
+    if b is None:
+        grads = {p: p.grad for p in model.parameters() if p.requires_grad}
+        b = ParamVector(grads.keys(), grads.values())
 
     # for making MC samplings at each iteration deterministic
     if fisher_type == FISHER_MC and random_seed is None:
@@ -231,368 +657,52 @@ def fisher_free_for_cross_entropy(
 
     return conjugate_gradient_method(fvp_fn,
                                      b,
-                                     data_loader=data_loader,
-                                     inputs=inputs,
-                                     targets=targets,
                                      init_x=init_x,
                                      damping=damping,
                                      max_iters=max_iters,
                                      tol=tol,
                                      preconditioner=preconditioner,
-                                     is_distributed=is_distributed,
                                      print_progress=print_progress,
-                                     random_seed=random_seed,
-                                     save_log=save_log)
+                                     random_seed=random_seed)
 
 
-def fvp_for_cross_entropy(
-    vec,
-    model,
-    fisher_type,
-    fisher_shape,
-    inputs,
-    targets=None,
-    n_mc_samples=1
+fisher_free_for_cross_entropy = partial(fisher_free, loss_type=LOSS_CROSS_ENTROPY)
+fisher_free_for_mse = partial(fisher_free, loss_type=LOSS_MSE)
+
+
+def fisher_quadratic_form(
+        model,
+        fisher_type: str,
+        fisher_shape,
+        loss_type: str,
+        v=None,
+        data_loader=None,
+        inputs=None,
+        targets=None,
+        is_distributed=False,
+        **kwargs
 ):
-    compute_full_fvp = compute_block_diag_fvp = False
-    if fisher_shape == SHAPE_FULL:
-        compute_full_fvp = True
-    elif fisher_shape == SHAPE_BLOCK_DIAG:
-        compute_block_diag_fvp = True
-    else:
-        raise ValueError(f'Invalid fisher_shape: {fisher_shape}.')
+    def fvp_fn(vec: ParamVector) -> ParamVector:
+        f = calculate_fisher(model,
+                             fisher_type,
+                             fisher_shape,
+                             loss_type,
+                             inputs=inputs,
+                             targets=targets,
+                             data_loader=data_loader,
+                             fvp=True,
+                             vec=vec,
+                             is_distributed=is_distributed,
+                             all_reduce=True,
+                             **kwargs)
+        return f.load_fvp(fisher_shape)
 
-    zero_fvp(model, [fisher_type])
+    if v is None:
+        grads = {p: p.grad for p in model.parameters() if p.requires_grad}
+        v = ParamVector(grads.keys(), grads.values())
 
-    with extend(model, OP_BATCH_GRADS):
-        _fisher_for_cross_entropy(
-            model, [fisher_type],
-            inputs,
-            targets,
-            compute_full_fvp=compute_full_fvp,
-            compute_block_diag_fvp=compute_block_diag_fvp,
-            vec=vec,
-            n_mc_samples=n_mc_samples
-        )
-
-    if fisher_shape == SHAPE_FULL:
-        return getattr(model, _get_fvp_attr(fisher_type))
-    else:
-        rst = []
-        for module in model.modules():
-            fvp = getattr(module, _get_fvp_attr(fisher_type), None)
-            if fvp is not None:
-                rst.extend(fvp)
-        return rst
+    return quadratic_form(fvp_fn, v, **kwargs)
 
 
-def _fisher_for_cross_entropy(
-    model,
-    fisher_types,
-    inputs,
-    targets=None,
-    compute_param_grad=False,
-    compute_full_fisher=False,
-    compute_full_fvp=False,
-    compute_block_diag_fisher=False,
-    compute_block_diag_fvp=False,
-    vec=None,
-    n_mc_samples=1,
-    backward_kwargs=None
-):
-    if backward_kwargs is None:
-        backward_kwargs = dict(retain_graph=True)
-    else:
-        assert type(backward_kwargs) is dict
-        backward_kwargs['retain_graph'] = True
-
-    # NOTE: this assumes we either want to diff wrt params OR inputs not both
-    if inputs.requires_grad:
-        with disable_param_grad(model):
-            logits = model(inputs)
-    else:
-        logits = model(inputs)
-        
-    if logits.ndim > 2:
-        # reduce augmented dimension
-        logits = logits.mean(dim=1)
-    log_probs = F.log_softmax(logits, dim=1)
-    probs = None
-
-    def loss_and_backward(target):
-        model.zero_grad(set_to_none=True)
-        loss = F.nll_loss(log_probs, target, reduction='sum')
-        loss.backward(**backward_kwargs)
-        if compute_full_fisher:
-            _full_covariance(model)
-        if compute_full_fvp:
-            _full_cvp(model, vec)
-        if compute_block_diag_fisher:
-            _block_diag_covariance(model)
-        if compute_block_diag_fvp:
-            _block_diag_cvp(model, vec)
-
-    if FISHER_MC in fisher_types:
-        probs = F.softmax(logits, dim=1)
-        _fisher_mc(loss_and_backward, model, probs, n_mc_samples)
-
-    if FISHER_EXACT in fisher_types:
-        if probs is None:
-            probs = F.softmax(logits, dim=1)
-        _fisher_exact(loss_and_backward, model, probs)
-
-    if COV in fisher_types:
-        assert targets is not None, 'targets must be specified for computing covariance.'
-        _covariance(loss_and_backward, model, targets, compute_param_grad)
-
-
-def _module_batch_grads(model):
-    rst = []
-    for module in model.modules():
-        operation = getattr(module, 'operation', None)
-        if operation is None:
-            continue
-        batch_grads = operation.get_op_results()[OP_BATCH_GRADS]
-        rst.append((module, batch_grads))
-    return rst
-
-
-def _module_batch_flatten_grads(model):
-    rst = []
-    for module, batch_grads in _module_batch_grads(model):
-        batch_flatten_grads = torch.cat(
-            [g.flatten(start_dim=1) for g in batch_grads.values()],
-            dim=1
-        )
-        rst.append((module, batch_flatten_grads))
-    return rst
-
-
-def _module_batch_gvp(model, vec):
-    rst = []
-    pointer = 0
-    for module, batch_grads in _module_batch_grads(model):
-        batch_gvp = None
-        for b_g in batch_grads.values():
-            v = vec[pointer]
-            b_gvp = b_g.mul(v.unsqueeze(0)).flatten(start_dim=1).sum(1)  # n
-            if batch_gvp is None:
-                batch_gvp = b_gvp
-            else:
-                batch_gvp += b_gvp
-            pointer += 1
-        rst.append((module, batch_gvp))
-    assert pointer == len(vec)
-    return rst
-
-
-def _full_covariance(model):
-    batch_all_g = []
-    for _, batch_g in _module_batch_flatten_grads(model):
-        batch_all_g.append(batch_g)
-    batch_all_g = torch.cat(batch_all_g, dim=1)  # n x p_all
-    cov_full = torch.matmul(batch_all_g.T, batch_all_g)  # p_all x p_all
-    setattr(model, _COV_FULL, cov_full)
-
-
-def _block_diag_covariance(model):
-    for module, batch_g in _module_batch_flatten_grads(model):
-        cov_block = torch.matmul(batch_g.T, batch_g)  # p_all x p_all
-        setattr(module, _COV_BLOCK_DIAG, cov_block)
-
-
-def _full_cvp(model, vec):
-    """
-    g: n x p
-    v: p
-    c = sum[gg^t]: p x p
-    cvp = sum[gg^t]v = sum[g(g^t)v]: p
-    """
-    # compute batched (g^t)v
-    batch_all_gvp = None
-    for module, batch_gvp in _module_batch_gvp(model, vec):
-        if batch_all_gvp is None:
-            batch_all_gvp = batch_gvp
-        else:
-            batch_all_gvp += batch_gvp
-
-    # compute cvp = sum[g(g^t)v]
-    cvp = []
-    for module, batch_grads in _module_batch_grads(model):
-        for b_g in batch_grads.values():
-            cvp.append(torch.einsum('n...,n->...', b_g, batch_all_gvp))
-
-    setattr(model, _CVP_FULL, cvp)
-
-
-def _block_diag_cvp(model, vec):
-    """
-    g: n x p
-    v: p
-    c = sum[gg^t]: p x p
-    cvp = sum[gg^t]v = sum[g(g^t)v]: p
-    """
-    batch_gvp_dict = {k: v for k, v in _module_batch_gvp(model, vec)}
-    for module, batch_grads in _module_batch_grads(model):
-        cvp = []
-        # compute cvp = sum[g(g^t)v]
-        batch_gvp = batch_gvp_dict[module]
-        for b_g in batch_grads.values():
-            cvp.append(torch.einsum('n...,n->...', b_g, batch_gvp))
-
-        setattr(module, _CVP_BLOCK_DIAG, cvp)
-
-
-def _fisher_mc(loss_and_backward, model, probs, n_mc_samples=1):
-    dist = torch.distributions.Categorical(probs)
-    _targets = dist.sample((n_mc_samples, ))
-    for i in range(n_mc_samples):
-        loss_and_backward(_targets[i])
-        _register_fisher(
-            model,
-            FISHER_MC,
-            scale=1 / n_mc_samples,
-            accumulate=True
-        )
-
-
-def _fisher_exact(loss_and_backward, model, probs):
-    _, n_classes = probs.shape
-    probs, _targets = torch.sort(probs, dim=1, descending=True)
-    sqrt_probs = torch.sqrt(probs)
-    for i in range(n_classes):
-        with _grads_scale(model, sqrt_probs[:, i]):
-            loss_and_backward(_targets[:, i])
-        _register_fisher(
-            model, FISHER_EXACT, accumulate=True
-        )
-
-
-def _covariance(loss_and_backward, model, targets, compute_param_grad=False):
-    if compute_param_grad:
-        loss_and_backward(targets)
-    else:
-        with disable_param_grad(model):
-            loss_and_backward(targets)
-    _register_fisher(model, COV)
-
-
-@contextmanager
-def _grads_scale(model, scale):
-    for module in model.modules():
-        operation = getattr(module, 'operation', None)
-        if operation is None:
-            continue
-        operation.grads_scale = scale
-
-    yield
-
-    for module in model.modules():
-        operation = getattr(module, 'operation', None)
-        if operation is None:
-            continue
-        operation.grads_scale = None
-
-
-def _register_fisher(model, fisher_type, scale=1., accumulate=False):
-    """
-    module.fisher_{fisher_type} = op_results
-    op_results = {
-        'diag': {'weight': torch.Tensor, 'bias': torch.Tensor},
-        'kron': {'A': torch.Tensor, 'B': torch.Tensor},
-        'block_diag': torch.Tensor,
-        'unit_wise': torch.Tensor,
-    }
-    """
-    device = next(model.parameters()).device
-    for module in model.modules():
-        operation = getattr(module, 'operation', None)
-        if operation is None:
-            continue
-        op_results = operation.get_op_results()
-        kron = diag = unit = None
-        if OP_COV_KRON in op_results:
-            rst = op_results[OP_COV_KRON]
-            kron = Kron(rst['A'], rst['B'], device=device)
-        if OP_COV_DIAG in op_results:
-            rst = op_results[OP_COV_DIAG]
-            diag = Diag(
-                rst.get('weight', None), rst.get('bias', None), device=device
-            )
-        if OP_COV_UNIT_WISE in op_results:
-            rst = op_results[OP_COV_UNIT_WISE]
-            unit = UnitWise(rst, device=device)
-        operation.clear_op_results()
-        # move block_diag/kron/diag fisher
-        _accumulate_fisher(
-            module,
-            _COV_BLOCK_DIAG,
-            fisher_type,
-            kron=kron,
-            diag=diag,
-            unit=unit,
-            scale=scale,
-            accumulate=accumulate
-        )
-        # move block_diag fvp
-        _accumulate_fvp(
-            module, _CVP_BLOCK_DIAG, fisher_type, scale, accumulate
-        )
-
-    # move full fisher
-    _accumulate_fisher(
-        model, _COV_FULL, fisher_type, scale=scale, accumulate=accumulate
-    )
-    # move full fvp
-    _accumulate_fvp(model, _CVP_FULL, fisher_type, scale, accumulate)
-
-
-def _accumulate_fisher(
-    module,
-    data_src_attr,
-    dst_attr,
-    kron=None,
-    diag=None,
-    unit=None,
-    scale=1.,
-    accumulate=False
-):
-    data = getattr(module, data_src_attr, None)
-    if all(v is None for v in [data, kron, diag, unit]):
-        return
-    device = next(module.parameters()).device
-    fisher = SymMatrix(data, kron, diag, unit, device=device)
-    fisher.scaling(scale)
-    dst_fisher = getattr(module, dst_attr, None)
-    if (dst_fisher is None) or (not accumulate):
-        setattr(module, dst_attr, fisher)
-    else:
-        # accumulate fisher
-        dst_fisher += fisher
-        if dst_fisher.has_kron:
-            # not accumulate kron.A
-            dst_fisher.kron.A = fisher.kron.A
-        setattr(module, dst_attr, dst_fisher)
-
-    if data is not None:
-        delattr(module, data_src_attr)
-
-
-def _accumulate_fvp(module, src_attr, fisher_type, scale=1., accumulate=False):
-    dst_attr = _get_fvp_attr(fisher_type)
-    cvp = getattr(module, src_attr, None)
-    if cvp is None:
-        return
-    cvp = [v * scale for v in cvp]
-    dst_fvp = getattr(module, dst_attr, None)
-    if (dst_fvp is None) or (not accumulate):
-        setattr(module, dst_attr, cvp)
-    else:
-        dst_fvp = [u.add(v) for u, v in zip(dst_fvp, cvp)]
-        setattr(module, dst_attr, dst_fvp)
-
-    delattr(module, src_attr)
-
-
-def _get_fvp_attr(fisher_type):
-    return f'{fisher_type}_vp'
+fisher_quadratic_form_for_cross_entropy = partial(fisher_quadratic_form, loss_type=LOSS_CROSS_ENTROPY)
+fisher_quadratic_form_for_mse = partial(fisher_quadratic_form, loss_type=LOSS_MSE)

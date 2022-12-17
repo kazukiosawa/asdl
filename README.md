@@ -28,11 +28,10 @@ import asdfghjkl
 | **K**ernel | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathcal{K}=\mathcal{JJ}^\top\in\mathbb{R}^{NC\times{NC}}"/> |
 
 ## Matrix approximations
-<img src="https://user-images.githubusercontent.com/7961228/92199553-73a4f000-eeb2-11ea-8f89-28abbba1f2de.png" width="600"/>
+<img src="https://user-images.githubusercontent.com/7961228/122673899-05c47d80-d1d3-11eb-8ece-74063a029666.png" width="800"/>
 
 ## Supported operations
 - matrix-vector product
     - power method
-    - Lanczos method
     - conjugate gradient method
 - preconditioning gradient
