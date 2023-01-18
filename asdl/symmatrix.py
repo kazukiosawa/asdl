@@ -522,7 +522,7 @@ class Kron:
                     del self.A
                     self.A = None
         if calc_B_inv:
-            if not self.has_A:
+            if not self.has_B:
                 raise ValueError('B does not exist.')
             if not torch.all(self.B == 0):
                 if self.B_is_square:
