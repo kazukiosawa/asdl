@@ -1,37 +1,59 @@
-# ASD(FGHJK)L (alpha release)
-The library is called "ASDL", which stands for **A**utomatic **S**econd-order **D**ifferentiation (for **F**isher, **G**radient covariance, **H**essian, **J**acobian, and **K**ernel) **L**ibrary.
-ASDL is a PyTorch extension for computing 1st/2nd-order metrics and performing 2nd-order optimization of deep neural networks.
+# ASDL: Automatic Second-order Differentiation Library
 
-You can import `asdfghjkl` by sliding your finger on a QWERTY keyboard :innocent:
+ASDL is an extension library of PyTorch to easily perform **gradient preconditioning** using **second-order information** (e.g., Hessian, Fisher information) for deep neural networks.
+
+<p align="center">
+  <img src="https://user-images.githubusercontent.com/7961228/207084513-d696f459-1b6e-48cb-b597-00ec6c4bffe2.png" width="400">
+</p>
+
+ASDL provides various implementations and **a unified interface** (GradientMaker) for gradient preconditioning for deep neural networks. For example, to train your model with gradient preconditioning by [K-FAC](https://arxiv.org/abs/1503.05671) algorithm, you can replace a `<Standard>` gradient calculation procedure (i.e., a forward pass followed by a backward pass) with one by `<ASDL>` with KfacGradientMaker like the following:
+
 ```python
-import asdfghjkl
+from asdl.precondition import PreconditioningConfig, KfacGradientMaker
+
+# Initialize model
+model = Net()
+
+# Initialize optimizer (SGD is recommended)
+optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+# Initialize KfacGradientMaker
+config = PreconditioningConfig(data_size=batch_size, damping=0.01)
+gm = KfacGradientMaker(model, config)
+
+# Training loop
+for x, t in data_loader:
+  optimizer.zero_grad()
+  
+  # <Standard> (gradient calculation)
+  # y = model(x)
+  # loss = loss_fn(y, t)
+  # loss.backward()
+
+  # <ASDL> ('preconditioned' gradient calculation)
+  dummy_y = gm.setup_model_call(model, x)
+  gm.setup_loss_call(loss_fn, dummy_y, t)
+  y, loss = gm.forward_and_backward()
+
+  optimizer.step()
 ```
 
-## ADL vs ASDL
-### Basic metrics supported by a standard automatic differentiation libarary (ADL)
-| metric | definition |
-| --- | --- |
-| neural network | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;f_\theta:\mathbb{R}^{M_{0}}\to\mathbb{R}^{C},\,\,\,\theta\in\mathbb{R}^{P}"/> |
-| loss | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathcal{L}(\theta)=\frac{1}{N}\sum_{i=1}^N\ell(x_i,y_i,\theta)=\left\langle\ell(x_i,y_i,\theta)\right\rangle"/> |
-| (averaged) gradient | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\bar{g}=\nabla\mathcal{L}(\theta)=\left\langle\frac{\partial}{\partial\theta}\ell(x_i,y_i,\theta)\right\rangle=\left\langle\mathbf{J}_{f,\theta}(x_i)^\top\frac{\partial}{\partial{f}}\ell(x_i,y_i,\theta)\right\rangle\in\mathbb{R}^P"/> |
+You can apply a different gradient preconditioning algorithm by replacing `gm` with another `XXXGradientMaker(model, config)` (*XXX*: algorithm name, e.g., ShampooGradientMaker for [Shampoo](https://arxiv.org/abs/1802.09568) algorithm) **with the same interface**. 
+This enables a *flexible switching/comparison* of a range of gradient preconditioning algorithms.
 
-### Advanced 1st/2nd-order metrics (FGHJK) supported by ASDL
-| metric | definition |
-| --- | --- |
-| **F**isher information matrix | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathbf{F}=\left\langle\mathbb{E}_{p(k\|x_i)}\left[\frac{\partial}{\partial\theta}\ell(x_i,k,\theta)\frac{\partial}{\partial\theta}\ell(x_i,k,\theta)^\top\right]\right\rangle\in\mathbb{R}^{P\times{P}}" />  |
-| **F**isher information matrix (MC estimation) | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathbf{F}_{n{\rm{mc}}}=\left\langle\frac{1}{n}\sum_{j=1}^n\frac{\partial}{\partial\theta}\ell(x_i,k^{(j)},\theta)\frac{\partial}{\partial\theta}\ell(x_i,k^{(j)},\theta)^\top\right\rangle\in\mathbb{R}^{P\times{P}},\,\,\,k^{(j)}\sim{p(k\|x)}" />  |
-| empirical **F**isher | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathbf{F}_{\rm{emp}}=\left\langle\frac{\partial}{\partial\theta}\ell(x_i,y_i,\theta)\frac{\partial}{\partial\theta}\ell(x_i,y_i,\theta)^\top\right\rangle\in\mathbb{R}^{P\times{P}}" />  |
-| **G**radient covariance | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathbf{C}=\left\langle\left(\frac{\partial}{\partial\theta}\ell(x_i,y_i,\theta)-\bar{g}\right)\left(\frac{\partial}{\partial\theta}\ell(x_i,y_i,\theta)-\bar{g}\right)^\top\right\rangle\in\mathbb{R}^{P\times{P}}" />  |
-| **H**essian | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathbf{H}=\nabla^2\mathcal{L}(\theta)=\left\langle\frac{\partial^2}{\partial\theta\partial\theta^\top}\ell(x_i,y_i,\theta)\right\rangle\in\mathbb{R}^{P\times{P}}"/> |
-| **J**acobian (per example) | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathbf{J}_{f,\theta}(x)=\frac{\partial}{\partial\theta}f_{\theta}(x)\in\mathbb{R}^{C\times{P}}"/> |
-| **J**acobian | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathcal{J}=\left[\mathbf{J}_{f,\theta}(x_1)^\top,\dots,\mathbf{J}_{f,\theta}(x_N)^\top\right]^\top\in\mathbb{R}^{NC\times{P}}"/> |
-| **K**ernel | <img src="https://latex.codecogs.com/png.latex?\dpi{130}&space;\mathcal{K}=\mathcal{JJ}^\top\in\mathbb{R}^{NC\times{NC}}"/> |
+## Installation
 
-## Matrix approximations
-<img src="https://user-images.githubusercontent.com/7961228/122673899-05c47d80-d1d3-11eb-8ece-74063a029666.png" width="800"/>
+You can install the latest version of ASDL by running:
+```shell
+$ pip install git+https://github.com/kazukiosawa/asdl
+```
+Alternatively, you can install via PyPI:
+```shell
+$ pip install asdl
+```
 
-## Supported operations
-- matrix-vector product
-    - power method
-    - conjugate gradient method
-- preconditioning gradient
+ASDL is tested with Python 3.7 and is compatible with PyTorch 1.13.
+
+## Resource
+
+- [ASDL poster](./ASDL_HOOML2022_poster.pdf) @ [HOOML2022 workshop](https://order-up-ml.github.io/) at NeurIPS 2022

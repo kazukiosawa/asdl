@@ -1,0 +1,18 @@
+{
+    "dataset": "MNIST",
+    "model":"mlp",
+    "width":2048,
+    "depth":3,
+    "data_augmentation":true,
+    "epochs": 20,
+    "batch_size": 32,
+    "train_size":45056,
+    "weight_decay":1e-5,
+    "clipping_norm":10,
+    "optim":"kbfgs",
+    "lr":0.03,
+    "momentum":0.9,
+    "curvature_update_interval":100,
+    "damping":1,
+    "ema_decay":0.1
+}
