@@ -52,4 +52,5 @@ ASDL is tested with Python 3.7 and is compatible with PyTorch 1.13.
 
 ## Resource
 
+- [ASDL paper](https://arxiv.org/abs/2305.04684)
 - [ASDL poster](./ASDL_HOOML2022_poster.pdf) @ [HOOML2022 workshop](https://order-up-ml.github.io/) at NeurIPS 2022
