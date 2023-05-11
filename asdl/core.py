@@ -231,17 +231,17 @@ def module_wise_assignments(model, *assign_rules, ignore_modules=None, map_rule=
             continue
 
         if module in specified_asgmts:
-            yield *module_info, specified_asgmts[module]
+            yield (*module_info, specified_asgmts[module])
         elif any(isinstance(key, str) and key in name for key in specified_asgmts):
             key = next(key for key in specified_asgmts if isinstance(
                 key, str) and key in name)
-            yield *module_info, specified_asgmts[key]
+            yield (*module_info, specified_asgmts[key])
         elif module.__class__ in specified_asgmts:
-            yield *module_info, specified_asgmts[module.__class__]
+            yield (*module_info, specified_asgmts[module.__class__])
         else:
             if len(common_asgmts) == 0:
                 continue
-            yield *module_info, common_asgmts.copy()
+            yield (*module_info, common_asgmts.copy())
 
 
 def modules_to_assign(model, value, *assign_rules, ignore_modules=None, named=False):
