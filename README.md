@@ -50,6 +50,9 @@ $ pip install git+https://github.com/kazukiosawa/asdl
 
 ASDL is tested with Python 3.7 and is compatible with PyTorch 1.13.
 
+## Example
+[The training script](https://github.com/kazukiosawa/asdl/tree/master/examples/arxiv_results) for training MLPs, CNNs, or ResNets using varous types of gradient preconditionig methods (which reproduces the results in the [ASDL paper](https://arxiv.org/abs/2305.04684)).
+
 ## Resource
 
 - [ASDL paper](https://arxiv.org/abs/2305.04684)
