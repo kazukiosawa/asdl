@@ -42,6 +42,7 @@ class FisherConfig:
     is_distributed: bool = False
     all_reduce: bool = False
     is_master: bool = True
+    ignore_index: int = -1
 
 
 class FisherMaker(GradientMaker):
@@ -434,7 +435,7 @@ class FisherExactCrossEntropy(FisherMaker):
             targets = torch.tensor([i] * n, device=logits.device)
 
             def nll_expr():
-                nll = F.nll_loss(log_probs, targets, reduction='none', ignore_index=-1)
+                nll = F.nll_loss(log_probs, targets, reduction='none', ignore_index=self.config.ignore_index)
                 return nll.mul(sqrt_probs[:, i]).sum()
             closure(nll_expr, retain_graph=i < n_classes - 1)
 
@@ -454,7 +455,7 @@ class FisherMCCrossEntropy(FisherMaker):
             with torch.no_grad():
                 targets = dist.sample()
             closure(lambda: F.nll_loss(log_probs.view(-1, log_probs.size(-1)),
-                                       targets.view(-1), reduction='sum', ignore_index=-1) / n_mc_samples,
+                                       targets.view(-1), reduction='sum', ignore_index=self.config.ignore_index) / n_mc_samples,
                     retain_graph=i < n_mc_samples - 1)
 
 
