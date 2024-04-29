@@ -59,13 +59,16 @@ def data_loader_gradient(
     return total_loss
 
 
-def batch_gradient(model, closure, return_outputs=False):
+def batch_gradient(model, closure, return_outputs=False, batch_size=None):
     with extend(model, OP_BATCH_GRADS) as cxt:
         outputs = closure()
         grads = []
         for module in model.modules():
             g = cxt.batch_grads(module, flatten=True)
             if g is not None:
+                if batch_size is not None and batch_size != g.shape[0]:
+                    # Reduce the weight-sharing dim
+                    g = g.reshape(batch_size, -1, g.shape[-1]).sum(1)
                 grads.append(g)
         grads = torch.cat(grads, dim=1)  # (n, p)
     if return_outputs:
@@ -89,7 +92,7 @@ def save_batch_gradient(model, closure, return_outputs=False):
     if return_outputs:
         return outputs
 
-    
+
 def jacobian(model, x):
     f = model(x)
     if f.ndim != 2:  # (n, c)

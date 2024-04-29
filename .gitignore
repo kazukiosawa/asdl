@@ -137,3 +137,5 @@ dmypy.json
 tags
 wandb
 .data
+
+.DS_Store
