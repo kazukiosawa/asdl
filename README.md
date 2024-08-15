@@ -45,7 +45,7 @@ This enables a *flexible switching/comparison* of a range of gradient preconditi
 
 You can install the latest version of ASDL by running:
 ```shell
-$ pip install git+https://github.com/kazukiosawa/asdl
+$ pip install asdfghjkl
 ```
 
 ASDL is tested with Python 3.7 and is compatible with PyTorch 1.13.
