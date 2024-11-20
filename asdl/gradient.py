@@ -4,7 +4,7 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from .core import extend
 from .operations import OP_BATCH_GRADS
 
-__all__ = ["data_loader_gradient", "batch_gradient", "save_batch_gradient", "jacobian"]
+__all__ = ['data_loader_gradient', 'batch_gradient', 'save_batch_gradient', 'jacobian']
 
 
 def data_loader_gradient(
@@ -81,10 +81,10 @@ def save_batch_gradient(model, closure, return_outputs=False):
             if grads is not None:
                 for key, value in grads.items():
                     param = getattr(module, key)
-                    if hasattr(param, "batch_grad"):
+                    if hasattr(param, 'batch_grad'):
                         param.batch_grad += value
                     else:
-                        setattr(param, "batch_grad", value)
+                        setattr(param, 'batch_grad', value)
     if return_outputs:
         return outputs
 
@@ -92,7 +92,7 @@ def save_batch_gradient(model, closure, return_outputs=False):
 def jacobian(model, x):
     f = model(x)
     if f.ndim != 2:  # (n, c)
-        raise ValueError(f"Number of output dimensions has to be 2. Got {f.ndim}")
+        raise ValueError(f'Number of output dimensions has to be 2. Got {f.ndim}')
     n, c = f.shape
     rst = []
     for i in range(c):
