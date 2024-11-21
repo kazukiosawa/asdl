@@ -66,7 +66,7 @@ def batch_gradient(model, closure, return_outputs=False):
             g = cxt.batch_grads(module, flatten=True)
             if g is not None:
                 grads.append(g)
-        grads = torch.cat(grads, dim=1)  # (..., p)
+        grads = torch.cat(grads, dim=-1)  # (..., p)
     if return_outputs:
         return grads, outputs
     else:

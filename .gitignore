@@ -139,3 +139,5 @@ wandb
 .data
 
 .DS_Store
+
+ruff.toml
