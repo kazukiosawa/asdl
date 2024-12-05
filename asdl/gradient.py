@@ -14,7 +14,7 @@ def data_loader_gradient(
     is_distributed=False,
     all_reduce=False,
     is_master=True,
-    data_average=True
+    data_average=True,
 ):
     # NOTE: loss_fn is supposed be defined with reduction='sum'
 
@@ -39,8 +39,9 @@ def data_loader_gradient(
     if is_distributed:
         grads = [p.grad for p in model.parameters() if p.requires_grad]
         # pack
-        packed_tensor = torch.cat([parameters_to_vector(grads),
-                                   torch.tensor(total_loss, device=device)])
+        packed_tensor = torch.cat(
+            [parameters_to_vector(grads), torch.tensor(total_loss, device=device)]
+        )
         # reduce
         if all_reduce:
             dist.all_reduce(packed_tensor)
@@ -50,27 +51,22 @@ def data_loader_gradient(
         if is_master or all_reduce:
             total_loss = packed_tensor[-1].item()
             packed_tensor = packed_tensor[:-1]
-            vector_to_parameters(
-                packed_tensor.div_(dist.get_world_size()), grads
-            )
+            vector_to_parameters(packed_tensor.div_(dist.get_world_size()), grads)
 
         dist.barrier()
 
     return total_loss
 
 
-def batch_gradient(model, closure, return_outputs=False, batch_size=None):
+def batch_gradient(model, closure, return_outputs=False):
     with extend(model, OP_BATCH_GRADS) as cxt:
         outputs = closure()
         grads = []
         for module in model.modules():
             g = cxt.batch_grads(module, flatten=True)
             if g is not None:
-                if batch_size is not None and batch_size != g.shape[0]:
-                    # Reduce the weight-sharing dim
-                    g = g.reshape(batch_size, -1, g.shape[-1]).sum(1)
                 grads.append(g)
-        grads = torch.cat(grads, dim=1)  # (n, p)
+        grads = torch.cat(grads, dim=-1)  # (..., p)
     if return_outputs:
         return grads, outputs
     else:
